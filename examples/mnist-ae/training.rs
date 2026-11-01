@@ -2,10 +2,10 @@
 //! train and validation epochs, and saves the model and the optimizer. The
 //! objective is pixel reconstruction (binary cross-entropy on the normalized
 //! image, computed from raw logits). A `Trainer` trains it. Under plain SGD (and
-//! without `--no-graph`), the whole training step replays from a graph captured
+//! without `--no-graph`), the whole training step is a captured step, recorded
 //! at the first batch. Under any other optimizer, it runs eagerly. The
-//! validation side is [`Valid`], which replays the forward from a captured
-//! graph.
+//! validation side is [`Valid`], which replays the forward as a captured
+//! step.
 
 pub use crate::common::{
     model::ModelConfigExt,
@@ -58,7 +58,7 @@ pub fn train(
 
     // Create the dataloaders. The workers build batches on the host, and the
     // loops move them to the device. A worker that uploads to the GPU from its
-    // own thread can invalidate a graph capture (see `loader_device`).
+    // own thread can invalidate a captured step (see `loader_device`).
     let dataloader_train = DataLoaderBuilder::new(batcher.clone())
         .batch_size(training_config.batch_size)
         .shuffle(progress.shuffle_seed(training_config.seed))
@@ -257,7 +257,7 @@ pub fn epoch_train(
 
 /// Run validation over (up to `valid_loop_limit`) batches, report the average
 /// reconstruction loss, and write it into the metrics log of the `session`.
-/// The forward replays from a graph if `graphs` is true ([`Valid`]).
+/// The forward replays as a captured step if `graphs` is true ([`Valid`]).
 pub fn epoch_valid(
     dataloader_valid: Dataloader,
     valid_model: AeModel,
@@ -311,14 +311,14 @@ fn train_loss(model: &AeModel, input_bhw1: Tensor<4>) -> (Tensor<1>, Tensor<2>) 
 }
 
 /// The validation-side autoencoder: the trained model on the inner backend. Its
-/// forward is captured at the shape of the first batch, and it replays from the
-/// graph for every later batch of that shape. Any other shape (a short last
+/// forward is captured at the shape of the first batch, and it replays the
+/// recording for every later batch of that shape. Any other shape (a short last
 /// batch) runs eagerly. `--no-graph` disables the capture.
 ///
 /// There is one capture per validation pass, because the weights change
 /// between passes. Each capture costs the 3 forwards that
-/// `CapturedStep::capture` runs before it records. Without hardware graphs
-/// (flex), the capture falls back to eager, and the recording runs too: that
+/// `CapturedStep::capture` runs before it records. On a backend that cannot
+/// record (flex), the capture falls back to eager, and the recording runs too: that
 /// costs only 4 forwards per pass.
 pub struct Valid {
     model: AeModel,
@@ -356,7 +356,7 @@ impl Valid {
         if captured.input_dims() != input_bhw1.dims() {
             return self.model.forward(input_bhw1);
         }
-        // A copy of the output buffer of the graph, which the next replay
+        // A copy of the output buffer of the recording, which the next replay
         // overwrites.
         let y = captured.step(input_bhw1);
         y.empty_like().slice_assign(y.dims().map(|d| 0..d), y.clone())

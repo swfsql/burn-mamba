@@ -13,7 +13,7 @@
 //! O(state) per character. The decode loop is the shared
 //! [`decode`](burn_stack::examples::tiny_stories::sample::decode). A masked
 //! step runs the same launches at every call, so the loop can replay it from a
-//! captured graph. A gathered step reads the decisions on the host, so it runs
+//! recording. A gathered step reads the decisions on the host, so it runs
 //! eagerly.
 //!
 //! **The chunk view** (`-- --show-chunks`). `forward` from a cache equals

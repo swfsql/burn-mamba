@@ -6,9 +6,9 @@
 //! shared with `burn-deltanet`. The Mamba part here is the [`Wrap`] type. It
 //! trains the example network through a cross-entropy classification head on
 //! the last timestep, and it supplies the `MnistModel` interface that the
-//! shared loops use. Under SGD, its training step replays from a captured graph
+//! shared loops use. Under SGD, its training step replays as a captured step
 //! (a `Trainer`). Its validation side is [`Valid`], which replays the forward
-//! from a graph. `--no-graph` disables both.
+//! as a captured step. `--no-graph` disables both.
 
 pub use crate::common::{
     cli::AppArgs,
@@ -60,7 +60,7 @@ pub fn train(
 
     // Create the dataloaders. The workers build batches on the host, and the
     // loops move them to the device. A worker that uploads to the GPU from its
-    // own thread can invalidate a graph capture (see `loader_device`).
+    // own thread can invalidate a captured step (see `loader_device`).
     let dataloader_train = DataLoaderBuilder::new(batcher.clone())
         .batch_size(training_config.batch_size)
         .shuffle(progress.shuffle_seed(training_config.seed))
@@ -133,17 +133,17 @@ pub fn train(
 
 /// The training-side classifier: [`MambaLatentNet`] on the autodiff backend,
 /// stepped by a `Trainer`. Under plain SGD (and without `--no-graph`), the
-/// whole training step replays from a graph captured at the first batch. Under
+/// whole training step is a captured step, recorded at the first batch. Under
 /// any other optimizer, it runs eagerly.
 pub struct Wrap {
     trainer: Trainer<MambaLatentNet, (Tensor<4>, Tensor<1, Int>), Tensor<2>>,
-    /// Whether validation replays its forward from a graph ([`Valid`]).
+    /// Whether validation replays its forward as a captured step ([`Valid`]).
     graphs: bool,
 }
 
 impl Wrap {
     /// `net`, trained under the optimizer of `training_config`. It replays
-    /// passes from graphs if `graphs` is true.
+    /// passes as captured steps if `graphs` is true.
     pub fn new(net: MambaLatentNet, training_config: &TrainingConfig, graphs: bool) -> Self {
         Self {
             trainer: Trainer::new(net, train_loss, &training_config.optimizer, graphs),
@@ -151,7 +151,7 @@ impl Wrap {
         }
     }
 
-    /// The current weights (a copy, when a graph holds them).
+    /// The current weights (a copy, when a recording holds them).
     pub fn net(&self) -> MambaLatentNet {
         self.trainer.module()
     }
@@ -198,13 +198,13 @@ impl MnistModel for Wrap {
 
 /// The validation-side classifier: the network of [`Wrap`] on the inner
 /// backend. Its forward is captured at the shape of the first batch, and it
-/// replays from the graph for every later batch of that shape. Any other shape
+/// replays the recording for every later batch of that shape. Any other shape
 /// (a short last batch) runs eagerly. `--no-graph` disables the capture.
 ///
 /// There is one capture per validation pass, because the weights change
 /// between passes. Each capture costs the 3 forwards that
-/// `CapturedStep::capture` runs before it records. Without hardware graphs
-/// (flex), the capture falls back to eager, and the recording runs too: that
+/// `CapturedStep::capture` runs before it records. On a backend that cannot
+/// record (flex), the capture falls back to eager, and the recording runs too: that
 /// costs only 4 forwards per pass.
 pub struct Valid {
     net: MambaLatentNet,
@@ -242,7 +242,7 @@ impl Valid {
         if captured.input_dims() != input.dims() {
             return logits(&self.net, input);
         }
-        // A copy of the output buffer of the graph, which the next replay
+        // A copy of the output buffer of the recording, which the next replay
         // overwrites.
         let y = captured.step(input);
         y.empty_like().slice_assign(y.dims().map(|d| 0..d), y.clone())

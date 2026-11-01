@@ -3,7 +3,7 @@
 //! The objective is a cross-entropy head over **every** token (the group element
 //! after each pair of symbols, [`forward_classification`]). A `Trainer` trains
 //! it. Under plain SGD (and without `--no-graph`), the whole training step
-//! replays from a graph captured at the first batch. Under any other optimizer,
+//! is a captured step, recorded at the first batch. Under any other optimizer,
 //! it runs eagerly.
 
 pub use crate::common::{
@@ -67,7 +67,7 @@ pub fn train(
 
     // The workers build batches on the host, and the loops move them to the
     // device. A worker that uploads to the GPU from its own thread can
-    // invalidate a graph capture (see `device::loader_device`).
+    // invalidate a captured step (see `device::loader_device`).
     let dataloader_train = DataLoaderBuilder::new(batcher.clone())
         .batch_size(training_config.batch_size)
         .shuffle(progress.shuffle_seed(training_config.seed))

@@ -16,9 +16,9 @@
 //! block-generic version cannot dispatch. The decode loop itself is shared
 //! ([`decode`](burn_stack::examples::tiny_stories::sample::decode)). It draws
 //! every character on the device. After its first few steps, it replays one
-//! captured graph of the step and its draw, instead of a new launch. The
-//! prefill ([`prefill`]) also replays a graph. The prompt follows the latents
-//! in right-padded fixed-shape windows, and one captured graph serves every
+//! recording of the step and its draw, instead of a new launch. The
+//! prefill ([`prefill`]) also replays a recording. The prompt follows the
+//! latents in right-padded fixed-shape windows, and one recording serves every
 //! window of every prompt across which the prefill is held. `--no-graph`
 //! disables both captures, and the text is the same either way. [`infer`]
 //! loads the checkpoint and prints a few stories at different temperatures,
@@ -187,7 +187,7 @@ pub fn generate(
     let (logits, caches, class) = open(model, run, device, tokens.as_deref(), prefill);
 
     // Decode: one `step` per character, against that same cache. After the
-    // first few steps, it replays one captured graph, unless `--no-graph` is
+    // first few steps, it replays one recording, unless `--no-graph` is
     // set (or a class latent is still to come).
     let capture = model.only_start_latents() && run.graphs;
     // Safety: the step reads only its arguments and `model`, which it borrows

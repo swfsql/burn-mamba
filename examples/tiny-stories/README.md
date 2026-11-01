@@ -86,10 +86,10 @@ So one `generate()` call is one story. A second story needs a second call
 against a **reset** cache. That is the one place where these examples really
 reset a cache.
 
-On CUDA, the decode `step`s replay from one captured graph (burn-stack's
+On CUDA, the decode `step`s replay from one recording (burn-stack's
 `CapturedStep`), and are not launched again. A model this small is bound by the
 host that enqueues its launches, not by the GPU. The prefill windows of a prompt
-also replay, from one graph that every prompt shares. The text is the same in
+also replay, from one recording that every prompt shares. The text is the same in
 both modes. `--no-graph` runs both eagerly.
 
 Every position is scored against its next character, so the reported accuracy is

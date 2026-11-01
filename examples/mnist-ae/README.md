@@ -68,9 +68,10 @@ next to the reconstruction).
 - See `burn-mamba/Cargo.toml` for other backends/features.
 - See `burn-mamba/examples/README.md` for the CLI usage overview.
 
-On CUDA, each validation pass captures its forward in one graph at its first
-batch (burn-stack's `CapturedStep`), as in `mnist-class`. The reconstruction PNGs
-run eagerly. The loss is the same in both modes. The graph holds its own memory.
+On CUDA, each validation pass captures its forward as one captured step at its
+first batch (burn-stack's `CapturedStep`), as in `mnist-class`. The
+reconstruction PNGs run eagerly. The loss is the same in both modes. The
+recording holds its own memory.
 `--no-graph` runs the forward eagerly. Under `--sgd` (plain SGD instead of AdamW,
 see `mnist-class`), the training step replays in the same way: the forward, the
 backward and the update, captured at the first batch.

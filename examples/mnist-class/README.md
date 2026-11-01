@@ -49,11 +49,11 @@ cargo run --release --example mnist-class --features "backend-wgpu" -- --trainin
 - See `burn-mamba/Cargo.toml` for other features or backend information.
 - See `burn-mamba/examples/README.md` for the CLI usage overview.
 
-On CUDA, each validation pass captures its forward in one graph at its first
-batch (burn-stack's `CapturedStep`). The other batches replay that graph and do
-not launch the forward again. A model this small is bound by the host that
-enqueues its launches. The metrics are the same in both modes. The graph holds
-its own memory. `--no-graph` runs the forward eagerly. Under SGD (below), the
+On CUDA, each validation pass captures its forward as one captured step at its
+first batch (burn-stack's `CapturedStep`). The other batches replay that
+recording and do not launch the forward again. A model this small is bound by
+the host that enqueues its launches. The metrics are the same in both modes.
+The recording holds its own memory. `--no-graph` runs the forward eagerly. Under SGD (below), the
 training step replays in the same way.
 
 ## Optimizer: AdamW vs. AdamW + Muon vs. SGD
@@ -96,15 +96,15 @@ sub-matrix separately, as if each were a separate `Linear`.
 gradient clipping at 1.0, no momentum, no weight decay). It uses the same cosine
 schedule, with a peak of 5e-2 instead of the 9.6e-3 of AdamW.
 
-SGD is the one optimizer whose training step replays from a captured graph. The
+SGD is the one optimizer whose training step replays as a captured step. The
 first batch records the forward, the backward and the update once. Every batch of
 that shape then replays them. The learning rate is an input, so the schedule
 continues to move. The other optimizers of Burn put their host-side state into a
-graph ([tracel-ai/burn#5779](https://github.com/tracel-ai/burn/issues/5779)), so
+recording ([tracel-ai/burn#5779](https://github.com/tracel-ai/burn/issues/5779)), so
 they train eagerly. Muon + SGD (`--muon --sgd`, at the SGD rate) also trains
 eagerly, because Muon keeps momentum. A replayed run trains exactly as the eager
-one (`--no-graph`). The graph holds the memory of one training step for as long
-as it exists.
+one (`--no-graph`). The recording holds the memory of one training step for as
+long as it exists.
 
 ```bash
 cargo run --release --example mnist-class --features "backend-cuda" -- --training -a /tmp/mc-sgd --sgd

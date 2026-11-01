@@ -185,7 +185,7 @@ cargo run --example reset-majority --features "backend-flex" -- --training --art
 cargo run --example reset-majority --features "backend-flex" -- --training --max-seconds 600
 
 # Muon on the hidden matrices, plain SGD on the rest; and plain SGD alone, whose training
-# step replays from a captured CUDA graph (--no-graph runs it eagerly)
+# step replays as a captured step (--no-graph runs it eagerly)
 cargo run --example mnist-class --features "backend-flex" -- --training --muon --sgd
 cargo run --release --example mnist-class --features "backend-cuda" -- --training --sgd
 

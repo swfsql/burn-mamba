@@ -18,8 +18,8 @@
 //! reconstruction loss.
 //!
 //! The optimizer is AdamW, unless the shared flags select a different one.
-//! `--sgd` trains with plain SGD, the one optimizer whose training step can
-//! replay from a captured CUDA graph (`--no-graph` runs it eagerly).
+//! `--sgd` trains with plain SGD, the one optimizer whose training step can be
+//! a captured step (`--no-graph` runs it eagerly).
 //!
 //! ## Run
 //!
@@ -30,7 +30,7 @@
 //! # train + reconstruct on CUDA (long-running), 16-latent bottleneck
 //! cargo run --release --example mnist-ae --features "backend-cuda,fusion" -- --training --inference
 //!
-//! # SGD, the training step replayed from a graph
+//! # SGD, the training step replayed as a captured step
 //! cargo run --release --example mnist-ae --features backend-cuda -- --training --sgd
 //! ```
 

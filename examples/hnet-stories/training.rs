@@ -116,7 +116,7 @@ pub struct Run {
     pub vram_cleanup_every: Option<u64>,
     /// `--step-mode`: how a decode step runs the inner H-Net of a stage.
     pub step_mode: StepMode,
-    /// Whether decode steps replay a captured graph (`--no-graph` runs them
+    /// Whether decode steps replay a recording (`--no-graph` runs them
     /// eagerly). Only a masked step can.
     pub graphs: bool,
     /// `--show-chunks`: mark the chunk starts in each sample.

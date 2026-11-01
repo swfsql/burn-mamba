@@ -74,7 +74,7 @@ prompt (`-- --prompt <TEXT>`, repeatable).
 - `-- --step-mode masked` (the default) steps the inner H-Net of a stage on
   every row. It keeps the old inner state on the rows that start no chunk.
   Every step then runs the same kernels, so on CUDA the decode replays one
-  captured graph. `-- --step-mode gathered` steps the inner H-Net only on
+  recording. `-- --step-mode gathered` steps the inner H-Net only on
   the rows that start a chunk. It reads the decisions on the host, so it runs
   eagerly.
 

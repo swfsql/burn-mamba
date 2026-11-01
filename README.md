@@ -90,9 +90,8 @@ each kind buys.
 - **Bidirectional stacks** for non-autoregressive tasks.
 - **Class tokens / latents**: learnable class markers in the sequence. They land identically for any split of the sequence into
   `forward()` chunks and `step()`s. `prime()` steps them without a user token.
-- **CUDA graph replay** (optional): a decode `step()`, a fixed-shape
-  `forward()`, and a plain-SGD training step can replay from one captured
-  graph.
+- **Captured steps** (optional): a decode `step()`, a fixed-shape
+  `forward()`, and a plain-SGD training step can replay from one recording.
 
 ## Installation
 

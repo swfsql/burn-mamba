@@ -12,8 +12,8 @@
 //!   [Muon](burn_stack::optim). It first splits the fused `in_proj` per
 //!   sub-projection.
 //! - `--sgd` trains every weight with plain SGD instead. It is the one
-//!   optimizer whose training step can replay from a captured CUDA graph
-//!   (`--no-graph` runs it eagerly).
+//!   optimizer whose training step can be a captured step (`--no-graph` runs
+//!   it eagerly).
 //!
 //! The choice goes into the `training_config.json` of the artifacts, so a
 //! resumed run keeps it. The example takes no flags of its own after `--`
@@ -24,7 +24,7 @@
 //! cargo run --release --example mnist-class --features backend-flex -- --training
 //! # AdamW + Muon on the hidden matrices
 //! cargo run --release --example mnist-class --features backend-flex -- --training --muon
-//! # SGD, the training step replayed from a graph
+//! # SGD, the training step replayed as a captured step
 //! cargo run --release --example mnist-class --features backend-cuda -- --training --sgd
 //! ```
 
