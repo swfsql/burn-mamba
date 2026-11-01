@@ -854,7 +854,7 @@ fn labels_are_the_symmetric_group() {
     let cubed = labels(&[RESET, SWAP_R, SWAP_L, SWAP_R, SWAP_L, SWAP_R, SWAP_L]);
     assert_eq!(cubed[6], 0, "(lr)³ = 1");
 
-    // every element is reachable, and the reset restarts the word
+    // every element is reachable, and the reset starts the word again
     let mut seen = [false; NUM_CLASSES];
     for item in ResetSwapDataset::new(64, SEQ_LENGTH, Family::Mixed, 7).iter() {
         let item = item.expect("dataset item");

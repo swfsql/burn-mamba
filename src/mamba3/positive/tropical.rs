@@ -27,7 +27,7 @@ use burn::prelude::*;
 ///
 /// # In a packed row
 ///
-/// `restart` marks the segments of a packed row, or is `None`. Each segment
+/// `resets` marks the segments of a packed row, or is `None`. Each segment
 /// then scans alone, from the origin carry. The positions before the first
 /// reset of the row continue from `carry_bh`.
 ///
@@ -39,16 +39,16 @@ pub fn register(
     a_bsh: Tensor<3>,
     b_bsh: Tensor<3>,
     carry_bh: Tensor<2>,
-    restart: Option<&scan::Restart>,
+    resets: Option<&scan::Resets>,
 ) -> Tensor<3> {
     let elements = Affine {
         a: a_bsh.clamp_min(LOG_ZERO),
         b: b_bsh.clamp_min(LOG_ZERO),
     };
-    match restart {
+    match resets {
         None => scan::prefix(elements).apply(carry_bh),
-        Some(restart) => {
-            scan::prefix_in_segments(elements, &restart.start_bs).apply_each(restart.carries(carry_bh))
+        Some(resets) => {
+            scan::prefix_in_segments(elements, &resets.start_bs).apply_each(resets.carries(carry_bh))
         }
     }
 }

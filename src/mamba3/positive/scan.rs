@@ -273,9 +273,9 @@ pub fn prefix<E: Element>(elements: E) -> E {
     acc
 }
 
-/// The segments of a packed row, as a scan over the row reads them.
+/// The resets of a packed row, as a scan over the row reads them.
 #[derive(Clone, Debug)]
-pub struct Restart {
+pub struct Resets {
     /// `[batch, len]`: the first position of the segment of each position
     /// (`-1` before the first reset of the row).
     pub start_bs: Tensor<2, Int>,
@@ -284,13 +284,13 @@ pub struct Restart {
     pub origin_bh: Tensor<2>,
 }
 
-impl Restart {
+impl Resets {
     /// The carry of each position, `[batch, len, nheads]`: `carry_bh` before
     /// the first reset of the row, and the origin carry from there on.
     pub fn carries(&self, carry_bh: Tensor<2>) -> Tensor<3> {
         let [batch, len] = self.start_bs.dims();
         let [_, nheads] = carry_bh.dims();
-        let restarted_bsh = self
+        let after_reset_bsh = self
             .start_bs
             .clone()
             .greater_equal_elem(0)
@@ -299,7 +299,7 @@ impl Restart {
         carry_bh
             .unsqueeze_dim::<3>(1)
             .expand([batch, len, nheads])
-            .mask_where(restarted_bsh, self.origin_bh.clone().unsqueeze_dim::<3>(1).expand([batch, len, nheads]))
+            .mask_where(after_reset_bsh, self.origin_bh.clone().unsqueeze_dim::<3>(1).expand([batch, len, nheads]))
     }
 }
 

@@ -483,7 +483,7 @@ fn the_width_denies_the_latches_but_not_one_nonlinear_channel() {
         assert!(r > 0.05, "a latch for {k} fits at this width — the rung is not about the register");
     }
 
-    // The labels themselves: ties are not records, and a reset restarts.
+    // The labels themselves: ties are not records, and a reset starts again.
     let symbols = vec![2, 0, 3, 3, 1, RESET, 1, 4];
     assert_eq!(
         labels(&symbols),

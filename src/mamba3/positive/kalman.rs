@@ -51,7 +51,7 @@ pub struct GainInput {
     /// The segments of a packed row, or `None`. Each segment starts from the
     /// origin carry, and the positions before the first reset of the row
     /// continue from `carry_bh`.
-    pub restart: Option<scan::Restart>,
+    pub resets: Option<scan::Resets>,
 }
 
 /// The per-position quantities of the gain.
@@ -200,11 +200,11 @@ pub fn gain(da_bsh: Tensor<3>, masses: LogMasses, input: GainInput) -> GainOutpu
     };
     let ln_q = ln_q.clamp_min(LOG_ZERO);
     let elements = elements(&da_bsh, &ln_q, &masses);
-    let log_precision_bsh = match &input.restart {
+    let log_precision_bsh = match &input.resets {
         None => scan::prefix(elements).apply(input.carry_bh.clone()),
         // A packed row: each segment scans alone, from the origin carry.
-        Some(restart) => scan::prefix_in_segments(elements, &restart.start_bs)
-            .apply_each(restart.carries(input.carry_bh.clone())),
+        Some(resets) => scan::prefix_in_segments(elements, &resets.start_bs)
+            .apply_each(resets.carries(input.carry_bh.clone())),
     };
     // ℓₜ₋₁: the carry, then every position but the last.
     let carry_b1h = input.carry_bh.reshape([batch, 1, nheads]);
@@ -214,16 +214,16 @@ pub fn gain(da_bsh: Tensor<3>, masses: LogMasses, input: GainInput) -> GainOutpu
         Tensor::cat(vec![carry_b1h.clone(), log_precision_bsh.clone().narrow(1, 0, len - 1)], 1)
     };
     // …and at the first position of a segment, the origin carry.
-    let prev_bsh = match &input.restart {
+    let prev_bsh = match &input.resets {
         None => prev_bsh,
-        Some(restart) => {
-            let first_bsh = Tensor::<1, Int>::arange(0..len as i64, &restart.start_bs.device())
+        Some(resets) => {
+            let first_bsh = Tensor::<1, Int>::arange(0..len as i64, &resets.start_bs.device())
                 .reshape([1, len])
                 .expand([batch, len])
-                .equal(restart.start_bs.clone())
+                .equal(resets.start_bs.clone())
                 .unsqueeze_dim::<3>(2)
                 .expand([batch, len, nheads]);
-            let origin_bsh = restart
+            let origin_bsh = resets
                 .origin_bh
                 .clone()
                 .reshape([batch, 1, nheads])

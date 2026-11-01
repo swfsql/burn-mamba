@@ -191,7 +191,7 @@ fn run_gain(case: &GainCase, carry: Tensor<2>) -> kalman::GainOutput {
             log_kappa_h: case.log_kappa.clone(),
             noise_bsh: Some(case.noise.clone()),
             carry_bh: carry,
-            restart: None,
+            resets: None,
         },
     )
 }
@@ -309,7 +309,7 @@ fn the_precision_is_the_plants_weight_on_ones() {
                 log_kappa_h: log_kappa.clone(),
                 noise_bsh: None,
                 carry_bh: carry.clone(),
-                restart: None,
+                resets: None,
             }),
         );
         let lag = pattern.tap_lag(u);
@@ -462,7 +462,7 @@ fn an_underflowing_mass_keeps_the_gradient_finite() {
                 log_kappa_h: Tensor::<1>::full([1], 0.5f32.ln(), &ad).cast(dtype),
                 noise_bsh: None,
                 carry_bh: Tensor::<2>::full([1, 1], LOG_ZERO, &ad).cast(dtype),
-                restart: None,
+                resets: None,
             },
         );
         assert!(all_finite(out.log_precision_bsh.clone()), "{dtype:?}: ln Λ");

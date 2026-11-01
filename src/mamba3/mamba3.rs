@@ -582,7 +582,7 @@ impl Mamba3 {
             log_kappa_h,
             noise_bsh,
             carry_bh: carry_bh.expect(field),
-            restart: packed.map(|p| crate::mamba3::positive::scan::Restart {
+            resets: packed.map(|p| crate::mamba3::positive::scan::Resets {
                 start_bs: p.segments.start_bs.clone(),
                 origin_bh: p.origin.log_precision_bh.clone().expect(field),
             }),
@@ -617,7 +617,7 @@ impl Mamba3 {
     /// position of its row, or is the incoming one for a row with none.
     ///
     /// `packed` marks the resets of a packed call ([`crate::packing`]). The
-    /// register then restarts at each of them from the carry of the origin. A
+    /// register then starts again at each of them from the carry of the origin. A
     /// carry from before the last reset of a row is that of the origin.
     ///
     /// # Shapes
@@ -640,11 +640,11 @@ impl Mamba3 {
         let field = "a tropical register keeps its cache field";
         let tropical_bsh = tropical_ab_bsh.map(|(a_bsh, b_bsh)| {
             let carry_bh = tropical_carry_bh.clone().expect(field);
-            let restart = packed.map(|p| crate::mamba3::positive::scan::Restart {
+            let resets = packed.map(|p| crate::mamba3::positive::scan::Resets {
                 start_bs: p.segments.start_bs.clone(),
                 origin_bh: p.origin.tropical_bh.clone().expect(field),
             });
-            crate::mamba3::positive::tropical::register(a_bsh, b_bsh, carry_bh, restart.as_ref())
+            crate::mamba3::positive::tropical::register(a_bsh, b_bsh, carry_bh, resets.as_ref())
         });
         let (end_b, log_precision_carry_bh) = end.unzip();
         let last_bh = |t_bsh: &Tensor<3>, carry_bh: Option<Tensor<2>>, origin_bh: Option<Tensor<2>>| {
@@ -1688,7 +1688,7 @@ impl Mamba3 {
     /// cache is that of the last segment of each row. `origin` has no effect
     /// without resets. See [`crate::packing`].
     ///
-    /// At a start, every carried quantity restarts from `origin`: the SSD
+    /// At a reset, every carried quantity starts again from `origin`: the SSD
     /// carry between chunks (plus the single-SSD boundary seed of that chunk),
     /// the `β` taps (they read the tap slots), the cumulative rotation, and the
     /// positive systems. The variant of `cache` selects the pathway, and

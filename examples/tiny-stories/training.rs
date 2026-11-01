@@ -316,7 +316,7 @@ impl Wrap {
     /// window of a story, and into no other window.
     ///
     /// A batch of packed rows (`--pack`) runs through the packed forward
-    /// instead. Each story restarts at its reset, and its latents are in its
+    /// instead. Each story starts at its reset, and its latents are in its
     /// opening slots, so `class` does not apply.
     pub fn forward_lm(
         &self,

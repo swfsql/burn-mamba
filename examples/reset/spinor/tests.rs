@@ -736,8 +736,8 @@ fn counts_ceiling_is_the_abelian_limit() {
 // ---------------------------------------------------------------------------
 
 /// The labels of the dataset are the `Q₈` word problem: the product is
-/// non-commutative (`ij ≠ ji`), the generators have order 4, and `R` restarts
-/// the word.
+/// non-commutative (`ij ≠ ji`), the generators have order 4, and `R` starts
+/// the word again.
 #[test]
 fn labels_are_the_quaternion_group() {
     let ij = labels(&[RESET, TURN_J, TURN_I]); // newest factor on the left: i·j
@@ -750,7 +750,7 @@ fn labels_are_the_quaternion_group() {
     assert_eq!(quaternion(powers[2]), [-1.0, 0.0, 0.0, 0.0], "i² = -1");
     assert_eq!(powers[4], powers[0], "i⁴ = 1");
 
-    // every element is reachable, and the reset restarts the word
+    // every element is reachable, and the reset starts the word again
     let mut seen = [false; NUM_CLASSES];
     for item in ResetSpinorDataset::new(64, SEQ_LENGTH, Family::Mixed, 7).iter() {
         let item = item.expect("dataset item");

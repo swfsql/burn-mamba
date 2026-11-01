@@ -2,8 +2,8 @@
 //! row, each from one origin cache.
 //!
 //! `reset_bt` (`[batch, tokens]`, `true` at the first token of a segment)
-//! marks where a row starts a new sequence. At that token, the block restarts
-//! from the **origin** cache (`origin`, a fresh one for `origin = None`). The
+//! marks where a row starts a new sequence. At that token, the block starts
+//! again from the **origin** cache (`origin`, a fresh one for `origin = None`). The
 //! tokens before the first reset of a row continue from the incoming cache
 //! (`cache`), as in a plain call. So a stream of packed calls can continue a
 //! sequence across a call boundary. A reset at the first token of a call
@@ -12,8 +12,8 @@
 //! Each sequence gives what its own row gives in a batch of plain calls from
 //! the origin: the outputs, the last cache and the gradients. This is true for
 //! any split of the stream into calls. The previous segment gets no gradient
-//! through a restart. The origin gets the gradients of every segment that
-//! restarts from it. `origin = cache` restarts every segment from the incoming
+//! through a reset. The origin gets the gradients of every segment that
+//! starts from it. `origin = cache` starts every segment from the incoming
 //! cache (for example, a shared prefix).
 //!
 //! # Only at a chunk start
@@ -39,7 +39,7 @@
 //! sequence at a chunk start, with a padded last chunk.
 //!
 //! Some scans run over the whole row: the cumulative rotation of Mamba-3 and
-//! its positive systems. They restart at the first position of each segment,
+//! its positive systems. They start again at the first position of each segment,
 //! from the carry of the origin.
 //!
 //! The cache that a call returns is that of the last segment of each row. Its
@@ -169,7 +169,7 @@ pub(crate) fn chunk_heads(
 
 /// `x`, where `head` replaces the first `width` positions (along `axis`) of
 /// every chunk that starts with a reset. `head` holds the values of the origin
-/// cache that those positions read at a restart: `x` with `width` entries
+/// cache that those positions read at a reset: `x` with `width` entries
 /// along `axis`, one set per row. Axis 0 is the batch.
 pub(crate) fn restart_heads<const D: usize>(
     x: Tensor<D>,

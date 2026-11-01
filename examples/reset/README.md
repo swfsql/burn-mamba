@@ -177,8 +177,8 @@ the readout gain.
 - **The selective solution is a basin that training must find.** With a
   constant LR, training either finds it or stalls near the memoryless ceiling.
   The init decides which. The cosine schedule (warmup to 3e-2, annealed to 1e-4)
-  finds it on most seeds. A run that ends near 80% has stalled. Restart it with
-  a different `seed` in the training config.
+  finds it on most seeds. A run that ends near 80% has stalled. Run it again
+  with a different `seed` in the training config.
 - **Ties are unscored on purpose.** A third "vote is exactly zero" class turns a
   sign readout into an exact-zero detector. That costs most of the accuracy, and
   it tests calibration, not memory.
@@ -1079,7 +1079,7 @@ group at all.
   cosine schedule (warmup to 3e-2, annealed to 1e-4). Accuracy increases, falls,
   and then jumps to exact during the run. So a run below 100% at the halfway
   mark has not necessarily stalled. Only `reset-majority` is sensitive enough to
-  the seed to need a restart.
+  the seed to need a new run.
 - **Each rung inherits the rungs below.** The reset is always the selective decay
   of `reset-majority`. The periodicity is always the rotation of `reset-rotor`. A
   rung adds exactly one requirement. That is why every ablation is one knob and

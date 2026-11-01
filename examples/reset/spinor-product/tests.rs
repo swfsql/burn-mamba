@@ -1226,7 +1226,7 @@ fn counts_ceiling_is_the_order_blind_limit() {
 
 /// The labels are the `Q₈` word problem, read two symbols at a time. A token
 /// composes its pair in order, and the pairs compose with each other. `HOLD`
-/// does nothing, and a reset restarts the word in either slot of a token.
+/// does nothing, and a reset starts the word again in either slot of a token.
 #[test]
 fn labels_are_the_paired_quaternion_word_problem() {
     // one token, two turns: (i, j) is j·i, and (j, i) is i·j, and they differ
@@ -1246,7 +1246,7 @@ fn labels_are_the_paired_quaternion_word_problem() {
     assert_eq!(
         labels(&[RESET, TURN_I, TURN_J, RESET])[1],
         0,
-        "a reset in the second slot restarts the word"
+        "a reset in the second slot starts the word again"
     );
     assert_eq!(
         labels(&[RESET, TURN_I, RESET, TURN_J])[1],

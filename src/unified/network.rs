@@ -531,7 +531,7 @@ impl MambaVocabNet {
     }
 
     /// [`Self::forward`] over packed rows ([`VocabNetwork::forward_packed`]).
-    /// At each reset of `packed`, every block restarts from a zero cache. A
+    /// At each reset of `packed`, every block starts again from a zero cache. A
     /// reset must be at a multiple of [`Self::pack_align`], and each sequence
     /// opens with [`Self::n_class_latents`] slots. Mamba-1 takes no packed
     /// rows (it panics).
