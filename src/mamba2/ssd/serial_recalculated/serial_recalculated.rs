@@ -307,7 +307,7 @@ pub(crate) fn k4_ssd_state_passing<B: Backend>(
     (chunk_input_state_bnhpr, final_state_bhpr)
 }
 
-/// `1 − keep`: `1` at a chunk that restarts from the initial state.
+/// `1 − keep`: `1` at a chunk that restarts from the origin state.
 pub(crate) fn restart_factor<B: Backend>(keep_bn: &F<B, 2>) -> F<B, 2> {
     F::<B, 2>::full(keep_bn.dims(), 1.0, &keep_bn.device(), keep_bn.dtype()) - keep_bn.clone()
 }
