@@ -78,7 +78,7 @@ fn handmade(device: &Device, arm: Arm) -> MambaLatentNet {
     let cfg = model_config(matches!(arm, Arm::Register));
     let mut model = crate::common::model::ModelConfigExt::init(&cfg, device);
     let MambaLatentNet::Mamba3(net) = &mut model else {
-        unreachable!("tally-depth configures the Mamba-3 variant")
+        unreachable!("tally-depth configures the Mamba-3 family")
     };
     let embeddings: Vec<Vec<f64>> = EMBED.iter().map(|e| e.to_vec()).collect();
 

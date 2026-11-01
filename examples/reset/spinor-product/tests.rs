@@ -354,13 +354,13 @@ fn embedding(device: &Device) -> Tensor<2> {
 fn handmade(device: &Device, micro_steps: usize, head: Head, gen_scale: f64) -> MambaLatentNet {
     let cfg = crate::model::model_config(micro_steps, 1);
     let MambaLatentNetConfig::Mamba3 { mamba_block, .. } = &cfg else {
-        unreachable!("spinor-product configures the Mamba-3 variant")
+        unreachable!("spinor-product configures the Mamba-3 family")
     };
     let mamba_block = mamba_block.clone();
     let mut model = ModelConfigExt::init(&cfg, device);
     {
         let MambaLatentNet::Mamba3(net) = &mut model else {
-            unreachable!("spinor-product configures the Mamba-3 variant")
+            unreachable!("spinor-product configures the Mamba-3 family")
         };
 
         // ── network in_proj: two one-hot slots → the token embedding ─────────
@@ -414,7 +414,7 @@ fn handmade(device: &Device, micro_steps: usize, head: Head, gen_scale: f64) -> 
 /// class head. Shared by [`handmade`] and [`handmade_composed`].
 fn finish(model: &mut MambaLatentNet, head: Head, device: &Device) {
     let MambaLatentNet::Mamba3(net) = model else {
-        unreachable!("spinor-product configures the Mamba-3 variant")
+        unreachable!("spinor-product configures the Mamba-3 family")
     };
     let block = &mut net.layers.real_layers.last_mut().expect("one layer").block;
 
@@ -1082,13 +1082,13 @@ fn element_generator(e: usize) -> [f64; 3] {
 fn handmade_composed(device: &Device, head: Head) -> MambaLatentNet {
     let cfg = crate::model::model_config(1, 1);
     let MambaLatentNetConfig::Mamba3 { mamba_block, .. } = &cfg else {
-        unreachable!("spinor-product configures the Mamba-3 variant")
+        unreachable!("spinor-product configures the Mamba-3 family")
     };
     let mamba_block = mamba_block.clone();
     let mut model = ModelConfigExt::init(&cfg, device);
     {
         let MambaLatentNet::Mamba3(net) = &mut model else {
-            unreachable!("spinor-product configures the Mamba-3 variant")
+            unreachable!("spinor-product configures the Mamba-3 family")
         };
 
         // ── network in_proj: the feature, verbatim ───────────────────────────

@@ -113,7 +113,7 @@ pub fn launch(app_args: &AppArgs) {
         model::model_config_with(group, rotation, layers, d_model, expand, heads, mimo_rank)
     });
     let MambaLatentNetConfig::Mamba3 { output_size, .. } = &model_config else {
-        panic!("reset-quintic configures the Mamba-3 variant")
+        panic!("reset-quintic configures the Mamba-3 family")
     };
     assert_eq!(
         *output_size,

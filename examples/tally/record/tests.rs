@@ -126,7 +126,7 @@ fn handmade(device: &Device, arm: Arm) -> MambaLatentNet {
     let cfg = model_config(matches!(arm, Arm::Register));
     let mut model = crate::common::model::ModelConfigExt::init(&cfg, device);
     let MambaLatentNet::Mamba3(net) = &mut model else {
-        unreachable!("tally-record configures the Mamba-3 variant")
+        unreachable!("tally-record configures the Mamba-3 family")
     };
     let embeddings = match arm {
         Arm::ExpWrite => by_exp(),

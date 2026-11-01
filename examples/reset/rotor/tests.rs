@@ -144,7 +144,7 @@ enum Head {
 fn config_without_rotation() -> MambaLatentNetConfig {
     let mut cfg = crate::model::model_config();
     let MambaLatentNetConfig::Mamba3 { mamba_block, .. } = &mut cfg else {
-        unreachable!("reset-rotor configures the Mamba-3 variant")
+        unreachable!("reset-rotor configures the Mamba-3 family")
     };
     *mamba_block = mamba_block
         .clone()
@@ -169,7 +169,7 @@ fn build(
 ) -> MambaLatentNet {
     let mut model = ModelConfigExt::init(cfg, device);
     let MambaLatentNet::Mamba3(net) = &mut model else {
-        unreachable!("reset-rotor configures the Mamba-3 variant")
+        unreachable!("reset-rotor configures the Mamba-3 family")
     };
 
     // ── network in_proj: one-hot → the symbol embedding ──────────────────────

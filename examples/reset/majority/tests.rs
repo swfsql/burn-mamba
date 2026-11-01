@@ -116,7 +116,7 @@ fn handmade(device: &Device, selective: bool, alpha: f64, gain: f64) -> MambaLat
     let cfg = crate::model::model_config();
     let mut model = ModelConfigExt::init(&cfg, device);
     let MambaLatentNet::Mamba3(net) = &mut model else {
-        unreachable!("reset-majority configures the Mamba-3 variant")
+        unreachable!("reset-majority configures the Mamba-3 family")
     };
 
     // ── network in_proj: one-hot → the symbol embedding ──────────────────────

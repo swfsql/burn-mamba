@@ -289,7 +289,7 @@ fn handmade_a5(device: &Device, rotation: RotationKind, head: Head) -> MambaLate
     let cfg = model_config_with(group, rotation, 1, d, 1, H, 1);
     let mut model = ModelConfigExt::init(&cfg, device);
     let MambaLatentNet::Mamba3(net) = &mut model else {
-        unreachable!("reset-quintic configures the Mamba-3 variant")
+        unreachable!("reset-quintic configures the Mamba-3 family")
     };
     let embed = embeddings(d);
 
@@ -358,7 +358,7 @@ fn handmade_s5(device: &Device, head: Head) -> MambaLatentNet {
     let cfg = model_config_with(group, rotation, 2, d, 1, H, 1);
     let mut model = ModelConfigExt::init(&cfg, device);
     let MambaLatentNet::Mamba3(net) = &mut model else {
-        unreachable!("reset-quintic configures the Mamba-3 variant")
+        unreachable!("reset-quintic configures the Mamba-3 family")
     };
     let pi = std::f64::consts::PI;
     let half_turn = [pi, 0.0, 0.0];
@@ -904,7 +904,7 @@ fn learned_rotations() {
         crate::common::cli::load_model_config(&dir.join("model_config.json")).unwrap();
     let model: MambaLatentNet = crate::common::cli::load_model(&dir, &cfg, &device).unwrap();
     let MambaLatentNet::Mamba3(net) = &model else {
-        unreachable!("reset-quintic configures the Mamba-3 variant")
+        unreachable!("reset-quintic configures the Mamba-3 family")
     };
     let to_vec = |t: Tensor<1>| -> Vec<f64> {
         t.into_data().try_into_vec_as::<f32>().unwrap().iter().map(|&v| f64::from(v)).collect()

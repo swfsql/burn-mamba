@@ -32,7 +32,7 @@ or forget. This gives it two modes:
 - a **recurrent** form for decoding: one token at a time, in constant memory
   (no growing attention KV-cache).
 
-Each generation in this crate builds on the one before:
+Each family in this crate builds on the one before:
 
 - **Mamba-1**: the original selective SSM (a sequential selective scan).
 - **Mamba-2**: recasts the recurrence as **Structured State Space Duality
