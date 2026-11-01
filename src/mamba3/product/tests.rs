@@ -68,9 +68,10 @@ fn last_micro_takes_the_read_position() {
 // ---------------------------------------------------------------------------
 
 /// `micro_steps = 1` must leave the projection width exactly where it was, and
-/// `u` must widen only the per-micro-step segments (`z` and `C` stay put).
+/// `u` must repeat only the per-micro-step sub-projections (`z` and `C` stay
+/// put).
 #[test]
-fn in_proj_widens_only_the_per_micro_step_segments() {
+fn in_proj_repeats_only_the_per_micro_step_sub_projections() {
     for kind in [
         RotationKind::Real1D,
         RotationKind::Complex2D,
@@ -95,12 +96,8 @@ fn in_proj_widens_only_the_per_micro_step_segments() {
         );
 
         // The Muon plan must still tile the whole fused axis.
-        let width: usize = u.muon_projections()[0]
-            .segments
-            .iter()
-            .map(|s| s.width)
-            .sum();
-        assert_eq!(u.d_in_proj(), width, "{kind:?}: muon segments tile in_proj");
+        let width = u.muon_projections()[0].width();
+        assert_eq!(u.d_in_proj(), width, "{kind:?}: muon sub-projections tile in_proj");
     }
 }
 
@@ -340,9 +337,9 @@ fn forward_step_grad_parity_non_abelian() {
 }
 
 /// Every micro-step's slice of the widened `in_proj` must receive gradient.
-/// A fold that dropped a micro-step (or read the segments in the wrong order)
-/// would leave one of these blocks dead, and every value-parity test above
-/// would still pass.
+/// A fold that dropped a micro-step (or read the sub-projections in the wrong
+/// order) would leave one of these sub-projections dead, and every
+/// value-parity test above would still pass.
 #[test]
 fn every_micro_step_receives_gradient() {
     let device = test_device();
@@ -380,15 +377,15 @@ fn every_micro_step_receives_gradient() {
         ("rotation", rot),
     ] {
         if width == 0 {
-            at += bc; // the per-token C segment sits between B and Δ
+            at += bc; // the per-token C sub-projection sits between B and Δ
             continue;
         }
         for j in 0..MICRO {
-            let block = g.clone().narrow(1, at + j * width, width);
-            let m = block.abs().max().into_scalar::<f32>();
+            let sub_grad = g.clone().narrow(1, at + j * width, width);
+            let m = sub_grad.abs().max().into_scalar::<f32>();
             assert!(
                 m > 0.0,
-                "micro-step {j} of the `{name}` segment received no gradient"
+                "the `{name}` sub-projection of micro-step {j} received no gradient"
             );
         }
         at += MICRO * width;

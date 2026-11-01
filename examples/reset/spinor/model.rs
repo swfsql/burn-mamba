@@ -71,7 +71,7 @@ use burn_mamba::prelude::{
 ///   independent, so every in-projection channel can take any value on the three
 ///   symbols (a 3×3 solve, see `tests.rs`).
 /// - `TapPattern::None`: the construction pins `λ ≈ 1`, so the `β` tap is dead
-///   weight. Switching it off is structural: no `λ` segment in the
+///   weight. Switching it off is structural: no `λ` sub-projection in the
 ///   in-projection, no tap slot in the cache, one SSD call instead of two.
 /// - `ignore_last_residual` zeroes the residual of the single layer, so
 ///   `out_proj` reads the output of the block alone.

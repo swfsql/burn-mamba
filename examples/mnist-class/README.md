@@ -82,8 +82,8 @@ The weights that Muon trains (see `burn_stack::optim`, and `muon_plan()` on the
 model config):
 
 - the block `out_proj`,
-- the Muon segments of its in-projection: `z`, `x`, `B`, `C` and the rotation
-  channels.
+- the Muon sub-projections of its in-projection: `z`, `x`, `B`, `C` and the
+  rotation channels.
 
 The per-head Δ/`A`/`λ` channels stay on AdamW. So do all 1-D/3-D parameters, the
 `in_proj`/`out_proj` of the network, and any class-token table.

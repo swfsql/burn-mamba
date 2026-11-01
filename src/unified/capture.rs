@@ -1,7 +1,7 @@
-//! Graph-capture support for the caches: the
+//! Captured-step support for the caches: the
 //! [`CacheTensors`](burn_stack::modules::CacheTensors) traversal of each
 //! family. With it, a captured `step`
-//! ([`CapturedStep`](burn_stack::utils::graph::CapturedStep)) writes its new
+//! ([`CapturedStep`](burn_stack::utils::capture::CapturedStep)) writes its new
 //! cache **into** the buffers of the old one.
 //!
 //! There is one traversal per cache type, and it visits every tensor field. An

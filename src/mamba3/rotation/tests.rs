@@ -893,8 +893,8 @@ fn config_rotation_channels_and_d_in_proj() {
     assert_eq!(base.rotation_fraction, 1.0);
     assert_eq!(base.rotation_dim(), 16);
 
-    // The default is the abelian kind. Its rotation segment of `in_proj` has
-    // one channel for each angle
+    // The default is the abelian kind. Its rotation sub-projection of `in_proj`
+    // has one channel for each angle
     // (num_rotation_channels == num_rotation_angles).
     assert_eq!(base.rotation, RotationKind::Complex2D);
     assert_eq!(base.num_rotation_channels(), base.num_rotation_angles());

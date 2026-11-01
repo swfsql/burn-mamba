@@ -121,7 +121,7 @@ pub struct Mamba2 {
     /// two as one.
     pub in_proj: Linear,
 
-    /// The trailing `dt_raw` segment of `in_proj`, when
+    /// The trailing `dt_raw` sub-projection of `in_proj`, when
     /// [`Mamba2Untied::InProjTail`] unties it: one copy per application, along
     /// the output axis. `None` ⇒ `in_proj` holds it.
     pub in_proj_tail: Option<Linear>,
@@ -290,7 +290,7 @@ impl Mamba2 {
 /// The big maps, the `z|xbc` head of `in_proj` and `out_proj`, are always tied.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Mamba2Untied {
-    /// The trailing Δ segment of `in_proj`, moved into
+    /// The trailing Δ sub-projection of `in_proj`, moved into
     /// [`Mamba2::in_proj_tail`] (a second, small GEMM).
     InProjTail,
     /// The depthwise convolution [`Mamba2::conv1d`], kernel and bias.
@@ -446,25 +446,26 @@ impl Mamba2Config {
         self.d_inner() + 2 * self.ngroups * self.state_rank
     }
 
-    /// The block's 2-D weights Muon may own, and how their fused columns split.
+    /// The block's 2-D weights Muon may own, and their sub-projections.
     ///
     /// `in_proj` is `[z | xbc | dt]`. The list splits `xbc` into its own
-    /// `x`/`B`/`C` maps: they share the depthwise conv, not a linear map. The
-    /// per-head dt channels stay on the fallback optimizer. The conv weight is
-    /// 3-D, so the list never has it. See [`burn_stack::optim`].
+    /// `x`/`B`/`C` sub-projections: they share the depthwise conv, not a linear
+    /// map. The per-head dt channels stay on the fallback optimizer. The conv
+    /// weight is 3-D, so the list never has it. See [`burn_stack::optim`].
     #[cfg(feature = "optim")]
     pub fn muon_projections(&self) -> Vec<burn_stack::optim::ProjSpec> {
-        use burn_stack::optim::{ProjSegment as Seg, ProjSpec};
+        use burn_stack::optim::{ProjSpec, SubProjection as Sub};
         let d_inner = self.d_inner();
         let bc = self.ngroups * self.state_rank;
         let head = vec![
-            Seg::muon("z", d_inner),
-            Seg::muon("x", d_inner),
-            Seg::muon("b", bc),
-            Seg::muon("c", bc),
+            Sub::muon("z", d_inner),
+            Sub::muon("x", d_inner),
+            Sub::muon("b", bc),
+            Sub::muon("c", bc),
         ];
-        let tail = vec![Seg::adamw("dt", self.nheads())];
-        // Split off, the Δ segment is its own weight, one copy per application.
+        let tail = vec![Sub::adamw("dt", self.nheads())];
+        // Split off, the Δ sub-projection is its own weight, one copy per
+        // application.
         let in_proj = match self.untied.contains(&Mamba2Untied::InProjTail) {
             true => vec![
                 ProjSpec::block("in_proj.weight", head),
@@ -529,7 +530,7 @@ impl Mamba2Config {
         // Projects d_model → (z, xbc, dt_raw).
         // Size:  d_inner  +  conv_dim  +  nheads
         let d_in_proj_out = d_inner + conv_dim + nheads;
-        // Untied, the Δ segment is a `Linear` of its own.
+        // Untied, the Δ sub-projection is a `Linear` of its own.
         let split_tail = unties(Mamba2Untied::InProjTail);
         let in_proj = LinearConfig::new(self.d_model, d_in_proj_out - if split_tail { nheads } else { 0 })
             .with_bias(self.has_proj_bias)

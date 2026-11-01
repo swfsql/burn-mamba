@@ -84,3 +84,8 @@ of the `asd-ste100` skill.
 - [ ] `cargo doc --all --no-deps` has no warnings.
 
 ## Comments
+
+- `../burn-stack/GLOSSARY.md` also lists "segment" (for a sub-projection),
+  "chunk" (for a window) and "graph" (for a recording) under _Avoid_. The
+  Comments of ticket 08 name some sites of these words that ticket 08 did not
+  change. Find the others with `rg`.

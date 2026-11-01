@@ -1,6 +1,6 @@
 # 08: Follow the utils and optim renames of burn-stack
 
-Status: ready-for-agent
+Status: resolved
 
 Blocked by: None (can start immediately)
 
@@ -75,12 +75,62 @@ decides if the scripts change.
 
 ## Acceptance criteria
 
-- [ ] `rg -e ProjSegment -e without_segment -e BlockState -e LrSegment
+- [x] `rg -e ProjSegment -e without_segment -e BlockState -e LrSegment
       -e 'Lr::Sequence' -e class_chunk_plan -e 'utils::graph'
       -e each_slot_alone` over `src`, `examples` (without `tmp/`) and the
       markdown files finds nothing.
-- [ ] `cargo check`, `cargo test --lib -- --test-threads=1`,
+- [x] `cargo check`, `cargo test --lib -- --test-threads=1`,
       `cargo test --examples -j 1 -- --test-threads=1` pass (flex).
-- [ ] `cargo doc --all --no-deps` has no warnings.
+- [x] `cargo doc --all --no-deps` has no warnings.
 
 ## Comments
+
+- The commit holds the bump of `Cargo.toml` (crate version 0.73.0, made by
+  the user), `Cargo.lock` (burn-stack 0.35.0) and the renames.
+- `cargo check --all-targets` has no warnings. `cargo test --lib`: 356 tests
+  pass, 4 are ignored. The example tests pass.
+- The docs and the identifiers of the same concept change with the names:
+  - "Segment" and "block" for a part of the weight of a fused projection are
+    now "sub-projection". This includes the `muon_projections` of the three
+    families, the in-projection docs of `Mamba2` and `Mamba3`, the Muon,
+    tap-pattern, product and rotation tests, the docs of `examples/reset/`,
+    `examples/mnist-class/README.md` and
+    `info/mamba-3/architecture-deltas.md`. The import alias `Seg` is now
+    `Sub`.
+  - Where the text means the slices of the projected input, it says
+    "channels". An example is the doc of `split_positive`.
+  - Five tests named a sub-projection "block" or "segment". They are now
+    `all_adamw_sub_projections_equal_plain_adamw`,
+    `one_muon_sub_projection_equals_plain_muon`,
+    `per_sub_projection_muon_differs_from_fused_muon`,
+    `sgd_fallback_sub_projections_are_stateless_sgd`
+    (`src/unified/tests/optim.rs`) and
+    `in_proj_repeats_only_the_per_micro_step_sub_projections`
+    (`src/mamba3/product/tests.rs`). The test helper `append_dead_segment`
+    (`src/mamba3/tap_pattern.rs`) is now `append_dead_sub_projections`.
+  - `src/unified/tests/class.rs` says "window", not "chunk", for a window.
+  - `src/padding/tests.rs` says "row" for a row of the batch, and "position"
+    or "real token" for a position. Its fifth test is now
+    `padded_mamba3_network_closes_each_row_at_its_own_end`.
+  - The headers of `src/unified/capture.rs` and of its tests say "captured
+    step", not "graph capture".
+- The scripts of `examples/hnet-stories/tmp/1m-a/` do not change (the
+  decision of the user). `examples/tiny-stories/tmp/1m-b/` and
+  `examples/tiny-stories/tmp/1m-cased/` also write the key `"Sequence"`, and
+  the `ORIENTATION.md` of `1m-b` names `Lr::Sequence`. These are records too,
+  so they do not change. A new run from these scripts needs the key
+  `"Chain"`.
+- Ticket 04 gets these sites. The list is not complete:
+  - "Segment" for a slice of the projected input, which is not a linear map:
+    `src/mamba3/helpers.rs`, `src/mamba3/product/mod.rs` (also two panic
+    messages) and the forwards of both pathways. They need a term for this
+    slice.
+  - "Segment" and "chunk" for a window: `src/mamba1/mamba1.rs` ("a sequence in
+    segments", "chunked prefill", "a prior segment"),
+    `src/unified/tests/layers.rs`, `src/mamba3/rotation/tests.rs`,
+    `src/mamba3/product/mod.rs` and `PREFILL_CHUNK` of
+    `examples/tiny-stories/inference.rs`.
+  - "Graph" for a recording or a captured step: `README.md` ("CUDA graph
+    replay") and the training docs of `examples/`. They name the flag
+    `--no-graph` and `AppArgs::graphs` of burn-stack, and burn-stack keeps
+    these names for now.

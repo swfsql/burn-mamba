@@ -1,4 +1,4 @@
-//! Tests for the graph-capture cache write-back ([`CacheTensors`]).
+//! Tests for the cache write-back of a captured step ([`CacheTensors`]).
 //!
 //! Whether the write lands in the same buffer is a backend property (cubecl's
 //! in-place `slice_assign`), exercised on CUDA by the decode-capture prototype.

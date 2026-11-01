@@ -303,29 +303,29 @@ impl Mamba1Config {
             .unwrap_or(self.d_model.div_ceil(self.state_rank))
     }
 
-    /// The block's 2-D weights Muon may own, and how their fused columns split.
+    /// The block's 2-D weights Muon may own, and their sub-projections.
     ///
     /// `in_proj` is `[x | res]` and `x_proj` is `[dt_raw | B | C]`. The
-    /// `dt_raw` block and all of `dt_proj` stay on the fallback optimizer. They
-    /// carry the Δ path, and the initialisation of `dt_proj` sets a scale, not a
-    /// feature map. The conv weight is 3-D, so the list never has it. See
-    /// [`burn_stack::optim`].
+    /// `dt_raw` sub-projection and all of `dt_proj` stay on the fallback
+    /// optimizer. They carry the Δ path, and the initialisation of `dt_proj`
+    /// sets a scale, not a feature map. The conv weight is 3-D, so the list
+    /// never has it. See [`burn_stack::optim`].
     #[cfg(feature = "optim")]
     pub fn muon_projections(&self) -> Vec<burn_stack::optim::ProjSpec> {
-        use burn_stack::optim::{ProjSegment as Seg, ProjSpec};
+        use burn_stack::optim::{ProjSpec, SubProjection as Sub};
         let d_inner = self.d_inner();
         vec![
             ProjSpec::block(
                 "in_proj.weight",
-                vec![Seg::muon("x", d_inner), Seg::muon("res", d_inner)],
+                vec![Sub::muon("x", d_inner), Sub::muon("res", d_inner)],
             ),
             {
                 let x_proj = ProjSpec::block(
                     "x_proj.weight",
                     vec![
-                        Seg::adamw("dt", self.dt_rank()),
-                        Seg::muon("b", self.state_rank),
-                        Seg::muon("c", self.state_rank),
+                        Sub::adamw("dt", self.dt_rank()),
+                        Sub::muon("b", self.state_rank),
+                        Sub::muon("c", self.state_rank),
                     ],
                 );
                 // Untied, it holds one copy per application.

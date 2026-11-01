@@ -1,12 +1,12 @@
-//! Muon plan/segmentation tests: the specs describe the real weights, the
-//! groups only ever select rank-2 tensors, and per-block stepping agrees with
-//! the stock optimizers.
+//! Muon plan and `Segmented` tests. The specs describe the real weights, and
+//! the groups only ever select rank-2 tensors. A step of each sub-projection
+//! alone agrees with the stock optimizers.
 
 use crate::prelude::*;
 use burn::module::{Module, ModuleVisitor, Param, ParamId};
 use burn::optim::{AdamWConfig, MuonConfig, Optimizer, RecordState, StateSink, StateSource};
 use burn::prelude::*;
-use burn_stack::optim::segmented::{BlockState, Segmented, SegmentedState};
+use burn_stack::optim::segmented::{Segmented, SegmentedState, SubProjectionState};
 use burn_stack::utils::test_helpers::max_abs_diff;
 use burn_stack::utils::test_helpers::test_device;
 
@@ -70,8 +70,8 @@ fn muon() -> MuonConfig {
 // ---------------------------------------------------------------------------
 
 /// Every spec must select at least one parameter, every selected parameter must
-/// be rank 2 (Muon panics otherwise), and the segment widths must sum to the
-/// weight's output width.
+/// be rank 2 (Muon panics otherwise), and the sub-projection widths must sum to
+/// the weight's output width.
 fn assert_plan_fits(plan: &MuonPlan, rows: &[ParamRow], expect_min: usize) {
     for spec in &plan.specs {
         let hits = selected(spec, rows);
@@ -93,7 +93,7 @@ fn assert_plan_fits(plan: &MuonPlan, rows: &[ParamRow], expect_min: usize) {
             assert_eq!(
                 row.dims[1],
                 spec.width(),
-                "spec {:?} segment widths do not sum to {:?}'s output width",
+                "spec {:?} sub-projection widths do not sum to {:?}'s output width",
                 spec.path,
                 row.path
             );
@@ -131,7 +131,8 @@ fn mamba3_plan_fits_the_model() {
 }
 
 /// `Real1D` drops the `in_proj`'s rotation columns entirely, so the plan has to
-/// drop the matching segment — a zero-width one would not sum to the weight.
+/// drop the matching sub-projection — a zero-width one would not sum to the
+/// weight.
 #[cfg(feature = "mamba3")]
 #[test]
 fn mamba3_real1d_plan_fits_the_model() {
@@ -283,7 +284,7 @@ fn mamba3_scalar_channels_stay_on_adamw() {
     assert_eq!(in_proj.width(), config.d_in_proj());
 
     let scalar: usize = in_proj
-        .segments
+        .sub_projections
         .iter()
         .filter(|s| !s.muon)
         .map(|s| s.width)
@@ -300,18 +301,19 @@ fn rand_2d(shape: [usize; 2], device: &Device) -> Tensor<2> {
     Tensor::random(shape, burn::tensor::Distribution::Default, device)
 }
 
-/// AdamW is elementwise, so splitting a weight into blocks and running AdamW on
-/// each must reproduce plain AdamW on the whole weight — the property that lets
-/// the non-Muon channels of a fused projection keep exactly the update they had.
+/// AdamW is elementwise, so splitting a weight into sub-projections and running
+/// AdamW on each must reproduce plain AdamW on the whole weight — the property
+/// that lets the non-Muon channels of a fused projection keep exactly the
+/// update they had.
 #[test]
-fn all_adamw_blocks_equal_plain_adamw() {
+fn all_adamw_sub_projections_equal_plain_adamw() {
     let device = test_device();
     let spec = ProjSpec::path(
         "w",
         vec![
-            ProjSegment::adamw("a", 3),
-            ProjSegment::adamw("b", 5),
-            ProjSegment::adamw("c", 4),
+            SubProjection::adamw("a", 3),
+            SubProjection::adamw("b", 5),
+            SubProjection::adamw("c", 4),
         ],
     );
     let segmented = Segmented::new(&spec, muon().build(), adamw().build(), 1);
@@ -333,9 +335,9 @@ fn all_adamw_blocks_equal_plain_adamw() {
     assert!(diff < 1e-6, "segmented AdamW diverged from plain AdamW: {diff}");
 }
 
-/// A single all-Muon block is just Muon.
+/// A single all-Muon sub-projection is just Muon.
 #[test]
-fn one_muon_block_equals_plain_muon() {
+fn one_muon_sub_projection_equals_plain_muon() {
     let device = test_device();
     let spec = ProjSpec::path_whole("w", 12);
     let segmented = Segmented::new(&spec, muon().build(), adamw().build(), 1);
@@ -354,17 +356,18 @@ fn one_muon_block_equals_plain_muon() {
     }
 
     let diff = max_abs_diff(w_seg, w_ref);
-    assert!(diff < 1e-6, "one-block Segmented diverged from Muon: {diff}");
+    assert!(diff < 1e-6, "Segmented with one sub-projection diverged from Muon: {diff}");
 }
 
-/// Per-block orthogonalisation is *not* the same as orthogonalising the fused
-/// matrix — the whole reason the plan carries the column seams.
+/// To orthogonalise each sub-projection alone is *not* the same as to
+/// orthogonalise the fused matrix — the whole reason the plan carries the
+/// column seams.
 #[test]
-fn per_block_muon_differs_from_fused_muon() {
+fn per_sub_projection_muon_differs_from_fused_muon() {
     let device = test_device();
     let spec = ProjSpec::path(
         "w",
-        vec![ProjSegment::muon("a", 6), ProjSegment::muon("b", 6)],
+        vec![SubProjection::muon("a", 6), SubProjection::muon("b", 6)],
     );
     let segmented = Segmented::new(&spec, muon().build(), adamw().build(), 1);
     let fused = muon().build();
@@ -377,16 +380,17 @@ fn per_block_muon_differs_from_fused_muon() {
     assert!(max_abs_diff(w_seg, w_fused) > 1e-6);
 }
 
-/// The hand-written record round-trips, keeping each block on its own optimizer.
+/// The hand-written record round-trips, keeping each sub-projection on its own
+/// optimizer.
 #[test]
 fn segmented_state_round_trips() {
     let device = test_device();
     let spec = ProjSpec::path(
         "w",
         vec![
-            ProjSegment::muon("a", 6),
-            ProjSegment::adamw("b", 4),
-            ProjSegment::muon("c", 2),
+            SubProjection::muon("a", 6),
+            SubProjection::adamw("b", 4),
+            SubProjection::muon("c", 2),
         ],
     );
     let segmented = Segmented::new(&spec, muon().build(), adamw().build(), 1);
@@ -404,10 +408,10 @@ fn segmented_state_round_trips() {
     }
     let reloaded = SegmentedState::<2>::state_unflatten("p", &mut source, &device)
         .expect("reloaded state");
-    assert_eq!(reloaded.blocks.len(), 3);
-    assert!(matches!(reloaded.blocks[0], BlockState::Muon(_)));
-    assert!(matches!(reloaded.blocks[1], BlockState::AdamW(_)));
-    assert!(matches!(reloaded.blocks[2], BlockState::Muon(_)));
+    assert_eq!(reloaded.states.len(), 3);
+    assert!(matches!(reloaded.states[0], SubProjectionState::Muon(_)));
+    assert!(matches!(reloaded.states[1], SubProjectionState::AdamW(_)));
+    assert!(matches!(reloaded.states[2], SubProjectionState::Muon(_)));
 
     // Continuing from the reloaded state matches continuing from the live one.
     let (a, _) = segmented.step(1e-2, w.clone(), grad.clone(), Some(state));
@@ -415,18 +419,19 @@ fn segmented_state_round_trips() {
     assert!(max_abs_diff(a, b) < 1e-6);
 }
 
-/// Under an SGD fallback the non-Muon blocks take plain SGD steps and hold no
-/// state: the state is the Muon blocks' alone, and pairs back with them.
+/// Under an SGD fallback the non-Muon sub-projections take plain SGD steps and
+/// hold no state: the state is the Muon sub-projections' alone, and pairs back
+/// with them.
 #[test]
-fn sgd_fallback_blocks_are_stateless_sgd() {
+fn sgd_fallback_sub_projections_are_stateless_sgd() {
     let device = test_device();
     let widths = vec![6, 4, 2];
     let spec = ProjSpec::path(
         "w",
         vec![
-            ProjSegment::muon("a", 6),
-            ProjSegment::adamw("b", 4),
-            ProjSegment::muon("c", 2),
+            SubProjection::muon("a", 6),
+            SubProjection::adamw("b", 4),
+            SubProjection::muon("c", 2),
         ],
     );
     let sgd = burn_stack::optim::SgdConfig::new().build();
@@ -440,8 +445,8 @@ fn sgd_fallback_blocks_are_stateless_sgd() {
         let grad = rand_2d([6, 12], &device);
         let (next, s) = segmented.step(1e-2, w, grad.clone(), state);
         let s = s.expect("state");
-        assert_eq!(s.blocks.len(), 2, "no entry for the SGD block");
-        assert!(matches!(s.blocks[1], BlockState::Muon(_)));
+        assert_eq!(s.states.len(), 2, "no entry for the SGD sub-projection");
+        assert!(matches!(s.states[1], SubProjectionState::Muon(_)));
         (w, state) = (next, Some(s));
 
         let g = grad.split_with_sizes(widths.clone(), 1);
@@ -453,7 +458,7 @@ fn sgd_fallback_blocks_are_stateless_sgd() {
     }
 
     let diff = max_abs_diff(w, Tensor::cat(w_ref, 1));
-    assert!(diff < 1e-6, "segmented Muon + SGD diverged from its blocks: {diff}");
+    assert!(diff < 1e-6, "segmented Muon + SGD diverged from its sub-projections: {diff}");
 }
 
 /// Building the module optimizer wires one group per Muon-owning spec, on top of
@@ -495,8 +500,9 @@ fn build_assembles_groups_without_panicking() {
 }
 
 /// The whole [`ModuleOptimizer`](burn::optim::ModuleOptimizer) round-trips: on
-/// reload each parameter is matched back to its group, and the per-block states
-/// land on the same optimizers, so training continues unchanged.
+/// reload each parameter is matched back to its group, and the states of the
+/// sub-projections land on the same optimizers, so training continues
+/// unchanged.
 #[cfg(feature = "mamba3")]
 #[test]
 fn module_optimizer_state_round_trips_through_a_record() {
@@ -550,8 +556,8 @@ fn module_optimizer_state_round_trips_through_a_record() {
     let from_scratch = step(model, &mut fresh);
 
     // A second step *with* momentum differs from one without — i.e. the record
-    // really carried the per-block state — and the reload did not panic on a
-    // state landing in the wrong group.
+    // really carried the sub-projection states — and the reload did not panic
+    // on a state landing in the wrong group.
     assert!(max_abs_diff(in_proj(&from_record), in_proj(&from_scratch)) > 1e-9);
 }
 
@@ -586,7 +592,7 @@ fn describe_reports_every_parameter() {
 
     let rows = params_of(&model).len();
     assert_eq!(report.lines().count(), rows + 1, "one line per param + summary");
-    // Both layers' in_proj show their column segments, Δ/A/λ marked as AdamW's.
+    // Both layers' in_proj show their sub-projections, Δ/A/λ marked as AdamW's.
     assert_eq!(report.matches("dt:").count(), 2);
     assert!(report.contains("on muon:"));
 }

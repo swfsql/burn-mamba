@@ -129,11 +129,11 @@ fn handmade(device: &Device, selective: bool, alpha: f64, gain: f64) -> MambaLat
 
     // ── block in_proj: one affine functional per channel ─────────────────────
     // The channel order is `[z(2) | x(2) | B(1) | C(1) | Δ(2) | A(2)]`. There is
-    // no rotation segment, because `Real1D` projects none, and no λ segment,
-    // because `TapPattern::None` projects none. Each entry is the target value
-    // of the channel at (MINUS, PLUS, RESET), *before* the activation of the
-    // channel: none on `x`, softplus on `Δ` and `−A`. `B`/`C` get QK-norm
-    // instead, which at `state_rank = 1` fixes them at their `γ`.
+    // no rotation sub-projection, because `Real1D` projects none, and no λ
+    // sub-projection, because `TapPattern::None` projects none. Each entry is
+    // the target value of the channel at (MINUS, PLUS, RESET), *before* the
+    // activation of the channel: none on `x`, softplus on `Δ` and `−A`. `B`/`C`
+    // get QK-norm instead, which at `state_rank = 1` fixes them at their `γ`.
     // ᾱ = exp(Δ·A) with Δ = 1 ⇒ A = ln(alpha).
     let hold = softplus_inv(-alpha.ln());
     let a0 = if selective {

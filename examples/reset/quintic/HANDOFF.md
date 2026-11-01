@@ -157,7 +157,7 @@ Files: `tmp/reflections/notes.md` (fuller notes, § numbers match `check.py`),
 - Crate cost (if built): blocks of 5 (`state_rank` multiple of 5); +1 in-proj channel per
   (head, block); scan over 2×2 quaternion matrices (8 `quat_mul` per combine;
   recompute-backward like `quat_scan/`); unitarity renormalisation (Gram–Schmidt on two
-  quaternionic columns); new `RotationState` accumulator; `muon_projections` segment.
+  quaternionic columns); new `RotationState` accumulator; `muon_projections` sub-projection.
 
 ### §7 The cheap alternative (worse)
 

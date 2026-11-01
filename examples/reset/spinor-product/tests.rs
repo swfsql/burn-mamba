@@ -375,8 +375,8 @@ fn handmade(device: &Device, micro_steps: usize, head: Head, gen_scale: f64) -> 
         let block = &mut layer.block;
 
         // ── block in_proj: one affine functional per channel ─────────────────
-        // Channel order: [z | x·u | B·u | C | Δ·u | A·u | λ·u | ϑ·u], with every
-        // per-micro-step segment laid out micro-step by micro-step.
+        // Channel order: [z | x·u | B·u | C | Δ·u | A·u | λ·u | ϑ·u], with the
+        // per-micro-step sub-projections in micro-step order.
         let channels = if micro_steps == 1 {
             channels_single(gen_scale)
         } else {

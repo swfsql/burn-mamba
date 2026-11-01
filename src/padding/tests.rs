@@ -1,8 +1,8 @@
-//! A right-padded call is each of its slots run alone: the outputs of a slot's
-//! real rows, every field of its returned cache, and every parameter's gradient
-//! of a loss over both. Each call continues an unpadded one, so the cache it
-//! reads is not fresh — and a slot with no real row at all must hand that cache
-//! back untouched.
+//! A right-padded call is each of its rows run alone: the outputs of a row's
+//! real tokens, every field of its returned cache, and every parameter's
+//! gradient of a loss over both. Each call continues an unpadded one, so the
+//! cache it reads is not fresh — and a row with no real token at all must hand
+//! that cache back untouched.
 
 use crate::mamba1::prelude::*;
 use crate::mamba2::prelude::*;
@@ -21,13 +21,13 @@ const D_MODEL: usize = 16;
 const VAL_TOL: f32 = 1e-4;
 const GRAD_TOL: f32 = 1e-3;
 
-/// Slot lengths of the padded call: one full slot, a short one, one with no
-/// real row, and one a single token long.
+/// Row lengths of the padded call: one full row, a short one, one with no
+/// real token, and one a single token long.
 const LENS: [usize; 4] = [7, 3, 0, 1];
 /// Tokens of the unpadded call before it.
 const PREFIX: usize = 4;
 
-/// `[batch, padded]`, `true` past each slot's length.
+/// `[batch, padded]`, `true` past each row's length.
 fn pad_mask(lens: &[usize], padded: usize, device: &Device) -> Tensor<2, Bool> {
     let batch = lens.len();
     let lens: Vec<i32> = lens.iter().map(|&l| l as i32).collect();
@@ -90,10 +90,10 @@ fn assert_grads_close(padded: Vec<Option<Tensor<1>>>, alone: Vec<Option<Tensor<1
     }
 }
 
-/// Run a padded call (after an unpadded prefix one) and each slot's own
-/// calls, and compare each slot's outputs, cache fields (`fields`) and the
+/// Run a padded call (after an unpadded prefix one) and each row's own
+/// calls, and compare each row's outputs, cache fields (`fields`) and the
 /// gradients of a loss over both.
-fn check_each_slot_alone<C, M: Module>(
+fn check_each_row_alone<C, M: Module>(
     module: &M,
     forward: impl Fn(Tensor<3>, Option<C>, Option<Tensor<2, Bool>>) -> (Tensor<3>, C),
     fields: impl Fn(&C) -> Vec<Tensor<2>>,
@@ -124,7 +124,7 @@ fn check_each_slot_alone<C, M: Module>(
                 let (y_b, cache_b) =
                     forward(x.clone().narrow(0, b, 1).narrow(1, 0, len), Some(cache0_b), None);
                 let y_own = y.clone().narrow(0, b, 1).narrow(1, 0, len);
-                assert_close(y_own.clone(), y_b.clone(), VAL_TOL, &format!("slot {b}'s outputs"));
+                assert_close(y_own.clone(), y_b.clone(), VAL_TOL, &format!("row {b}'s outputs"));
                 let weight = weight_y.clone().narrow(1, 0, len);
                 loss_padded = loss_padded + (y_own * weight.clone()).sum();
                 loss_alone = loss_alone + (y_b * weight).sum();
@@ -135,7 +135,7 @@ fn check_each_slot_alone<C, M: Module>(
         assert_eq!(fields_padded.len(), fields_b.len());
         for (k, ((f, f_b), w)) in fields_padded.iter().zip(fields_b).zip(&weights_c).enumerate() {
             let f_own = f.clone().narrow(0, b, 1);
-            assert_close(f_own.clone(), f_b.clone(), VAL_TOL, &format!("slot {b}'s cache field {k}"));
+            assert_close(f_own.clone(), f_b.clone(), VAL_TOL, &format!("row {b}'s cache field {k}"));
             loss_padded = loss_padded + (f_own * w.clone()).sum();
             loss_alone = loss_alone + (f_b * w.clone()).sum();
         }
@@ -147,13 +147,13 @@ fn check_each_slot_alone<C, M: Module>(
 }
 
 #[test]
-fn padded_mamba1_is_each_slot_alone() {
+fn padded_mamba1_is_each_row_alone() {
     let device = test_device().autodiff();
     let block = Mamba1Config::new(D_MODEL)
         .with_state_rank(8)
         .with_conv_kernel(4)
         .init(&device);
-    check_each_slot_alone(
+    check_each_row_alone(
         &block,
         |x, cache, pad| block.forward(x, cache, pad),
         |c: &Mamba1Cache| vec![rows(&c.conv_bik), rows(&c.ssm_bir)],
@@ -161,14 +161,14 @@ fn padded_mamba1_is_each_slot_alone() {
 }
 
 #[test]
-fn padded_mamba2_is_each_slot_alone() {
+fn padded_mamba2_is_each_row_alone() {
     let device = test_device().autodiff();
     let block = Mamba2Config::new(D_MODEL)
         .with_state_rank(8)
         .with_per_head_dim(8)
         .init(&device);
     for path in [Mamba2SsdPath::Minimal(Some(4)), Mamba2SsdPath::SerialRecalculated(Some(4))] {
-        check_each_slot_alone(
+        check_each_row_alone(
             &block,
             |x, cache, pad| block.forward(x, cache, path.clone(), pad),
             |c: &Mamba2Cache| vec![rows(&c.conv_bvk), rows(&c.ssm_bhpr)],
@@ -219,9 +219,9 @@ fn mamba3(
 /// Both pathways over a spread of the block's dials: every tap pattern family
 /// (none, lag 1, lag `u`, two taps, the token-gated one), every rotation kind,
 /// `u > 1`, MIMO, both positive systems, and chunks short enough that the real
-/// rows span several.
+/// tokens span several.
 #[test]
-fn padded_mamba3_is_each_slot_alone() {
+fn padded_mamba3_is_each_row_alone() {
     use {Gain as G, RotationKind as R, TapPattern as T, Tropical as Tr};
     let device = test_device().autodiff();
     let configs = [
@@ -239,12 +239,12 @@ fn padded_mamba3_is_each_slot_alone() {
     for (i, config) in configs.iter().enumerate() {
         let block = config.init(&device);
         let path = paths[i % paths.len()].clone();
-        check_each_slot_alone(
+        check_each_row_alone(
             &block,
             |x, cache, pad| block.forward_double_ssd(x, cache, &path, pad),
             |c: &Mamba3DoubleSsdCache| mamba3_fields!(c),
         );
-        check_each_slot_alone(
+        check_each_row_alone(
             &block,
             |x, cache, pad| block.forward_single_ssd(x, cache, &path, pad),
             |c: &Mamba3SingleSsdCache| mamba3_fields!(c),
@@ -253,11 +253,11 @@ fn padded_mamba3_is_each_slot_alone() {
 }
 
 /// Through a network whose stack closes every sequence with an `End` latent: a
-/// real block, run on each slot's rows gathered into that slot's order, sees
-/// the `End` right after the slot's own last token — its tap reading that
+/// real block, run on each row's positions gathered into that row's order,
+/// sees the `End` right after the row's own last token — its tap reading that
 /// token, not the padding the batch-wide `End` follows.
 #[test]
-fn padded_mamba3_network_closes_each_slot_at_its_own_end() {
+fn padded_mamba3_network_closes_each_row_at_its_own_end() {
     let device = test_device().autodiff();
     let block = mamba3(
         RotationKind::Quaternion4D,
@@ -291,7 +291,8 @@ fn padded_mamba3_network_closes_each_slot_at_its_own_end() {
         None,
         Some(pad_mask(&lens, padded, &device)),
     );
-    // Rows: `Start`, the tokens, then `End` — after the padding batch-wide.
+    // Positions: `Start`, the tokens, then `End` — after the padding
+    // batch-wide.
     assert_eq!(y.dims()[1], padded + 2);
     let Mamba3Caches::SingleSsd(caches) = caches else {
         panic!("a fresh call runs the single-SSD pathway");
@@ -309,10 +310,10 @@ fn padded_mamba3_network_closes_each_slot_at_its_own_end() {
             ],
             1,
         );
-        assert_close(y_own, y_b, VAL_TOL, &format!("slot {b}'s rows"));
+        assert_close(y_own, y_b, VAL_TOL, &format!("row {b}'s positions"));
         for (l, (c, c_b)) in caches.caches.iter().zip(&caches_b.caches).enumerate() {
             for (k, (f, f_b)) in mamba3_fields!(c).into_iter().zip(mamba3_fields!(c_b)).enumerate() {
-                let what = format!("slot {b}, layer {l}, cache field {k}");
+                let what = format!("row {b}, layer {l}, cache field {k}");
                 assert_close(f.narrow(0, b, 1), f_b, VAL_TOL, &what);
             }
         }

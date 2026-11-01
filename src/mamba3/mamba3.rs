@@ -238,7 +238,8 @@ pub struct Mamba3 {
     /// `[z | x·u | B_raw·u | C_raw | dd_dt·u | dd_A·u | lambda_raw·u | mu_raw·u
     /// | rotation·u | noise·u | tropical_a·u | tropical_b·u]`
     ///
-    /// The segments from `lambda_raw` on are optional, so they are at the end:
+    /// The sub-projections from `lambda_raw` on are optional, so they are at
+    /// the end:
     ///
     /// - [`TapPattern::None`] projects no `lambda_raw`,
     /// - a one-tap pattern projects no `mu_raw`,
@@ -257,7 +258,7 @@ pub struct Mamba3 {
     /// as one.
     pub in_proj: Linear,
 
-    /// The trailing per-micro-step segments of `in_proj`,
+    /// The trailing per-micro-step sub-projections of `in_proj`,
     /// `[dd_dt·u | dd_A·u | lambda_raw·u | mu_raw·u | rotation·u | noise·u |
     /// tropical_a·u | tropical_b·u]`, when [`Mamba3Untied::InProjTail`] unties
     /// them: one copy per application, along the output axis. `None` ⇒
@@ -416,7 +417,7 @@ pub struct Mamba3 {
     /// Number of in-projection channels for the rotation parameters, per
     /// micro-step: `num_rotation_angles` for `Complex2D`,
     /// `nheads·3·num_rotation_blocks` for the quaternion kinds, `0` for
-    /// `Real1D`. At `0`, `in_proj` has no rotation segment.
+    /// `Real1D`. At `0`, `in_proj` has no rotation sub-projection.
     pub num_rotation_channels: usize,
 
     /// Number of quaternion blocks (`rotation_dim / 4`). Only
@@ -478,17 +479,17 @@ impl Mamba3 {
         self.num_quat_blocks * self.rotation.quat_factors()
     }
 
-    /// Width of the trailing rotation segment of the in-projection: the
-    /// per-step [`Self::num_rotation_channels`] once per micro-step, because
-    /// each micro-step turns the state by its own rotation.
+    /// Width of the trailing rotation sub-projections of the in-projection:
+    /// the per-step [`Self::num_rotation_channels`] once per micro-step,
+    /// because each micro-step turns the state by its own rotation.
     pub fn rotation_channels_total(&self) -> usize {
         self.micro_steps * self.num_rotation_channels
     }
 
-    /// Width of the `λ` segment of the in-projection: one channel per (head,
-    /// micro-step), or **`0`** under [`TapPattern::None`], which has no `λ`.
-    /// `helpers::split_trailing` removes it from the tail, just inside the
-    /// rotation segment.
+    /// Width of the `λ` sub-projections of the in-projection: one channel per
+    /// (head, micro-step), or **`0`** under [`TapPattern::None`], which has no
+    /// `λ`. `helpers::split_trailing` removes their channels from the tail,
+    /// just inside the rotation channels.
     pub fn lambda_channels_total(&self) -> usize {
         if self.tap_pattern.has_beta_tap() {
             self.micro_steps * self.nheads()
@@ -497,12 +498,12 @@ impl Mamba3 {
         }
     }
 
-    /// Width of the `μ` segment of the in-projection (the mix of the two
-    /// taps): one channel per (head, micro-step) for the two-tap patterns.
+    /// Width of the `μ` sub-projections of the in-projection (the mix of the
+    /// two taps): one channel per (head, micro-step) for the two-tap patterns.
     /// **`0`** for every other pattern, and for a two-tap one at `u = 1`,
     /// where the taps fold ([`TapPattern::has_two_taps`]).
-    /// `helpers::split_trailing` removes it from the tail, just inside the `λ`
-    /// segment.
+    /// `helpers::split_trailing` removes their channels from the tail, just
+    /// inside the `λ` channels.
     pub fn mu_channels_total(&self) -> usize {
         if self.tap_pattern.has_two_taps(self.micro_steps) {
             self.micro_steps * self.nheads()
@@ -511,10 +512,10 @@ impl Mamba3 {
         }
     }
 
-    /// Width of the Kalman noise segment `r` of the in-projection: one channel
-    /// per (head, micro-step) under [`Gain::KalmanProjectedNoise`], **`0`** for
-    /// every other gain. `split_positive` removes it from the tail,
-    /// just inside the tropical segments.
+    /// Width of the Kalman noise sub-projections `r` of the in-projection: one
+    /// channel per (head, micro-step) under [`Gain::KalmanProjectedNoise`],
+    /// **`0`** for every other gain. `split_positive` removes their channels
+    /// from the tail, just inside the tropical channels.
     pub fn noise_channels_total(&self) -> usize {
         if self.gain.projects_noise() {
             self.micro_steps * self.nheads()
@@ -523,10 +524,10 @@ impl Mamba3 {
         }
     }
 
-    /// Width of the tropical segments `(a, b)` of the in-projection: two
-    /// channels per (head, micro-step) under [`Tropical::MaxPlus`], **`0`**
-    /// otherwise. It is the outermost trailing segment, so `split_positive`
-    /// removes it first.
+    /// Width of the tropical sub-projections `(a, b)` of the in-projection:
+    /// two channels per (head, micro-step) under [`Tropical::MaxPlus`], **`0`**
+    /// otherwise. Their channels are the outermost trailing channels, so
+    /// `split_positive` removes them first.
     pub fn tropical_channels_total(&self) -> usize {
         if self.tropical.is_on() {
             2 * self.micro_steps * self.nheads()
@@ -535,7 +536,7 @@ impl Mamba3 {
         }
     }
 
-    /// Remove the trailing segments of the positive systems from an
+    /// Remove the trailing channels of the positive systems from an
     /// in-projection whose channel axis is `dim`. Returns
     /// `(rest, noise, tropical (a, b))`, each `None` when the block does not
     /// project it. The two tropical halves are still `u`-wide, `a` first.
@@ -838,9 +839,10 @@ impl Mamba3 {
 /// tied.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Mamba3Untied {
-    /// The trailing per-micro-step scalar and rotation segments of `in_proj`,
-    /// `[Δ·u | A·u | λ·u | μ·u | rotation·u | noise·u | tropical·2u]`, moved
-    /// into [`Mamba3::in_proj_tail`] (a second, small GEMM).
+    /// The trailing per-micro-step scalar and rotation sub-projections of
+    /// `in_proj`, `[Δ·u | A·u | λ·u | μ·u | rotation·u | noise·u |
+    /// tropical·2u]`, moved into [`Mamba3::in_proj_tail`] (a second, small
+    /// GEMM).
     InProjTail,
     /// The Δ bias [`Mamba3::dt_bias_h`].
     DtBias,
@@ -1197,8 +1199,9 @@ impl Mamba3Config {
     /// Number of in-projection channels for the rotation parameters, per
     /// [`RotationKind`]:
     ///
-    /// - [`Real1D`](RotationKind::Real1D): none. The trailing `in_proj`
-    ///   segment is absent, not zero-width (Burn has no zero-width tensors).
+    /// - [`Real1D`](RotationKind::Real1D): none. The rotation sub-projections
+    ///   of `in_proj` are absent, not zero-width (Burn has no zero-width
+    ///   tensors).
     /// - [`Complex2D`](RotationKind::Complex2D): `num_rotation_angles` angle
     ///   channels, shared across heads and scaled per head by `Δ`, as in the
     ///   reference.
@@ -1242,24 +1245,24 @@ impl Mamba3Config {
     ///
     /// That is `d_inner + u·d_inner + u·bc + bc + (2 … 7)·u·nheads +
     /// u·num_rotation_channels`, with `bc = ngroups·state_rank·mimo_rank` and
-    /// `u` = [`Self::micro_steps`]. Only the **per-micro-step** segments widen.
-    /// The gate `z` and the read `C` are per token (see
-    /// [`crate::mamba3::product`]). At `u = 1`, the stock block (the default
-    /// tap pattern, no positive system) has
+    /// `u` = [`Self::micro_steps`]. Only the **per-micro-step**
+    /// sub-projections occur `u` times. The gate `z` and the read `C` are per
+    /// token (see [`crate::mamba3::product`]). At `u = 1`, the stock block (the
+    /// default tap pattern, no positive system) has
     /// `2·d_inner + 2·bc + 3·nheads + num_rotation_channels`.
     ///
-    /// A block can omit every segment from `λ` on (see [`Mamba3::in_proj`] for
-    /// which setting omits which). `helpers::split_trailing` removes them in
-    /// the reverse order.
+    /// A block can omit every sub-projection from `λ` on (see
+    /// [`Mamba3::in_proj`] for which setting omits which).
+    /// `helpers::split_trailing` removes their channels in the reverse order.
     pub fn d_in_proj(&self) -> usize {
         let u = self.micro_steps;
         let bc = self.ngroups * self.state_rank * self.mimo_rank;
         self.d_inner() + u * self.d_inner() + u * bc + bc + self.d_in_proj_tail()
     }
 
-    /// Width of the trailing per-micro-step segments of the in-projection,
-    /// `[Δ·u | A·u | λ·u | μ·u | rotation·u | noise·u | tropical·2u]`:
-    /// `(2 … 7)·u·nheads + u·num_rotation_channels`.
+    /// Width of the trailing per-micro-step sub-projections of the
+    /// in-projection, `[Δ·u | A·u | λ·u | μ·u | rotation·u | noise·u |
+    /// tropical·2u]`: `(2 … 7)·u·nheads + u·num_rotation_channels`.
     /// [`Mamba3Untied::InProjTail`] moves them into `in_proj_tail`.
     pub fn d_in_proj_tail(&self) -> usize {
         let u = self.micro_steps;
@@ -1271,61 +1274,63 @@ impl Mamba3Config {
         scalars * u * self.nheads() + u * self.num_rotation_channels()
     }
 
-    /// The block's 2-D weights Muon may own, and how their fused columns split.
+    /// The block's 2-D weights Muon may own, and their sub-projections.
     ///
-    /// The segments of `in_proj` mirror the `split_into` in the SSD pathways
-    /// (`[z | x·u | B·u | C | Δ·u | A·u | λ·u | μ·u | rotation·u | r·u | a·u |
-    /// b·u]`). The per-head *scalar* channels stay on the fallback optimizer.
-    /// See [`burn_stack::optim`].
+    /// The sub-projections of `in_proj` mirror the `split_into` in the SSD
+    /// pathways (`[z | x·u | B·u | C | Δ·u | A·u | λ·u | μ·u | rotation·u |
+    /// r·u | a·u | b·u]`). The per-head *scalar* channels stay on the fallback
+    /// optimizer. See [`burn_stack::optim`].
     ///
-    /// Each micro-step gets its **own** segment, not a share of one `u`-wide
-    /// slab: they are `u` independent `d_model → width` maps, and Muon must
-    /// orthogonalise each one alone. They share a name, so
-    /// [`MuonPlan::without_segment`](burn_stack::optim::MuonPlan::without_segment)
-    /// still removes all the micro-steps of a stream at once.
+    /// Each micro-step gets its **own** sub-projection, not a share of one
+    /// `u`-wide slab: they are `u` independent `d_model → width` maps, and
+    /// Muon must orthogonalise each one alone. They share a name, so
+    /// [`MuonPlan::without_sub_projection`] still removes all the micro-steps
+    /// of a stream at once.
     ///
-    /// Under [`Mamba3Untied::InProjTail`], the segments from `Δ` on belong to
-    /// `in_proj_tail`, one copy per application ([`ProjSpec::tiled`]).
+    /// Under [`Mamba3Untied::InProjTail`], the sub-projections from `Δ` on
+    /// belong to `in_proj_tail`, one copy per application
+    /// ([`ProjSpec::tiled`]).
     ///
+    /// [`MuonPlan::without_sub_projection`]: burn_stack::optim::MuonPlan::without_sub_projection
     /// [`ProjSpec::tiled`]: burn_stack::optim::ProjSpec::tiled
     #[cfg(feature = "optim")]
     pub fn muon_projections(&self) -> Vec<burn_stack::optim::ProjSpec> {
-        use burn_stack::optim::{ProjSegment as Seg, ProjSpec};
+        use burn_stack::optim::{ProjSpec, SubProjection as Sub};
         let d_inner = self.d_inner();
         let nheads = self.nheads();
         let bc = self.ngroups * self.state_rank * self.mimo_rank;
         let rot = self.num_rotation_channels();
-        // One copy of `seg` per micro-step.
-        let per_micro = |seg: Seg| std::iter::repeat_n(seg, self.micro_steps);
-        let head: Vec<Seg> = std::iter::once(Seg::muon("z", d_inner))
-            .chain(per_micro(Seg::muon("x", d_inner)))
-            .chain(per_micro(Seg::muon("b", bc)))
-            .chain(std::iter::once(Seg::muon("c", bc)))
+        // One copy of `sub` per micro-step.
+        let per_micro = |sub: Sub| std::iter::repeat_n(sub, self.micro_steps);
+        let head: Vec<Sub> = std::iter::once(Sub::muon("z", d_inner))
+            .chain(per_micro(Sub::muon("x", d_inner)))
+            .chain(per_micro(Sub::muon("b", bc)))
+            .chain(std::iter::once(Sub::muon("c", bc)))
             .collect();
-        let tail: Vec<Seg> = per_micro(Seg::adamw("dt", nheads))
-            .chain(per_micro(Seg::adamw("a", nheads)))
+        let tail: Vec<Sub> = per_micro(Sub::adamw("dt", nheads))
+            .chain(per_micro(Sub::adamw("a", nheads)))
             // `TapPattern::None` projects no `λ` (as `Real1D` projects no
             // rotation). Only a two-tap pattern projects `μ`, the mix of the
             // second mass.
             .chain(
                 self.tap_pattern
                     .has_beta_tap()
-                    .then(|| per_micro(Seg::adamw("lambda", nheads)))
+                    .then(|| per_micro(Sub::adamw("lambda", nheads)))
                     .into_iter()
                     .flatten(),
             )
             .chain(
                 self.tap_pattern
                     .has_two_taps(self.micro_steps)
-                    .then(|| per_micro(Seg::adamw("mu", nheads)))
+                    .then(|| per_micro(Sub::adamw("mu", nheads)))
                     .into_iter()
                     .flatten(),
             )
-            // `Real1D` has no rotation columns, and a segment cannot have
-            // zero width (see `num_rotation_channels`).
+            // `Real1D` has no rotation columns, and a sub-projection cannot
+            // have zero width (see `num_rotation_channels`).
             .chain(
                 (rot > 0)
-                    .then(|| per_micro(Seg::muon("rotation", rot)))
+                    .then(|| per_micro(Sub::muon("rotation", rot)))
                     .into_iter()
                     .flatten(),
             )
@@ -1333,7 +1338,7 @@ impl Mamba3Config {
             .chain(
                 self.gain
                     .projects_noise()
-                    .then(|| per_micro(Seg::adamw("kalman_noise", nheads)))
+                    .then(|| per_micro(Sub::adamw("kalman_noise", nheads)))
                     .into_iter()
                     .flatten(),
             )
@@ -1341,8 +1346,8 @@ impl Mamba3Config {
                 self.tropical
                     .is_on()
                     .then(|| {
-                        per_micro(Seg::adamw("tropical_a", nheads))
-                            .chain(per_micro(Seg::adamw("tropical_b", nheads)))
+                        per_micro(Sub::adamw("tropical_a", nheads))
+                            .chain(per_micro(Sub::adamw("tropical_b", nheads)))
                     })
                     .into_iter()
                     .flatten(),

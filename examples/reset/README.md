@@ -30,8 +30,8 @@ The four ladder rungs share three settings:
   symbols. Three points of `ℝ²` are affinely independent, so every
   in-projection channel can take any value on the three symbols.
 - **`TapPattern::None`**. Every construction below pins `λ ≈ 1`, so the `β` tap
-  does nothing useful. Switching it off is structural: no `λ` segment in the
-  in-projection, no tap slot in the cache, one SSD call instead of two.
+  does nothing useful. Switching it off is structural: no `λ` sub-projection in
+  the in-projection, no tap slot in the cache, one SSD call instead of two.
 - **`nheads = 2`**. A head is a *readout*, not a piece of state: every head
   holds its own copy of the same state, and differs only in the `C` that reads
   that copy. Each of these labels needs two projections.
@@ -714,8 +714,8 @@ adds error with every token.
 <details>
 <summary>Measured</summary>
 
-1044 parameters at `u = 2`, 720 at `u = 1` (`u` widens only the per-micro-step
-in-projection segments). Chance is 12.5%.
+1044 parameters at `u = 2`, 720 at `u = 1` (`u` repeats only the
+per-micro-step sub-projections of the in-projection). Chance is 12.5%.
 
 | | random | shuffle | runs |
 |---|---|---|---|

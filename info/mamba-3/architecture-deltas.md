@@ -129,11 +129,11 @@ groups (multi-value attention: in both families, the heads of a group share
 | output | gated RMSNorm(`y`, `z`) → out-proj | `y ⊙ SiLU(z)` → out-proj, with an **optional** norm |
 | skip | `D ⊙ x` per head | unchanged |
 
-`*` `μ` is a segment of this crate, not of the source. It is the mass that
-splits the left endpoint between two taps. Only a two-tap `TapPattern` has it
-([`trapezoid-as-integration.md`](trapezoid-as-integration.md) §9), and it
-folds away at `micro_steps = 1`. Every per-micro-step segment widens by `u`.
-`z` and `C` do not.
+`*` The `μ` sub-projection is of this crate, not of the source. `μ` is the
+mass that splits the left endpoint between two taps. Only a two-tap
+`TapPattern` has it ([`trapezoid-as-integration.md`](trapezoid-as-integration.md) §9), and
+it folds away at `micro_steps = 1`. Every per-micro-step sub-projection occurs
+`u` times. `z` and `C` occur once.
 
 Rows 2–4 together have a consequence that is worth a separate statement:
 **the only nonlinearities left on the `B`/`C`/`x` path are the normalisation

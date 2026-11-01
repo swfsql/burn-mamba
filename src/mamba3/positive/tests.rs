@@ -855,9 +855,9 @@ fn the_slots_survive_a_no_grad_round_trip() {
     assert!(after.log_precision_bh.is_some() && after.tropical_bh.is_some());
 }
 
-/// The Muon plan splits the width of the in-projection segment for segment,
-/// with the positive-system scalar channels on the fallback (tied and untied
-/// tail alike).
+/// The Muon plan splits the width of the in-projection into its
+/// sub-projections, with the positive-system scalar channels on the fallback
+/// (tied and untied tail alike).
 #[cfg(feature = "optim")]
 #[test]
 fn the_muon_plan_covers_the_positive_channels() {
@@ -873,10 +873,10 @@ fn the_muon_plan_covers_the_positive_channels() {
         assert_eq!(in_proj_width, config.d_in_proj(), "untied {untied:?}");
         let names: Vec<_> = specs
             .iter()
-            .flat_map(|s| s.segments.iter())
-            .filter(|seg| seg.name.starts_with("kalman") || seg.name.starts_with("tropical"))
+            .flat_map(|s| s.sub_projections.iter())
+            .filter(|sub| sub.name.starts_with("kalman") || sub.name.starts_with("tropical"))
             .collect();
         assert_eq!(names.len(), 3 * config.micro_steps, "untied {untied:?}");
-        assert!(names.iter().all(|seg| !seg.muon), "the scalar channels stay on AdamW");
+        assert!(names.iter().all(|sub| !sub.muon), "the scalar channels stay on AdamW");
     }
 }

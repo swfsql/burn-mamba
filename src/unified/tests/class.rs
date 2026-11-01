@@ -8,7 +8,7 @@ use burn::prelude::*;
 use burn_stack::modules::*;
 use burn::module::Param;
 use burn_stack::utils::class::{
-    class_chunk_plan, class_marker_output_indices, class_prime_plan, init_class_emb,
+    class_marker_output_indices, class_prime_plan, class_window_plan, init_class_emb,
 };
 use burn_stack::utils::{ClassCursor, ClassCursors};
 use burn_stack::utils::test_helpers::{dtype_tol, test_device};
@@ -691,7 +691,7 @@ fn per_layer_class_latents_step_matches_forward() {
 
 // --- prime (class-only steps, no user token) -------------------------------
 
-// The prime planner, checked directly against the chunk planner it splits off
+// The prime planner, checked directly against the window planner it splits off
 // from: a prime emits the markers waiting for the next user token — the run
 // sitting at the cursor — and leaves everything else exactly where `step` finds
 // it. `End` is never primed, and a cursor at the announced end primes nothing.
@@ -713,8 +713,8 @@ fn class_prime_plan_emits_only_what_waits_for_the_next_token() {
     assert_eq!(cursor.offset, 1);
     // …and the two steps that follow carry their user token alone (`Start` is
     // behind the cursor, the `Custom` still waits for u2).
-    assert_eq!(class_chunk_plan(&markers, 1, &mut cursor, "test"), vec![]);
-    assert_eq!(class_chunk_plan(&markers, 1, &mut cursor, "test"), vec![]);
+    assert_eq!(class_window_plan(&markers, 1, &mut cursor, "test"), vec![]);
+    assert_eq!(class_window_plan(&markers, 1, &mut cursor, "test"), vec![]);
     assert_eq!(cursor.offset, 3);
     // Now the `Custom` is what u2 would have been preceded by, so it primes.
     assert_eq!(
@@ -725,7 +725,7 @@ fn class_prime_plan_emits_only_what_waits_for_the_next_token() {
     // The last user token closes the sequence and `End` trails it there — never
     // on a prime, and the prime that follows has no next token to serve.
     assert_eq!(
-        class_chunk_plan(&markers, 1, &mut cursor, "test"),
+        class_window_plan(&markers, 1, &mut cursor, "test"),
         vec![(1, 2)]
     );
     assert_eq!(cursor.offset, 6);
@@ -734,10 +734,10 @@ fn class_prime_plan_emits_only_what_waits_for_the_next_token() {
 
     // A prime reaching an upper level carries the tokens the level below just
     // emitted, and flushes what the *next* one is due to be preceded by — the
-    // one difference from `class_chunk_plan` on the same tokens.
+    // one difference from `class_window_plan` on the same tokens.
     let markers = vec![ClassLatent::Custom(1)];
     let mut cursor = ClassCursor::whole(4);
-    assert_eq!(class_chunk_plan(&markers, 1, &mut cursor, "test"), vec![]);
+    assert_eq!(class_window_plan(&markers, 1, &mut cursor, "test"), vec![]);
     assert_eq!(cursor.offset, 1);
     let mut cursor = ClassCursor::whole(4);
     assert_eq!(
@@ -755,7 +755,7 @@ fn class_prime_plan_emits_only_what_waits_for_the_next_token() {
         vec![(0, 0)]
     );
     assert_eq!(cursor.offset, 1);
-    assert_eq!(class_chunk_plan(&markers, 1, &mut cursor, "test"), vec![]);
+    assert_eq!(class_window_plan(&markers, 1, &mut cursor, "test"), vec![]);
     assert_eq!(cursor.offset, 2);
     assert_eq!(
         class_prime_plan(&markers, 0, &mut cursor, "test"),
@@ -1210,12 +1210,12 @@ fn prime_through_the_runtime_enums() {
     assert_eq!(logits.dims(), [batch, vocab + 1]);
 }
 
-// --- streamed placement (chunked forward / cursored step) ------------------
+// --- streamed placement (a forward per window / cursored step) -------------
 
-// The chunk planner is the one place placement is decided, so check it directly:
-// all four marker kinds, whole vs split, and an open-ended stream.
+// The window planner is the one place placement is decided, so check it
+// directly: all four marker kinds, whole vs split, and an open-ended stream.
 #[test]
-fn class_chunk_plan_splits_a_sequence() {
+fn class_window_plan_splits_a_sequence() {
     let markers = vec![
         ClassLatent::Start,
         ClassLatent::Middle,
@@ -1226,24 +1226,24 @@ fn class_chunk_plan_splits_a_sequence() {
     // order (Start, Middle, End, Custom).
     assert_eq!(class_marker_output_indices(&markers, 6), vec![0, 5, 9, 2]);
 
-    // One call for the whole sequence: `(at, marker)`, `at` counting the chunk's
-    // own tokens placed before the marker.
+    // One call for the whole sequence: `(at, marker)`, `at` counting the
+    // window's own tokens placed before the marker.
     let mut cursor = ClassCursor::whole(6);
     assert_eq!(
-        class_chunk_plan(&markers, 6, &mut cursor, "test"),
+        class_window_plan(&markers, 6, &mut cursor, "test"),
         vec![(0, 0), (1, 3), (3, 1), (6, 2)]
     );
     assert_eq!(cursor.offset, 10);
 
-    // Split 4 + 2: identical placement, `End` waiting for the closing chunk.
+    // Split 4 + 2: identical placement, `End` waiting for the closing window.
     let mut cursor = ClassCursor::whole(6);
     assert_eq!(
-        class_chunk_plan(&markers, 4, &mut cursor, "test"),
+        class_window_plan(&markers, 4, &mut cursor, "test"),
         vec![(0, 0), (1, 3), (3, 1)]
     );
     assert_eq!(cursor.offset, 7);
     assert_eq!(
-        class_chunk_plan(&markers, 2, &mut cursor, "test"),
+        class_window_plan(&markers, 2, &mut cursor, "test"),
         vec![(2, 2)]
     );
     assert_eq!(cursor.offset, 10);
@@ -1255,14 +1255,14 @@ fn class_chunk_plan_splits_a_sequence() {
     assert_eq!(class_marker_output_indices(&markers, 3), vec![3, 4]);
     let mut cursor = ClassCursor::whole(3);
     assert_eq!(
-        class_chunk_plan(&markers, 3, &mut cursor, "test"),
+        class_window_plan(&markers, 3, &mut cursor, "test"),
         vec![(3, 0)]
     );
     assert_eq!(cursor.offset, 4);
     // One token past the announced length and the `Custom` does land — still
     // *before* that token, as `Custom` always does.
     assert_eq!(
-        class_chunk_plan(&markers, 1, &mut cursor, "test"),
+        class_window_plan(&markers, 1, &mut cursor, "test"),
         vec![(0, 1)]
     );
     assert_eq!(cursor.offset, 6);
@@ -1272,12 +1272,12 @@ fn class_chunk_plan_splits_a_sequence() {
     let markers = vec![ClassLatent::Start, ClassLatent::Custom(1)];
     let mut cursor = ClassCursor::default();
     assert_eq!(
-        class_chunk_plan(&markers, 1, &mut cursor, "test"),
+        class_window_plan(&markers, 1, &mut cursor, "test"),
         vec![(0, 0)]
     );
     assert_eq!(cursor.offset, 2);
     assert_eq!(
-        class_chunk_plan(&markers, 1, &mut cursor, "test"),
+        class_window_plan(&markers, 1, &mut cursor, "test"),
         vec![(0, 1)]
     );
     assert_eq!(cursor.offset, 4);
@@ -1285,9 +1285,9 @@ fn class_chunk_plan_splits_a_sequence() {
 
 // Splitting one `forward` in two must place every class marker exactly where a
 // single call over the whole sequence does — the shared cursors decide, not the
-// chunk length. Stack latents at all four kinds of position plus a per-layer
-// latent, so `Start` (behind the second chunk's cursor), `Custom`/`Middle`
-// (interior) and `End` (only on the chunk that closes the sequence) are all
+// window length. Stack latents at all four kinds of position plus a per-layer
+// latent, so `Start` (behind the second window's cursor), `Custom`/`Middle`
+// (interior) and `End` (only on the window that closes the sequence) are all
 // exercised, at both class levels. Outputs **and** final caches must agree.
 #[cfg(feature = "mamba2")]
 #[test]
@@ -1327,7 +1327,7 @@ fn class_markers_split_forward_matches_single_forward() {
     let (y_full, c_full) = layers.forward(x.clone(), None, path.clone(), None, None);
     assert_eq!(y_full.dims(), [batch, seq + 5, d_model]);
 
-    // The same sequence in two chunks, sharing one cursor set.
+    // The same sequence in two windows, sharing one cursor set.
     let mut class = ClassCursors::new(seq);
     let (y_a, caches) = layers.forward(
         x.clone().narrow(1, 0, split),
@@ -1343,7 +1343,8 @@ fn class_markers_split_forward_matches_single_forward() {
         Some(&mut class),
         None,
     );
-    // Chunk 1 carries Start, Custom and Middle; chunk 2 the trailing End.
+    // Window 1 carries Start, Custom and Middle. Window 2 carries the trailing
+    // End.
     assert_eq!(y_a.dims(), [batch, split + 4, d_model]);
     assert_eq!(y_b.dims(), [batch, seq - split + 1, d_model]);
 
@@ -1351,7 +1352,7 @@ fn class_markers_split_forward_matches_single_forward() {
     assert_eq!(y_split.dims(), y_full.dims());
     assert!(
         max_rel_diff(y_full, y_split) < dtype_tol(1e-4),
-        "chunked class placement disagrees with the single forward"
+        "class placement over two windows disagrees with the single forward"
     );
     for (i, (f, s)) in c_full.caches.iter().zip(&c_split.caches).enumerate() {
         assert!(
@@ -1434,7 +1435,7 @@ fn class_markers_step_matches_forward_with_full_len() {
 }
 
 // A network's own class tokens stream the same way (they are spliced at input
-// width, before `in_proj`): two chunks must equal one call.
+// width, before `in_proj`): two windows must equal one call.
 #[cfg(feature = "mamba2")]
 #[test]
 fn class_tokens_split_forward_matches_single_forward() {
@@ -1484,7 +1485,7 @@ fn class_tokens_split_forward_matches_single_forward() {
     assert_eq!(y_split.dims(), y_full.dims());
     assert!(
         max_rel_diff(y_full, y_split) < dtype_tol(1e-4),
-        "chunked class-token placement disagrees with the single forward"
+        "class-token placement over two windows disagrees with the single forward"
     );
     // 2 class tokens at the network level, and the stack's End latent above them.
     assert_eq!(class.network, seq + 2);

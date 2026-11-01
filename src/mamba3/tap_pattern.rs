@@ -93,7 +93,8 @@ pub enum TapPattern {
     /// [`RotationKind::Real1D`](crate::mamba3::rotation::RotationKind::Real1D)
     /// is. The absent term costs nothing:
     ///
-    /// - the in-projection has no `λ` channels (so Muon sees no `λ` segment),
+    /// - the in-projection has no `λ` channels (so Muon sees no `λ`
+    ///   sub-projection),
     /// - no `β` is formed, and the tap slots of the caches are `None`,
     /// - `forward` makes **one** SSD call, and `step` has no second outer
     ///   product.
@@ -280,9 +281,9 @@ impl TapPattern {
     /// split is a decomposition of one coefficient, and the pair **folds** back
     /// into one tap. The fold is structural, as the missing `λ` of
     /// [`None`](Self::None) is: no `μ` channels in the in-projection, no `μ`
-    /// segment for Muon, one shift, one SSD pass. Thus a two-tap member at
-    /// `u = 1` *is* [`HorizontalCarryOver`](Self::HorizontalCarryOver), not an
-    /// expensive form of it.
+    /// sub-projection for Muon, one shift, one SSD pass. Thus a two-tap member
+    /// at `u = 1` *is* [`HorizontalCarryOver`](Self::HorizontalCarryOver), not
+    /// an expensive form of it.
     pub fn has_two_taps(self, micro_steps: usize) -> bool {
         micro_steps > 1
             && matches!(
@@ -457,19 +458,19 @@ mod tests {
                 #[cfg(feature = "optim")]
                 {
                     let names: Vec<String> = config.muon_projections()[0]
-                        .segments
+                        .sub_projections
                         .iter()
                         .map(|s| s.name.to_string())
                         .collect();
                     assert_eq!(
                         names.iter().any(|n| n == "lambda"),
                         pattern.has_beta_tap(),
-                        "{label}: λ segment"
+                        "{label}: λ sub-projection"
                     );
                     assert_eq!(
                         names.iter().any(|n| n == "mu"),
                         pattern.has_two_taps(micro_steps),
-                        "{label}: μ segment"
+                        "{label}: μ sub-projection"
                     );
                 }
             }
@@ -477,7 +478,7 @@ mod tests {
     }
 
     /// `None` is the ablation, and it is structural: no `λ` channels in the
-    /// in-projection, and none of Muon's `λ` segments either.
+    /// in-projection, and none of Muon's `λ` sub-projections either.
     #[test]
     fn none_drops_the_lambda_channels() {
         let with = cfg();
@@ -496,7 +497,7 @@ mod tests {
         {
             let names = |c: &Mamba3Config| {
                 c.muon_projections()[0]
-                    .segments
+                    .sub_projections
                     .iter()
                     .map(|s| s.name.to_string())
                     .collect::<Vec<_>>()
@@ -603,8 +604,8 @@ mod tests {
     ///
     /// `σ(30)` rounds to exactly `1.0` in f32, so a carry-over block whose `λ`
     /// columns are zeroed and whose `λ` bias is `30` has `β = 0` and `γ = Δ`
-    /// exactly. Built by appending that dead segment to a `None` block's own
-    /// in-projection, so the two blocks agree on every other weight.
+    /// exactly. Built by appending that dead sub-projection to a `None` block's
+    /// own in-projection, so the two blocks agree on every other weight.
     #[test]
     fn none_equals_lambda_saturated_at_one() {
         use burn::module::Param;
@@ -624,8 +625,9 @@ mod tests {
         carry.c_bias_hmr = none.c_bias_hmr.clone();
         carry.out_proj = none.out_proj.clone();
 
-        // `Real1D` projects no rotation, so `λ` is the trailing segment: append
-        // a dead one (zero weights, +30 bias) to reach the carry-over width.
+        // `Real1D` projects no rotation, so `λ` is the trailing sub-projection:
+        // append a dead one (zero weights, +30 bias) to reach the carry-over
+        // width.
         let nheads = config.nheads();
         let w = none.in_proj.weight.val();
         let [d_model, _] = w.dims();
@@ -1125,8 +1127,8 @@ mod tests {
 
     /// Append `width` dead columns (zero weights, constant bias) to a block's
     /// in-projection — how a wider pattern is built from a narrower one's
-    /// weights, so the two differ in nothing but the appended segment.
-    fn append_dead_segment(
+    /// weights, so the two differ in nothing but the appended sub-projections.
+    fn append_dead_sub_projections(
         block: &Mamba3,
         into: &mut Mamba3,
         width: usize,
@@ -1162,8 +1164,8 @@ mod tests {
     /// At `u = 1` every position is a token's first micro-step, so
     /// `HorizontalReset`'s tap is closed everywhere and its mass returns to `γ`:
     /// the pattern **is** the ablation, whatever `λ` says. Built from a `None`
-    /// block plus a live-but-ignored `λ` segment, so the claim is about the gate
-    /// and not about the projection.
+    /// block plus a live-but-ignored `λ` sub-projection, so the claim is about
+    /// the gate and not about the projection.
     #[test]
     fn horizontal_reset_is_none_at_one_micro_step() {
         let device = test_device();
@@ -1176,7 +1178,7 @@ mod tests {
             .with_tap_pattern(TapPattern::HorizontalReset)
             .init(&device);
         share_weights_except_in_proj(&none, &mut reset);
-        append_dead_segment(&none, &mut reset, config.nheads(), 0.0, &device);
+        append_dead_sub_projections(&none, &mut reset, config.nheads(), 0.0, &device);
 
         let x = input(&config, 6);
         let path = Mamba3SsdPath::default();
@@ -1233,8 +1235,9 @@ mod tests {
         );
         assert!(d > dtype_tol(1e-4), "the gate has to do something: {d:.3e}");
 
-        // `Real1D` and one tap ⇒ `λ` is the trailing segment, and its first
-        // `nheads` columns are micro-step 0's. Saturate exactly those.
+        // `Real1D` and one tap ⇒ the `λ` sub-projections are the trailing
+        // columns, and their first `nheads` columns are micro-step 0's.
+        // Saturate exactly those.
         let nheads = config.nheads();
         let start = config.d_in_proj() - u * nheads;
         let w = reset.in_proj.weight.val();
@@ -1349,7 +1352,7 @@ mod tests {
         .map(|pattern| {
             let mut block = config.clone().with_tap_pattern(pattern).init(&device);
             share_weights_except_in_proj(&vertical, &mut block);
-            append_dead_segment(&vertical, &mut block, u * config.nheads(), 0.0, &device);
+            append_dead_sub_projections(&vertical, &mut block, u * config.nheads(), 0.0, &device);
             let out = block.forward_single_ssd(x.clone(), None, &path, None).0;
             let d = max_abs_diff(out.clone(), out_vertical.clone());
             assert!(d > dtype_tol(1e-4), "{pattern:?} vs Vertical: {d:.3e}");
@@ -1363,8 +1366,8 @@ mod tests {
     /// The join: `VerticalPlusHorizontalCarryOver` **contains** both implemented
     /// single-tap patterns — `μ ≡ 1` is the carry-over, `μ ≡ 0` is the vertical
     /// — so `μ` is a per-(head, micro-step) interpolation between them rather
-    /// than a third model. Built by appending a saturated `μ` segment to their
-    /// shared in-projection.
+    /// than a third model. Built by appending saturated `μ` sub-projections to
+    /// their shared in-projection.
     #[test]
     fn vertical_plus_carry_over_contains_both_single_tap_patterns() {
         let device = test_device();
@@ -1390,9 +1393,10 @@ mod tests {
                 .with_tap_pattern(TapPattern::VerticalPlusHorizontalCarryOver)
                 .init(&device);
             share_weights_except_in_proj(&carry, &mut join);
-            // `Real1D` ⇒ `μ` is the trailing segment: append it dead, at the
-            // saturation that selects one of the two taps.
-            append_dead_segment(&carry, &mut join, u * config.nheads(), bias, &device);
+            // `Real1D` ⇒ the `μ` sub-projections are the trailing columns:
+            // append them dead, at the saturation that selects one of the two
+            // taps.
+            append_dead_sub_projections(&carry, &mut join, u * config.nheads(), bias, &device);
 
             for (pathway, a, b) in [
                 (
