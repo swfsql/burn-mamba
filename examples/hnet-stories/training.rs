@@ -114,7 +114,7 @@ pub struct Run {
     /// `--vram-cleanup-every`: the period of those cleanups (`None`: the
     /// default schedule of [`vram::cleanup`]).
     pub vram_cleanup_every: Option<u64>,
-    /// `--step-mode`: how a decode step runs the inner network of a stage.
+    /// `--step-mode`: how a decode step runs the inner H-Net of a stage.
     pub step_mode: StepMode,
     /// Whether decode steps replay a captured graph (`--no-graph` runs them
     /// eagerly). Only a masked step can.
@@ -128,7 +128,7 @@ pub struct Run {
     pub ratio_targets: Vec<f64>,
     /// `α`.
     pub ratio_weight: f64,
-    /// `λˢ` of each stage, then of the main network.
+    /// `λˢ` of each stage, then of the main stack.
     pub lr_multipliers: Vec<f64>,
 }
 
@@ -137,7 +137,7 @@ impl Run {
     pub fn new(config: &HNetStoriesConfig, cli: &Cli, graphs: bool) -> Self {
         let n_stages = config.model.stage_blocks.len();
         assert_eq!(config.ratio_targets.len(), n_stages, "one ratio target per stage");
-        assert_eq!(config.lr_multipliers.len(), n_stages + 1, "one LR multiplier per stage, then the main network");
+        assert_eq!(config.lr_multipliers.len(), n_stages + 1, "one LR multiplier per stage, then the main stack");
         assert_eq!(
             config.model.families(),
             ("mamba3", "mamba3"),
@@ -282,7 +282,7 @@ impl LmModel for Wrap {
     }
 
     /// One training step at the rate `lr · λˢ` for the parameters of each stage, and
-    /// `lr · λᴹ` for those of the main network. The embedding and the heads
+    /// `lr · λᴹ` for those of the main stack. The embedding and the heads
     /// take the rate of stage 0.
     fn optim_step(self, optim: &mut ModuleOptimizer, lr: f64, grads: GradientsParams) -> Self {
         let multipliers = &self.1.lr_multipliers;

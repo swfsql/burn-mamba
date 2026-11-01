@@ -18,13 +18,13 @@ use burn_stack::utils::InitPolicy;
 /// The width of stage 0 (the character resolution) and of stage 1.
 const STAGE_WIDTHS: [usize; 2] = [32, 48];
 
-/// The width of the main network.
+/// The width of the main stack.
 const MAIN_WIDTH: usize = 64;
 
 /// The state rank of the blocks of every stage.
 const STAGE_STATE_RANK: usize = 32;
 
-/// The state rank of the blocks of the main network.
+/// The state rank of the blocks of the main stack.
 const MAIN_STATE_RANK: usize = 64;
 
 /// The target mean chunk length of each stage, in positions of its own input. At
@@ -67,8 +67,8 @@ impl ModelConfigExt for HNetStoriesConfig {
     }
 }
 
-/// The learning-rate multiplier of each stage and of the main network: the
-/// heuristic of the paper, normalised so that the main network has `1`.
+/// The learning-rate multiplier of each stage and of the main stack: the
+/// heuristic of the paper, normalised so that the main stack has `1`.
 ///
 /// ```text
 ///   λˢ = √( Dᴹ/Dˢ · Πᵢ₌ₛ^{S−1} Nⁱ )
@@ -106,7 +106,7 @@ fn mamba3(d: usize, state_rank: usize) -> MambaBlockConfig {
 /// The layout follows the reference at a tiny size, with Mamba-3 in every
 /// stack. The reference has Mamba-2 in the stages and attention in the main
 /// network. The stacks at character resolution are short and block-only. The
-/// main network is deeper and has a SwiGLU MLP. Every stack takes the
+/// main stack is deeper and has a SwiGLU MLP. Every stack takes the
 /// reference init (`N(0, 0.02)`, with the residual rescale over the stacks
 /// down to it).
 pub fn model_config(flags: &ModelFlags) -> HNetStoriesConfig {

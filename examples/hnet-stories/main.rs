@@ -3,8 +3,8 @@
 //! An auto-regressive H-Net (Hwang, Wang & Gu, 2025) over single
 //! **characters** of the [TinyStories-GPT4-clean] corpus, the corpus of the
 //! `tiny-stories` example. The model learns where its chunks start. Each
-//! stage keeps the characters where its router starts a chunk, runs the next
-//! level on that shorter sequence, and expands the result back. Every stack is
+//! stage keeps the characters where its router starts a chunk, runs its inner
+//! H-Net on that shorter sequence, and expands the result back. Every stack is
 //! Mamba-3. This example is a work in progress: its sizes and hyperparameters
 //! are placeholders until a parameter search.
 //!

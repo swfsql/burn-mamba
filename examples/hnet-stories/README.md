@@ -7,9 +7,9 @@ are placeholders until a parameter search.
 
 An H-Net does not read a fixed tokenization. Each **stage** runs a stack at
 the resolution of its input, and a router decides where a chunk starts. The
-stage keeps only the positions that start a chunk, the next level runs on that
-shorter sequence, and the stage expands the result back. The innermost level
-is the **main network**. The H-Net itself is block-generic and lives in
+stage keeps only the positions that start a chunk, its inner H-Net runs on
+that shorter sequence, and the stage expands the result back. The innermost
+stack is the **main stack**. The H-Net itself is block-generic and lives in
 `burn_stack::modules::hnet` (its module header holds the math). This example
 selects the families through `MambaHNetVocabNet`.
 
@@ -29,11 +29,11 @@ cargo run --release --example hnet-stories --features backend-flex -- --inferenc
 |---|---|---|---|
 | stage 0 (characters) | 32 | 32 | 2 encoder layers, 2 decoder layers, no MLP |
 | stage 1 (`--stages 2`) | 48 | 32 | 2 encoder layers, 2 decoder layers, no MLP |
-| main network | 64 | 64 | 4 layers with a SwiGLU MLP |
+| main stack | 64 | 64 | 4 layers with a SwiGLU MLP |
 
 - Every stack is Mamba-3, with the complex (`Complex2D`) rotation, as in
   `tiny-stories`. The reference has Mamba-2 in the stages and attention in the
-  main network.
+  main stack.
 - The embedding is tied to the LM head, and a token is the pair (character,
   case flag), as in `tiny-stories`.
 - Four learnable **start embeddings** open every story (`n_start_embeddings`).
@@ -55,7 +55,7 @@ run keeps it:
   `-- --chunk-log N` prints the chunk ratio of each stage every `N` windows.
 - **A learning rate per stage.** Each stage trains at the rate of the
   schedule times `λˢ` (`lr_multipliers`). The default is the heuristic of the
-  paper, normalised to `1` at the main network. A stage sees more positions
+  paper, normalised to `1` at the main stack. A stage sees more positions
   per training step and is narrower, so it takes a larger rate.
 - **Runs of windows.** A story trains window by window, and the state carries
   from one window to the next (see "Runs and the frontier" in the
@@ -71,10 +71,10 @@ prompt (`-- --prompt <TEXT>`, repeatable).
 
 - `-- --show-chunks` marks each character where a stage starts a chunk: `|`
   for stage 0, `‖` where stage 1 also starts one.
-- `-- --step-mode masked` (the default) steps the inner network of a stage on
+- `-- --step-mode masked` (the default) steps the inner H-Net of a stage on
   every row. It keeps the old inner state on the rows that start no chunk.
   Every step then runs the same kernels, so on CUDA the decode replays one
-  captured graph. `-- --step-mode gathered` steps the inner network only on
+  captured graph. `-- --step-mode gathered` steps the inner H-Net only on
   the rows that start a chunk. It reads the decisions on the host, so it runs
   eagerly.
 

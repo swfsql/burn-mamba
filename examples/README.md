@@ -62,7 +62,7 @@
 - **`hnet-stories`** ([`hnet-stories/README.md`](hnet-stories/README.md), work
   in progress): a character-level H-Net of Mamba-3 stacks on the same corpus.
   The model learns where its chunks start: the stages run on the characters,
-  and the main network runs on the chunks. Its README covers the stages, the
+  and the main stack runs on the chunks. Its README covers the stages, the
   start embeddings that open a story, the ratio loss and the learning rate of
   each stage, and the chunk view of a sample (`-- --show-chunks`). It also takes
   `-- --context-use` and `-- --long-stories`, the measures of `tiny-stories`.

@@ -2,7 +2,7 @@
 //! serializable [`MambaHNetVocabNetConfig`].
 //!
 //! The H-Net itself is block-generic and lives in `burn_stack::modules::hnet`.
-//! Its encoders and decoders take one block family `E`, and its main network
+//! Its encoders and decoders take one block family `E`, and its main stack
 //! takes another family `M` (`HNetVocabNetwork<E, M>`). This module wraps each
 //! enabled pair `(E, M)` of Mamba families in one enum variant. So a caller
 //! can choose both at runtime and serialize the choice. A cache or an SSD path
@@ -50,7 +50,7 @@ impl MambaBlockConfig {
 }
 
 /// The serializable config of a [`MambaHNetVocabNet`]: the shape of
-/// `burn-stack` plus one block config per stage and one for the main network.
+/// `burn-stack` plus one block config per stage and one for the main stack.
 #[derive(Config, Debug)]
 pub struct MambaHNetVocabNetConfig {
     /// The stacks, the vocabulary and the knobs of the chunking.
@@ -59,13 +59,13 @@ pub struct MambaHNetVocabNetConfig {
     /// block config of a stage builds both its encoder and its decoder, and
     /// sets the width of the stage.
     pub stage_blocks: Vec<MambaBlockConfig>,
-    /// The block config of the main network.
+    /// The block config of the main stack.
     pub main_block: MambaBlockConfig,
 }
 
 impl MambaHNetVocabNetConfig {
-    /// `(E, M)`: the family of the stages and that of the main network. With
-    /// no stage, `E` is the family of the main network.
+    /// `(E, M)`: the family of the stages and that of the main stack. With
+    /// no stage, `E` is the family of the main stack.
     pub fn families(&self) -> (&'static str, &'static str) {
         let main = self.main_block.family();
         let Some(first) = self.stage_blocks.first() else {
@@ -171,11 +171,11 @@ macro_rules! with_family_pairs {
 macro_rules! define_hnet {
     ($(($v:ident, $e:ident, $m:ident, $fe:literal, $fm:literal)),* $(,)?) => {
         /// A runtime-selectable H-Net language model: one variant per pair
-        /// `(family of the stages, family of the main network)`.
+        /// `(family of the stages, family of the main stack)`.
         #[derive(Module, Debug)]
         pub enum MambaHNetVocabNet {
             $(
-                #[doc = concat!("Stages of `", stringify!($e), "`, main network of `", stringify!($m), "`.")]
+                #[doc = concat!("Stages of `", stringify!($e), "`, main stack of `", stringify!($m), "`.")]
                 #[cfg(all(feature = $fe, feature = $fm))]
                 $v(HNetVocabNetwork<$e, $m>),
             )*
@@ -197,7 +197,7 @@ macro_rules! define_hnet {
             /// Full-sequence pass: token pairs `[batch, sequence, 2]` → logits
             /// `[batch, sequence, padded_vocab + 1]`, the caches, and one
             /// [`Routing`] per stage. `paths` is `(the SSD path of the stages,
-            /// that of the main network)`. `pad` marks a right-padded batch.
+            /// that of the main stack)`. `pad` marks a right-padded batch.
             /// See `HNet::forward` of `burn-stack`.
             pub fn forward(
                 &self,
@@ -342,7 +342,7 @@ macro_rules! define_hnet {
                             device,
                         )),
                     )*
-                    (e, m) => panic!("no H-Net of {e} stages and a {m} main network in this build"),
+                    (e, m) => panic!("no H-Net of {e} stages and a {m} main stack in this build"),
                 }
             }
 
@@ -359,7 +359,7 @@ macro_rules! define_hnet {
                             <$m as Family>::config(&self.main_block),
                         ),
                     )*
-                    (e, m) => panic!("no H-Net of {e} stages and a {m} main network in this build"),
+                    (e, m) => panic!("no H-Net of {e} stages and a {m} main stack in this build"),
                 }
             }
         }

@@ -93,7 +93,7 @@ impl MambaLatentNet {
 
     /// Single-token step. It has no path argument (decoding is recurrent for
     /// all families). The cache family must match the network. `class` (the
-    /// cursors of all three class levels) goes to the inner network (see
+    /// cursors of all three marker levels) goes to the wrapped network (see
     /// [`LatentNetwork::step`]).
     pub fn step(
         &self,
@@ -616,7 +616,7 @@ impl MambaVocabNet {
 
     /// Single-token step: token pairs `[batch, 2]` → logits
     /// `[batch, padded_vocab + 1]`. The cache family must match the network.
-    /// `class` (the cursors of the inner [`Layers`]) goes to the inner network
+    /// `class` (the cursors of the inner [`Layers`]) goes to the wrapped network
     /// (see [`VocabNetwork::step`]).
     pub fn step(
         &self,

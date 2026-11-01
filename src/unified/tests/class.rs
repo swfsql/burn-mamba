@@ -998,7 +998,7 @@ fn prime_runs_a_per_layer_latent_mamba3() {
     }
 }
 
-// A network primes all three class levels at once: its own class token runs a
+// A network primes all three marker levels at once: its own class token runs a
 // full pass (the stack splicing its latents around it, per-layer ones included),
 // and the layers flush whatever is still waiting above it. What comes back is
 // the last marker's output — the seedless generation seed.
@@ -1288,7 +1288,7 @@ fn class_window_plan_splits_a_sequence() {
 // window length. Stack latents at all four kinds of position plus a per-layer
 // latent, so `Start` (behind the second window's cursor), `Custom`/`Middle`
 // (interior) and `End` (only on the window that closes the sequence) are all
-// exercised, at both class levels. Outputs **and** final caches must agree.
+// exercised, at both marker levels. Outputs **and** final caches must agree.
 #[cfg(feature = "mamba2")]
 #[test]
 fn class_markers_split_forward_matches_single_forward() {

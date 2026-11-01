@@ -15,9 +15,9 @@ use burn_stack::modules::hnet::StepMode;
 /// `-- --help`, below the corpus knobs.
 const HELP: &str = concat!(
     "    --ssd-path <PATH[:L]>  The SSD path of every chunkwise forward of the stages: recalc (default), serial or minimal. L sets the chunk length (default: from the block shape)\n",
-    "    --main-ssd-path <PATH[:L]>  The SSD path of the main network (default: that of --ssd-path)\n",
+    "    --main-ssd-path <PATH[:L]>  The SSD path of the main stack (default: that of --ssd-path)\n",
     "    --stages <N>           A new model: the number of stages, 1 or 2 (default 1)\n",
-    "    --step-mode <M>        How a decode step runs the inner network of a stage: masked (default, capturable) or gathered (only the rows that start a chunk, read on the host)\n",
+    "    --step-mode <M>        How a decode step runs the inner H-Net of a stage: masked (default, capturable) or gathered (only the rows that start a chunk, read on the host)\n",
     "    --show-chunks          Mark the chunk starts in each sample: | where stage 0 starts a chunk, ‖ where stage 1 also does\n",
     "    --chunk-log <N>        Print the chunk ratios of each stage once per N training windows (default 100, 0 never)\n",
     "    --prompt <TEXT>        At inference, continue TEXT instead of the built-in prompts. Give the flag again for each prompt\n",
@@ -43,7 +43,7 @@ pub struct Cli {
     /// `--profile`, `--max-vram`, `--grad-checkpointing`.
     pub step: StepFlags,
     /// `--ssd-path` and `--main-ssd-path`: the SSD paths of the stages and of
-    /// the main network.
+    /// the main stack.
     pub paths: (MambaSsdPath, MambaSsdPath),
     /// The shape of a new model.
     pub model: ModelFlags,

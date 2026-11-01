@@ -103,7 +103,7 @@ fn step_unrolled(
     (Tensor::cat(ys, 1), caches.unwrap())
 }
 
-/// Mamba-2 stages around a Mamba-3 main network (wider than the stage):
+/// Mamba-2 stages around a Mamba-3 main stack (wider than the stage):
 /// `forward` equals `step` unrolled on the logits and the caches, in both
 /// step modes.
 #[cfg(all(feature = "mamba2", feature = "mamba3"))]

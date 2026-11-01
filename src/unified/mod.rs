@@ -62,7 +62,7 @@ pub mod network;
 #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
 pub mod bidi;
 /// Runtime-selectable H-Net language models ([`MambaHNetVocabNet`]): one
-/// family for the stages, one for the main network.
+/// family for the stages, one for the main stack.
 #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
 pub mod hnet;
 
