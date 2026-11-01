@@ -13,7 +13,7 @@
 //!
 //! K1–K4 are the same as in the double-SSD, because:
 //! - K1 (`da_cumsum`, `da_chunk_end`) depends only on `da`.
-//! - K2 (`cb = C · Bᵀ`) uses the **unscaled** B / C. The single-ssd algorithm
+//! - K2 (`cb = C · Bᵀ`) uses the **unscaled** B / C. The single-ssd pathway
 //!   needs the unscaled CB to apply `scaleₜ` per column (lower triangular)
 //!   and to use the same-position block for the γ-correction.
 //! - K3 (chunk-end state from V·decay·K) does not depend on the form: with

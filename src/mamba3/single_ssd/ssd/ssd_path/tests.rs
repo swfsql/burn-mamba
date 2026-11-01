@@ -242,7 +242,7 @@ fn assert_path_runs_agree(label: &str, a: &PathRun, b: &PathRun, val_tol: f32, g
     check_inner!(d_init_state, "grad init_state", grad_tol);
     assert!(
         failures.is_empty(),
-        "single-ssd path mismatches:\n  {}",
+        "single-ssd SSD path mismatches:\n  {}",
         failures.join("\n  ")
     );
 }

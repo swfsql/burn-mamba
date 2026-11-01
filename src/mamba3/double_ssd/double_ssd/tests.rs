@@ -587,8 +587,8 @@ fn step_matches_forward_rotation_half_outproj_norm_mimo_random_init() {
 ///
 /// `step_matches_forward_random_init` already subsumes this (parity from an
 /// arbitrary initial state implies a `forward`-produced cache continues
-/// correctly); this is a direct, explicit check on the double-ssd path. A
-/// single `Minimal` config suffices: the three ssd-paths are proven equivalent
+/// correctly); this is a direct, explicit check on the double-ssd pathway. A
+/// single `Minimal` config suffices: the three SSD paths are proven equivalent
 /// among themselves in `double_ssd::ssd::ssd_path::tests`.
 fn run_split_matches_full(cfg: Mamba3Config) {
     let device = test_device();

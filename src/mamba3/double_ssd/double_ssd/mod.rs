@@ -40,8 +40,7 @@ use burn::prelude::*;
 // ---------------------------------------------------------------------------
 
 impl Mamba3 {
-    /// Process a full input sequence with the (double-ssd) trapezoidal
-    /// algorithm.
+    /// Process a full input sequence with the double-ssd pathway.
     ///
     /// For MIMO (mimo_rank>1), B/C have mimo_rank parallel rank channels. All
     /// ranks share the state, and each rank writes to it independently.

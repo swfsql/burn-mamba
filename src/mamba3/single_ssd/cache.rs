@@ -1,7 +1,7 @@
 //! # Mamba-3 Caches (single-SSD pathway)
 //!
 //! The cache of [`crate::mamba3::mamba3::Mamba3::forward_single_ssd`] (the
-//! single-pass SSD algorithm of the Triton SISO and Tilelang MIMO reference
+//! single-pass SSD pathway of the Triton SISO and Tilelang MIMO reference
 //! kernels). Its fields mirror those of
 //! [`Mamba3DoubleSsdCache`](crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCache),
 //! but `ssm_bhpr` holds the **accumulator**, which has different semantics
@@ -78,7 +78,7 @@ impl Mamba3SingleSsdCachesConfig {
 // Mamba3SingleSsdCache  (cache for a single layer)
 // ---------------------------------------------------------------------------
 
-/// The cache of one Mamba-3 layer that runs the single-ssd algorithm.
+/// The cache of one Mamba-3 layer that runs the single-ssd pathway.
 ///
 /// The fields and shapes match
 /// [`Mamba3DoubleSsdCache`](crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCache).

@@ -19,7 +19,7 @@
 //!
 //! ## Two SSD pathways
 //!
-//! Two interchangeable algorithms compute the trapezoidal recurrence. The
+//! Two interchangeable pathways compute the trapezoidal recurrence. The
 //! **cache variant** that the caller supplies selects one at runtime:
 //!
 //! - [`double_ssd`](crate::mamba3::double_ssd) — one standard SSD call per

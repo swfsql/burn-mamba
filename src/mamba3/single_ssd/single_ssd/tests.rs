@@ -51,7 +51,7 @@ fn cfg_real1d_scalar() -> Mamba3Config {
     cfg_real1d().with_state_rank(1)
 }
 
-/// Build a matched pair of initial caches for cross-algorithm parity
+/// Build a matched pair of initial caches for cross-pathway parity
 /// (`forward_double_ssd`/`step_double_ssd` use [`Mamba3DoubleSsdCache`];
 /// `forward_single_ssd` uses [`Mamba3SingleSsdCache`]).
 /// With `random = true` the state and cumulative rotation angle are random

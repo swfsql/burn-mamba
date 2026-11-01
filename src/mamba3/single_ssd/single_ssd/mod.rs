@@ -1,8 +1,8 @@
 //! # Mamba-3 — Single-Pass SSD Forward
 //!
 //! `forward_single_ssd` and `step_single_ssd` on
-//! [`Mamba3`](crate::mamba3::mamba3::Mamba3): the **official Mamba-3
-//! algorithm**, as in its Triton (SISO) and Tilelang (MIMO) kernels:
+//! [`Mamba3`](crate::mamba3::mamba3::Mamba3): the pathway of the **official
+//! Mamba-3 kernels**, Triton (SISO) and Tilelang (MIMO):
 //!
 //! ```text
 //!   scaleₜ = γₜ + νₜ₊ₗₐ₉ (+ νⁱⁿᵗₜ₊₁)
@@ -41,7 +41,7 @@ use burn::prelude::*;
 
 impl Mamba3 {
     /// Process a full input sequence with the **single-ssd (single-pass)**
-    /// trapezoidal algorithm.
+    /// pathway.
     ///
     /// Functionally equivalent to [`Self::forward_double_ssd`], with about half
     /// the SSD memory in training. The cache is a separate type
