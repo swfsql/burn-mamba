@@ -62,7 +62,7 @@ fn random_input(
         Distribution::Uniform(0.05, 0.5),
         device,
     );
-    // Random (general case) or zero (fresh-start) initial merged-form state
+    // Random (general case) or zero (fresh-start) initial accumulator
     // per `random_init`, covering the whole {zero, random} dimension.
     let initial_state = if random_init {
         Tensor::<4>::random(

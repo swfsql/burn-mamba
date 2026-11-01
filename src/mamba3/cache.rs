@@ -6,11 +6,11 @@
 //! [`Mamba3::step`](crate::mamba3::mamba3::Mamba3::step) selects the pathway
 //! at runtime. A missing cache selects `SingleSsd`.
 //!
-//! The SSM accumulators of the two pathways are different **mid-sequence**, so
-//! the cache types are distinct: this prevents a silent mix inside a chunked
-//! pass. They are equal at call boundaries, where caches are produced and
-//! consumed. So the `From` impls at the bottom convert between them by a
-//! lossless field-by-field move (see the note there).
+//! The accumulator of single-SSD and the state of double-SSD are different
+//! **mid-sequence**, so the cache types are distinct: this prevents a silent
+//! mix inside a chunked pass. They are equal at call boundaries, where caches
+//! are produced and consumed. So the `From` impls at the bottom convert
+//! between them by a lossless field-by-field move (see the note there).
 
 use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::single_ssd::prelude::*;

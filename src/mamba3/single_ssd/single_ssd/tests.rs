@@ -114,7 +114,7 @@ fn build_cross_caches(
 /// Build an initial [`Mamba3SingleSsdCache`] for the single-ssd form continuity test.
 /// With `random = true` *every* field (including the previous-token K/V
 /// history) is random, exercising forward_single_ssd continuation from an arbitrary
-/// single-ssd form state.
+/// accumulator.
 fn build_single_ssd_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3SingleSsdCache {
     let device = test_device();
     let nheads = cfg.nheads();
@@ -431,8 +431,8 @@ fn guard_random_init_consumed(
 /// initial state. With `random_init = true` the shared logical initial state
 /// is random (random state + cumulative rotation angle; zero previous-token
 /// history so the single-ssd and double-ssd forms coincide). The output and all
-/// parameter gradients must agree. The single-ssd cache SSM accumulator itself is
-/// not compared here (different semantics from the double-form state); the
+/// parameter gradients must agree. The accumulator of the single-ssd cache is
+/// not compared here (different semantics from the state); the
 /// single-ssd cache is compared in `run_forward_single_ssd_split_matches_full`.
 fn forward_match(cfg: Mamba3Config, ssd_path: Mamba3SsdPath, random_init: bool) {
     forward_match_tol(cfg, ssd_path, random_init, 1e-3);

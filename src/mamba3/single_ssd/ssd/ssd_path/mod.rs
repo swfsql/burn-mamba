@@ -50,7 +50,7 @@ pub struct Mamba3SingleSsdInput {
     /// Q/C tensor: the same processing as `b_bnlmhr`, but on the **read** axis
     /// of the chunk: one row per token, not per folded position.
     ///
-    /// Every micro-step of a token writes to the state. The token is read
+    /// Every micro-step of a token writes to the accumulator. The token is read
     /// once, at its last micro-step
     /// ([`micro_steps`](crate::mamba3::mamba3::Mamba3Config::micro_steps) is
     /// [`Self::read_stride`]). So `C` is necessary only there, and the `y` that
@@ -71,8 +71,8 @@ pub struct Mamba3SingleSsdInput {
     /// `γₜ = λₜ · Δₜ`: the per-token diagonal multiplier.
     ///
     /// On the **read** axis, like `c_bntmhr`: γ weights only the same-step term
-    /// of the output of a row (the state recurrence runs on `scale_bnlh`). So
-    /// the folded positions between the reads never use it.
+    /// of the output of a row (the recurrence of the accumulator runs on
+    /// `scale_bnlh`). So the folded positions between the reads never use it.
     ///
     /// # Shape
     /// - `[batch, nchunks, chunk_tokens, nheads]`
@@ -86,7 +86,7 @@ pub struct Mamba3SingleSsdInput {
     /// - `[batch, nchunks, chunk_len, nheads]`
     pub scale_bnlh: Tensor<4>,
 
-    /// Initial SSM hidden state (merged-form accumulator).
+    /// The initial accumulator.
     ///
     /// When the call continues a prior call, this must already hold the
     /// boundary β seed `Σⱼ νⱼ · Σₘ K_prev[j, m] ⊗ (x_prev[j] ⊙ mimo_xₘ)`. The
@@ -130,8 +130,8 @@ pub struct Mamba3SingleSsdInput {
     /// At a reset, no `ν` is paid forward across it. The chunk restarts from
     /// the origin state plus its own boundary seed (`seed_bnhpr`), as a call
     /// from the origin does. The call itself starts from
-    /// `initial_state_bhpr`. As without resets, that state holds the seed of
-    /// the call.
+    /// `initial_state_bhpr`. As without resets, that accumulator holds the
+    /// seed of the call.
     pub restarts: Option<crate::packing::Restarts>,
 
     /// The boundary β seed of each chunk, with resets: the installments that
@@ -170,7 +170,7 @@ impl Mamba3SingleSsdInput {
     /// - `y_bntmhp`: `[batch, nchunks, chunk_tokens, mimo_rank, nheads, per_head_dim]`
     ///   — token resolution, the readout's own (see [`Self::c_bntmhr`])
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]` —
-    ///   the merged-form accumulator at the last token (to be stored in the
+    ///   the accumulator at the last token (to be stored in the
     ///   cache for streaming).
     pub fn run(self, path: &Mamba3SsdPath) -> (Tensor<6>, Tensor<4>) {
         match path {

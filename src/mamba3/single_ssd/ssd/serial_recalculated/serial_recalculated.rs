@@ -7,7 +7,7 @@
 //! them (see [`super::backward`] / [`super::combined_backward`]). Unlike the
 //! double-SSD form, the kernels here apply the trapezoid `gamma`/`scale`
 //! themselves, so the backward also returns `d_gamma`/`d_scale`. (The caller
-//! folds the boundary-β seed into the initial state.)
+//! folds the boundary-β seed into the initial accumulator.)
 //!
 //! The default body runs under a generic backend `B`, where the high-level
 //! `Tensor` (pinned to `Dispatch`) is not available. So the K1–K5 math uses
@@ -114,8 +114,8 @@ pub trait Mamba3SingleSsdBackendExt: Backend {
     /// - `keep_bn`:            `[batch, nchunks]`, `0` at a chunk that starts
     ///   a new segment of a packed row. Read only when `resets` is `true`.
     /// - `origin_bhpr`:        `[batch, nheads, per_head_dim, state_rank]`, the
-    ///   state that such a chunk starts from (before its seed). Read only when
-    ///   `resets` is `true`.
+    ///   accumulator that such a chunk starts from (before its seed). Read only
+    ///   when `resets` is `true`.
     /// - `seed_bnhpr`:         `[batch, nchunks, nheads, per_head_dim,
     ///   state_rank]`, the boundary seed of each chunk (see
     ///   [`Mamba3SingleSsdInput::seed_bnhpr`]). Read only when `seeded` is

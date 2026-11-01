@@ -17,8 +17,8 @@
 //!   needs the unscaled CB to apply `scaleₜ` per column (lower triangular)
 //!   and to use the same-step block for the γ-correction.
 //! - K3 (chunk-end state from V·decay·K) does not depend on the form: with
-//!   the scaled K (`K_scaled = scaleₜ · B`) it gives the single-ssd chunk
-//!   state, with no other change.
+//!   the scaled K (`K_scaled = scaleₜ · B`) it gives the accumulator at each
+//!   chunk end, with no other change.
 //! - K4 (sequential state passing across chunks) uses a `[H, P, R]` per-chunk
 //!   state and a per-chunk decay total. Both do not depend on the form.
 //!
@@ -43,7 +43,7 @@ impl Mamba3SingleSsdInput {
     /// Sequence of kernels (matches the double-ssd `ssd_serial`):
     /// 1. **K1**: intra-chunk cumulative log-decay and per-chunk decay totals.
     /// 2. **K2**: `cb = C · Bᵀ` block matrix (unscaled).
-    /// 3. **K3**: per-chunk hidden state assuming zero initial state, fed
+    /// 3. **K3**: the accumulator at each chunk end, from a zero start, fed
     ///    `K_scaled = scaleₜ · B`.
     /// 4. **K4**: sequential state passing across chunks (loop over chunks).
     /// 5. **K5** (this module's new function): single-ssd chunk scan with
@@ -87,7 +87,7 @@ impl Mamba3SingleSsdInput {
 
         // ── K3: chunk state using K_scaled = scaleₜ · B ───────────────────────
         // The existing K3 computes `state = (V * decay)^T @ B_input`, so passing
-        // `B_input = K_scaled` recovers the single-ssd per-chunk state.
+        // `B_input = K_scaled` recovers the per-chunk accumulator.
         let scale_bnlh11 = input.scale_bnlh.clone().unsqueeze_dims::<6>(&[3, 5]);
         let k_scaled_bnlmhr = input.b_bnlmhr.clone() * scale_bnlh11;
         let intra_chunk_state_bnhpr: Tensor<5> = k3_ssd_chunk_state(

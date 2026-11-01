@@ -4,19 +4,20 @@
 //! single-pass SSD algorithm of the Triton SISO and Tilelang MIMO reference
 //! kernels). Its fields mirror those of
 //! [`Mamba3DoubleSsdCache`](crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCache),
-//! but the **SSM accumulator has different semantics** mid-sequence:
+//! but `ssm_bhpr` holds the **accumulator**, which has different semantics
+//! mid-sequence:
 //!
 //! - double-SSD: `ssm_bhpr` holds the trapezoidal state
 //!   `hₜ = αₜ hₜ₋₁ + βₜ Bₜ₋₁ ⊗ xₜ₋₁ + γₜ Bₜ ⊗ xₜ` (at the default lag 1).
-//! - single-SSD: `ssm_bhpr` holds the **trapezoid accumulator**
+//! - single-SSD: `ssm_bhpr` holds the **accumulator**
 //!   `h'ₜ = αₜ h'ₜ₋₁ + scaleₜ Bₜ ⊗ xₜ`, with
 //!   `scaleₜ = γₜ + νₜ₊ₗₐ₉ (+ νⁱⁿᵗₜ₊₁)`. With it, `yₜ = Cₜᵀ h'ₜ` is correct at
 //!   all positions except the `lag`-wide band before a tap is paid. The kernel
 //!   patches the diagonal (lag 1) with an explicit `γₜ · (Cₜᵀ Bₜ) · xₜ` term,
 //!   and `token_band` patches the wider band (lag `u`).
 //!
-//! The two states are equal at call boundaries, where caches are produced and
-//! consumed (see [`crate::mamba3::cache`]). Under
+//! The accumulator and the state are equal at call boundaries, where caches are
+//! produced and consumed (see [`crate::mamba3::cache`]). Under
 //! [`TapPattern::None`](crate::mamba3::tap_pattern::TapPattern::None) the difference
 //! disappears everywhere: `scaleₜ = γₜ`, so `h' ≡ h` at every position, and
 //! neither cache has tap slots.
@@ -74,17 +75,17 @@ impl Mamba3SingleSsdCachesConfig {
 }
 
 // ---------------------------------------------------------------------------
-// Mamba3SingleSsdCache  (state for a single layer)
+// Mamba3SingleSsdCache  (cache for a single layer)
 // ---------------------------------------------------------------------------
 
-/// The state of one Mamba-3 layer that runs the single-ssd algorithm.
+/// The cache of one Mamba-3 layer that runs the single-ssd algorithm.
 ///
 /// The fields and shapes match
 /// [`Mamba3DoubleSsdCache`](crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCache).
 /// The semantic difference is only in `ssm_bhpr` (see the module header).
 #[derive(Module, Debug)]
 pub struct Mamba3SingleSsdCache {
-    /// **Single-SSD SSM accumulator** `h'ₜ`.
+    /// **Accumulator** `h'ₜ`.
     ///
     /// Update rule: `h'ₜ = αₜ h'ₜ₋₁ + scaleₜ · sumₘ Bₜ[m] ⊗ (xₜ ⊙ mimo_xₘ)`.
     /// Mid-sequence, it is different from the double-ssd `ssm_bhpr`.

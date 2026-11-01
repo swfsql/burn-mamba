@@ -82,10 +82,10 @@ impl Mamba2CachesConfig {
 }
 
 // ---------------------------------------------------------------------------
-// Mamba2Cache  (state for a single layer)
+// Mamba2Cache  (cache for a single layer)
 // ---------------------------------------------------------------------------
 
-/// The state carried between calls for a **single** Mamba-2 layer.
+/// The cache that a **single** Mamba-2 layer carries between calls.
 ///
 /// Each call to [`Mamba2::step`] or [`Mamba2::forward`] returns a new cache
 /// with both tensors updated.

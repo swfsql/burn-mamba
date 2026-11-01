@@ -74,10 +74,10 @@ impl Mamba3DoubleSsdCachesConfig {
 }
 
 // ---------------------------------------------------------------------------
-// Mamba3DoubleSsdCache  (state for a single layer)
+// Mamba3DoubleSsdCache  (cache for a single layer)
 // ---------------------------------------------------------------------------
 
-/// The state carried between calls for a **single** Mamba-3 layer.
+/// The cache that a **single** Mamba-3 layer carries between calls.
 ///
 /// Each call to [`Mamba3::step`](crate::mamba3::mamba3::Mamba3::step) or
 /// [`Mamba3::forward`](crate::mamba3::mamba3::Mamba3::forward) returns a new

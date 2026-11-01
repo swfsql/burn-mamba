@@ -7,7 +7,7 @@
 //!   parentheses is the second installment of the two-tap members,
 //! - a strict lower-triangular intra-chunk mask,
 //! - a same-step γ correction,
-//! - a boundary-β seed, folded into the initial state.
+//! - a boundary-β seed, folded into the initial accumulator.
 //!
 //! It is one call for every tap pattern: every tap collapses into that one
 //! scalar per sample. Under the lag-`u` members the correction widens to a
@@ -15,12 +15,13 @@
 //!
 //! It uses ≈ half the training memory of the two-call
 //! [`double_ssd`](crate::mamba3::double_ssd) pathway, and less than a third of
-//! a three-call one. The SSM accumulator `h'` of its cache has **different
-//! mid-sequence semantics** from the double-SSD state (so the cache type is
+//! a three-call one. Its cache holds the accumulator `h'`, which has
+//! **different mid-sequence semantics** from the state (so the cache type is
 //! distinct). The two are equal at call boundaries and convert with
 //! field-identity `From` impls.
 
-/// The single-SSD cache (same fields as double-SSD, different `ssm` semantics).
+/// The single-SSD cache (same fields as double-SSD, but `ssm_bhpr` holds the
+/// accumulator).
 pub mod cache;
 /// `forward_single_ssd` (scale + boundary-β seed) and `step_single_ssd`.
 pub mod single_ssd;

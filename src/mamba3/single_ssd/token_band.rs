@@ -18,8 +18,8 @@
 //! ## Why the band never has to enter the kernel
 //!
 //! The band would cross chunk boundaries, and the part of it that arrived
-//! through the initial state of the chunk could not be un-weighted. But it
-//! does not have to enter the kernel. The only outputs of `forward` are at the
+//! through the accumulator at the start of the chunk could not be
+//! un-weighted. But it does not have to enter the kernel. The only outputs of `forward` are at the
 //! **last** micro-step of each token (the [read axis](crate::mamba3::product)
 //! of the chunk). For a read at folded position `p = τ·u + (u−1)`, the band
 //! `{p−u+1 … p}` is *exactly token `τ`*. So the correction is one small
@@ -38,9 +38,9 @@
 //!
 //! A correction of those positions too is possible, but not free. Their band
 //! reaches back over a token boundary. So part of it arrives through the
-//! initial state of the chunk (or, in the first token of the call, through the
-//! boundary β seed), already weighted by `scale`, where it cannot be
-//! un-weighted. This module does not pay that cost.
+//! accumulator at the start of the chunk (or, in the first token of the call,
+//! through the boundary β seed), already weighted by `scale`, where it cannot
+//! be un-weighted. This module does not pay that cost.
 //!
 //! ## The term
 //!
@@ -111,7 +111,7 @@ pub fn token_band_correction(
         .narrow(2, 0, taps);
     let weight_btJh = excess_btJh * decay_btJh;
 
-    // ── Fuse (tap, mimo_rank): both are outer products into one state ─────────
+    // ── Fuse (tap, mimo_rank): outer products into one accumulator ───────────
     let fused = taps * mimo_rank;
     let v_btJmhp = v_bsmhp
         .reshape([batch, tokens, u, mimo_rank, nheads, per_head_dim])

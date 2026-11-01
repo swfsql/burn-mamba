@@ -47,7 +47,7 @@
 //!   y        = y_lower + y_diag + y_off
 //!
 //!   h'_chunk_out = exp(da_cs_last) · h'_chunk_in
-//!                + K_scaled · exp(da_cs_rev)ᵀ · PsiV   // standard state update
+//!                + K_scaled · exp(da_cs_rev)ᵀ · PsiV   // accumulator update
 //! ```
 //!
 //! The MIMO causal mask is that of [`crate::mamba3::double_ssd::ssd::minimal`],
@@ -198,7 +198,7 @@ impl Mamba3SingleSsdInput {
             y_diag_bntmhp.reshape([batch, nchunks, read, nheads, per_head_dim]);
 
         // =============================================================
-        // STEP 2: Per-chunk single-ssd state (standard SSD with K_scaled)
+        // STEP 2: Per-chunk accumulator (standard SSD with K_scaled)
         //
         // s[n] = Σ_{t,m} exp(cumA[n,-1] - cumA[n,t]) · V[n,t*M+m] · K_scaled[n,t*M+m]^T
         // =============================================================

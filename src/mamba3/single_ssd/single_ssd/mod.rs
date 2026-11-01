@@ -45,8 +45,8 @@ impl Mamba3 {
     ///
     /// Functionally equivalent to [`Self::forward_double_ssd`], with about half
     /// the SSD memory in training. The cache is a separate type
-    /// ([`Mamba3SingleSsdCache`]), because its hidden state has different
-    /// semantics mid-sequence.
+    /// ([`Mamba3SingleSsdCache`]), because this pathway carries the
+    /// accumulator, which differs from the state mid-sequence.
     ///
     /// "Equivalent" covers **everything that a caller can observe**: the
     /// returned output and every field of the returned cache. It does not cover
@@ -68,7 +68,7 @@ impl Mamba3 {
     /// `pad_bt` marks a right-padded batch of tokens, as in [`Self::forward`].
     /// The last tap installment of a real position, which a padded position
     /// would pay, then stays in the tap slots, exactly as at a call boundary.
-    /// So `h'` holds the double-SSD state from the end of each slot on.
+    /// So the accumulator `h'` equals the state from the end of each slot on.
     ///
     /// # Shapes
     /// - `input_bsm`: `[batch, sequence, d_model]`
@@ -166,8 +166,8 @@ impl Mamba3 {
         };
         let mut cache = cache.unwrap_or_else(fresh);
         // A packed row: the cache that each segment starts from. At a call
-        // boundary, `h'` is the double-SSD state, so the fields convert as
-        // they are.
+        // boundary, the accumulator `h'` equals the state, so the fields
+        // convert as they are.
         let packed = segments.map(|segments| Packed {
             segments,
             origin: origin.unwrap_or_else(fresh).into(),
@@ -262,8 +262,8 @@ impl Mamba3 {
         //
         // Each shifted term is zero for the last positions that its own lag
         // reaches past: the taps that pay them belong to the *next* call, from
-        // the tap slots. This also makes `h'` equal to the double-SSD state at
-        // a cache boundary, hence the field-identity `From` impls.
+        // the tap slots. This also makes the accumulator `h'` equal to the
+        // state at a cache boundary, hence the field-identity `From` impls.
         //
         // `t+lag` is a later *folded* position: lag 1 is
         // [`TapPattern::HorizontalCarryOver`], lag `u` is [`TapPattern::Vertical`].
@@ -358,9 +358,9 @@ impl Mamba3 {
             packed.as_ref(),
         );
 
-        // ── Boundary β seed for initial state ─────────────────────────────────
+        // ── Boundary β seed for the initial accumulator ─────────────────────
         // Add Σⱼ νⱼ · Σₘ K_prev[j, m] ⊗ (x_prev[j] ⊙ mimo_xₘ) to the carried
-        // single-ssd SSM state. Cache slot `j` (oldest first) is the position
+        // accumulator. Cache slot `j` (oldest first) is the position
         // whose tap position `j` of this call pays, so it takes `νⱼ` from the
         // first `lag` positions of this call. `x_prev` already carries the
         // decay from its own position to the boundary, and `K_prev` its own
@@ -420,7 +420,7 @@ impl Mamba3 {
         let nu_head_buh = nu_heads_bnuh.clone().narrow(1, 0, 1).squeeze_dim::<3>(1);
         let v_prev_mimo_bumhp = v_prev_mimo_bumhp * nu_head_buh.unsqueeze_dims::<5>(&[2, 4]);
         // The seed contracts over the slots *and* the ranks (both are outer
-        // products into one state). So, fused, it is the same one
+        // products into one accumulator). So, fused, it is the same one
         // `mimo_outer_sum` that the per-token write uses.
         let boundary_seed_bhpr = helpers::mimo_outer_sum(
             v_prev_mimo_bumhp.reshape([batch, lag * mimo_rank, nheads, per_head_dim]),
@@ -659,9 +659,9 @@ mod step {
             cache: Option<Mamba3SingleSsdCache>,
         ) -> (Tensor<2>, Mamba3SingleSsdCache) {
             // Token-by-token decoding always uses the recurrent (double-ssd)
-            // form. A single-ssd cache holds the trapezoid state at a call
-            // boundary, where the single- and double-ssd accumulators are equal
-            // (see the `From` impls in `crate::mamba3::cache`). So the
+            // form. A single-ssd cache holds the accumulator at a call
+            // boundary, where the accumulator equals the state (see the `From`
+            // impls in `crate::mamba3::cache`). So the
             // conversion in and back out is lossless. One recurrence step is
             // itself a boundary-to-boundary transition, so the round trip stays
             // exact.

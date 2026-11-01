@@ -30,7 +30,8 @@
 //! - [`single_ssd`](crate::mamba3::single_ssd) — **one** SSD call in the
 //!   official-kernel form, for every tap pattern. It uses ≈ half the training
 //!   memory of the double pathway at the default, and less when there are more
-//!   taps. Its SSM accumulator has different semantics mid-sequence.
+//!   taps. It carries the accumulator, which differs from the state
+//!   mid-sequence.
 //!
 //! [`cache`](crate::mamba3::cache) holds the enum that selects the pathway.
 //! [`ssd_path`](crate::mamba3::ssd_path) selects the pathway-agnostic
