@@ -385,8 +385,9 @@ pub struct Mamba3 {
     /// Paper: `M`. Python: `mimo_rank`.
     pub mimo_rank: usize,
 
-    /// Recurrence micro-steps per token — DeltaProduct's `u`
-    /// (see [`Mamba3Config::micro_steps`] and [`crate::mamba3::product`]).
+    /// Micro-steps per token: the `u` of MambaProduct, the dial that
+    /// DeltaProduct turns (see [`Mamba3Config::micro_steps`] and
+    /// [`crate::mamba3::product`]).
     /// `1` is stock Mamba-3.
     pub micro_steps: usize,
 
@@ -927,7 +928,7 @@ pub struct Mamba3Config {
     #[config(default = 1)]
     pub mimo_rank: usize,
 
-    /// **MambaProduct**: recurrence micro-steps per token — DeltaProduct's `u`.
+    /// **MambaProduct**: micro-steps per token, the `u` of the DeltaProduct dial.
     /// `1` (the default) is stock Mamba-3, byte for byte.
     ///
     /// Each micro-step runs the full Mamba-3 recurrence with its own projected
