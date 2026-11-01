@@ -1,4 +1,4 @@
-//! # Single-Pass SSD (Minimal / segsum variant)
+//! # Single-Pass SSD (the `Minimal` SSD path, by segsum)
 //!
 //! The MIMO-first, single-pass SSD of the Mamba-3 trapezoid recurrence. It is
 //! the Burn analogue of the official Tilelang MIMO and Triton SISO kernels.
@@ -65,7 +65,7 @@ use burn_stack::modules::segsum;
 use burn::prelude::*;
 
 impl Mamba3SingleSsdInput {
-    /// MIMO-first single-SSD — segsum variant.
+    /// MIMO-first single-SSD — the `Minimal` SSD path (segsum).
     ///
     /// See module documentation for the algorithm. Returns the chunked outputs
     /// and the final single-ssd accumulator.

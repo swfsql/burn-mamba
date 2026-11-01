@@ -36,7 +36,7 @@ const HALF_GRAD_TOL: f32 = 5e-2;
 /// The tokens of each sequence of each row (the chunk is 4 or 8 tokens).
 const ROWS: [&[usize]; 2] = [&[5, 9, 1], &[12, 3]];
 
-/// The first row of each sequence, and the width of the rows.
+/// The first position of each sequence, and the width of the rows.
 fn starts(align: usize, lead: usize) -> (Vec<Vec<usize>>, usize) {
     let mut width = 0;
     let starts = ROWS

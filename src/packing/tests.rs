@@ -54,7 +54,7 @@ const STREAMS: [&[&[usize]]; 2] = [&[&[8, 7, 2]], &[&[5, 8, 3], &[9, 2, 0], &[1,
 /// of the chunk length ends each call inside a chunk.
 type Schedule = (usize, Option<usize>);
 
-/// A Mamba-2 conv tap reads `conv_kernel − 1 = 3` rows back, so its chunks
+/// A Mamba-2 conv tap reads `conv_kernel − 1 = 3` positions back, so its chunks
 /// hold at least 3 tokens.
 const MAMBA2_SCHEDULES: [Schedule; 4] = [(3, Some(6)), (4, Some(6)), (3, Some(5)), (4, None)];
 const MAMBA3_SCHEDULES: [Schedule; 4] = [(2, Some(6)), (3, Some(6)), (3, Some(5)), (2, None)];
@@ -652,9 +652,9 @@ fn reset_inside_a_chunk_panics() {
     let _ = block.forward_packed(x, None, None, Mamba2SsdPath::Serial(Some(4)), None, Some(reset));
 }
 
-/// A Mamba-2 conv tap reads `conv_kernel − 1` rows back, and only the first
-/// chunk of a segment checks for a restart. So a packed call refuses a chunk
-/// that holds fewer rows.
+/// A Mamba-2 conv tap reads `conv_kernel − 1` positions back, and only the
+/// first chunk of a segment checks for a restart. So a packed call refuses a
+/// chunk that holds fewer positions.
 #[test]
 #[should_panic(expected = "a packed call needs chunk_len")]
 fn packed_mamba2_chunk_shorter_than_the_conv_panics() {

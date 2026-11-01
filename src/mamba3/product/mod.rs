@@ -128,9 +128,9 @@
 //! recurrence one `mimo_outer_sum`. So a decode step costs the same number of
 //! kernel launches at every `u`.
 //!
-//! Everything else is per micro-step, including the decay. Mamba has no decay
-//! separate from its step size: `α = exp(ΔA)`, and `Δ` also weights the
-//! write and paces the rotation. So the "forget gate on micro-step 0" of
+//! Everything else is per micro-step, including the decay. In Mamba, the decay
+//! is not a control of its own: it comes from the step size (`α = exp(ΔA)`),
+//! and `Δ` also weights the write and paces the rotation. So the "forget gate on micro-step 0" of
 //! DeltaProduct has no faithful analogue here. `α ≡ 1` on the interior
 //! micro-steps would also stop the rotation. A scalar decay composes either way
 //! (`∏ⱼ αₜ,ⱼ` is one decay per token), so the uniform placement costs nothing
@@ -215,11 +215,11 @@ pub fn unfold_micro_b(t_bW: Tensor<2>, micro_steps: usize) -> Tensor<3> {
 /// - out      : `[batch, sequence, nheads, per_head_dim]`
 #[allow(non_snake_case)]
 pub fn last_micro4(t_bShp: Tensor<4>, micro_steps: usize) -> Tensor<4> {
-    let [batch, folded, nheads, per_head_dim] = t_bShp.dims();
+    let [batch, write_len, nheads, per_head_dim] = t_bShp.dims();
     if micro_steps == 1 {
         return t_bShp;
     }
-    let sequence = folded / micro_steps;
+    let sequence = write_len / micro_steps;
     t_bShp
         .reshape([batch, sequence, micro_steps, nheads, per_head_dim])
         .narrow(2, micro_steps - 1, 1)

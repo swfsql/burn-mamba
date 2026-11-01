@@ -156,9 +156,10 @@ const CADENCE: Cadence = Cadence {
     valid_batches: Some(10),
 };
 
-/// Train `trainer` for (the rest of) one epoch, one training step per batch. It saves
-/// checkpoints and validates at the cadence of the `session`. It stops early at
-/// the end of the session budget (`--max-batches` / `--max-seconds`).
+/// Train `trainer` for (the rest of) one epoch, one training step per batch.
+/// It saves checkpoints and validates at the cadence of the `session`. It
+/// stops early at the end of the session budget (`--max-batches` /
+/// `--max-seconds`).
 #[allow(clippy::too_many_arguments)]
 pub fn epoch_train(
     dataloader_train: Dataloader,

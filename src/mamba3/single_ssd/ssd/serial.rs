@@ -1,7 +1,7 @@
 //! # Single-SSD Serial (K1–K5) SSD
 //!
 //! Chunk-serial counterpart of [`crate::mamba3::single_ssd::ssd::minimal`].
-//! The Minimal variant uses a segsum-based quadratic state passing. This one
+//! The `Minimal` SSD path uses a segsum-based quadratic state passing. This one
 //! uses the K1–K4 helpers of [`crate::mamba3::double_ssd::ssd::serial`] (with a
 //! sequential loop for K4), and adds its own K5 with the single-ssd logic:
 //!
@@ -38,7 +38,7 @@ use crate::mamba3::single_ssd::ssd::diag::y_diag_correction;
 use burn::prelude::*;
 
 impl Mamba3SingleSsdInput {
-    /// MIMO-first Single-SSD — chunk-serial (K1–K5) variant.
+    /// MIMO-first Single-SSD — the `Serial` SSD path (chunk-serial, K1–K5).
     ///
     /// Sequence of kernels (matches the double-ssd `ssd_serial`):
     /// 1. **K1**: intra-chunk cumulative log-decay and per-chunk decay totals.

@@ -705,16 +705,16 @@ impl Mamba2 {
     /// `reset_bs` (`[batch, sequence]`, `true` at the first position of a
     /// segment) marks each start. It must be at the first position of a chunk
     /// (every `chunk_len` positions), and `chunk_len` must be at least
-    /// `conv_kernel − 1`.
-    /// The positions before the first reset of a row continue from `cache`, as
-    /// in [`Self::forward`]. So a sequence can continue from the previous call.
-    /// A segment can end with padded positions (`pad_bs`) up to the next start. The
-    /// result for each sequence is that of its own `forward` calls from
+    /// `conv_kernel − 1`. The positions before the first reset of a row
+    /// continue from `cache`, as in [`Self::forward`]. So a sequence can
+    /// continue from the previous call.
+    /// A segment can end with padded positions (`pad_bs`) up to the next start.
+    /// The result for each sequence is that of its own `forward` calls from
     /// `origin`. The returned cache is that of the last segment of each row.
     /// `origin` has no effect without resets. See [`crate::packing`].
     ///
-    /// At a start, the conv reads the window of `origin` in place of the rows
-    /// before it, and the SSD carry between chunks restarts from the state of
+    /// At a start, the conv reads the window of `origin` in place of the
+    /// positions before it, and the SSD carry between chunks restarts from the state of
     /// `origin`. Only [`Mamba2SsdPath::Serial`] and
     /// [`Mamba2SsdPath::SerialRecalculated`] take resets.
     #[allow(non_snake_case)]

@@ -403,7 +403,7 @@ fn horizon_is_inert_without_autodiff() {
 /// The loss weights the output and every final cache tensor by a fixed random
 /// head, so a sign or ordering error cannot cancel out the way a plain `sum`
 /// would let it.
-fn run_chunked_parity(horizon: Option<GradHorizon>) {
+fn run_split_parity(horizon: Option<GradHorizon>) {
     let device = test_device().autodiff();
     let (n_real, n_virtual) = (2, 6);
     // Split on a chunk boundary (`path()` uses chunk_len 4) so the two runs do
@@ -495,16 +495,16 @@ fn run_chunked_parity(horizon: Option<GradHorizon>) {
 /// Control: the parity must already hold without a horizon, so a failure under
 /// one is attributable to the cut rather than to the harness.
 #[test]
-fn chunked_forward_matches_single_forward() {
-    run_chunked_parity(None);
+fn split_forward_matches_single_forward() {
+    run_split_parity(None);
 }
 
 /// The same parity with the stack cut: the prefix caches round-trip through the
 /// inner backend between calls, the suffix caches carry gradient across the
 /// boundary, and the result must be indistinguishable from one long call.
 #[test]
-fn chunked_forward_matches_single_forward_under_horizon() {
-    run_chunked_parity(Some(GradHorizon::last(2, 6)));
+fn split_forward_matches_single_forward_under_horizon() {
+    run_split_parity(Some(GradHorizon::last(2, 6)));
 }
 
 // ===========================================================================
@@ -672,7 +672,7 @@ fn stepped_prefix_parameters_get_no_gradient() {
 ///
 /// `prime` opens with no user token at all, so the two interesting shapes are a
 /// latent **above** the cut (every layer below it runs on an empty stream and is
-/// skipped entirely) and one **below** it (the emitted row is created on the
+/// skipped entirely) and one **below** it (the emitted latent is created on the
 /// inner backend and has to be lifted at the boundary before any tracked layer
 /// touches it — without that lift the tracked half meets an inner tensor and
 /// Burn panics on a backend mismatch).
@@ -726,7 +726,7 @@ fn run_prime_cut(latent_layer: usize) {
         "the top layer lost its gradient (latent on layer {latent_layer})",
     );
     // The latent itself trains from either side of the cut — below it that is
-    // the cascade's ghost row doing the work.
+    // the ghost latent of the cascade doing the work.
     assert!(
         layers.real_layers[latent_layer]
             .class_latents_emb
@@ -745,7 +745,7 @@ fn prime_under_a_cut_with_a_latent_above_it() {
     run_prime_cut(3);
 }
 
-/// Latent below the cut: the row is created on the inner backend and has to
+/// Latent below the cut: its position is created on the inner backend and has to
 /// cross the boundary before any tracked layer sees it.
 #[test]
 fn prime_under_a_cut_with_a_latent_below_it() {
@@ -863,7 +863,7 @@ fn a_cut_changes_gradients_only() {
 ///
 /// Two things ride on that. The lengths must agree or the boundary add fails
 /// outright; and the ghost is what keeps the latent itself trainable, since it is
-/// a learnable *input row* rather than part of the layer's transform. The layer's
+/// a learnable *input position* rather than part of the layer's transform. The layer's
 /// actual weights stay undifferentiated, which is what the last assertion
 /// separates.
 #[test]
@@ -876,7 +876,7 @@ fn the_carry_tracks_class_latents_spliced_below_the_cut() {
 
     let mut layers = LayersBuilder::new(n, block_config(D_MODEL)).init(&device);
     layers.grad_horizon = Some(GradHorizon::last(k, n));
-    // Two prefix layers each splice a row, so the boundary sequence is longer
+    // Two prefix layers each splice a position, so the boundary sequence is longer
     // than the input by two.
     for i in 0..(n - k) {
         layers.real_layers[i].class_latents = vec![ClassLatent::Start];
@@ -886,7 +886,7 @@ fn the_carry_tracks_class_latents_spliced_below_the_cut() {
     let x = input(&device).require_grad();
     let mut class = ClassCursors::new(SEQ);
     let (y, _) = layers.forward(x.clone(), None, path(), Some(&mut class), None);
-    assert_eq!(y.dims()[1], SEQ + (n - k), "each prefix layer splices one row");
+    assert_eq!(y.dims()[1], SEQ + (n - k), "each prefix layer splices one position");
 
     let grads = y.sum().backward();
     assert!(
@@ -902,7 +902,7 @@ fn the_carry_tracks_class_latents_spliced_below_the_cut() {
                 .val()
                 .grad(&grads)
                 .is_some(),
-            "prefix layer {i}'s class latent is a learnable input row and must \
+            "prefix layer {i}'s class latent is a learnable input position and must \
              train — a dead parameter here would be silent",
         );
         assert!(

@@ -25,7 +25,7 @@ use burn_stack::modules::segsum;
 use burn::prelude::*;
 
 impl Mamba3DoubleSsdInput {
-    /// MIMO-first chunkwise SSD — minimal/segsum variant.
+    /// MIMO-first chunkwise SSD — the `Minimal` SSD path (segsum).
     ///
     /// The four-step decomposition for the MIMO (double-ssd) trapezoidal
     /// recurrence. SISO (mimo_rank=1) is the degenerate case where the fused

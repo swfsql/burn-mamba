@@ -144,7 +144,7 @@ fn kept_reads<const D: usize>(t: Tensor<D>, dim: usize, stride: usize) -> Tensor
     )
 }
 
-/// [`kept_reads`]' transpose: put each row back where it came from, zero between.
+/// [`kept_reads`]' transpose: put each read back where it came from, zero between.
 fn scatter_reads<const D: usize>(t: Tensor<D>, dim: usize, stride: usize) -> Tensor<D> {
     let dims = t.dims();
     let device = t.device();

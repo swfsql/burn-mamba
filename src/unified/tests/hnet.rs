@@ -208,8 +208,8 @@ fn mamba3_padded_rows_match_each_row_alone() {
     }
 }
 
-/// The scoped Muon plan fits the real weights of every stack (a Muon training step
-/// panics on a column layout of the wrong width), and it gives the fused
+/// The scoped Muon plan fits the real weights of every stack (a Muon training
+/// step panics on a column layout of the wrong width), and it gives the fused
 /// `in_proj` of each stack to Muon.
 #[cfg(all(feature = "mamba2", feature = "mamba3", feature = "optim"))]
 #[test]

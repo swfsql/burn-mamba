@@ -107,7 +107,7 @@ pub fn train(
 #[derive(Clone, Debug)]
 pub struct Run {
     /// The SSD paths of every chunkwise `forward`: (the stages, the main
-    /// network), from `--ssd-path` and `--main-ssd-path`.
+    /// stack), from `--ssd-path` and `--main-ssd-path`.
     pub paths: (MambaSsdPath, MambaSsdPath),
     /// `--max-vram`, in MiB: the cap of [`vram`], with its cleanups.
     pub max_vram_mib: Option<u64>,

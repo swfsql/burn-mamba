@@ -193,7 +193,7 @@ cargo run --release --example mnist-class --features "backend-cuda" -- --trainin
 cargo run --example reset-spinor --features "backend-flex" -- --training -- --rotation complex
 cargo run --example reset-spinor --features "backend-flex" -- -- --help
 
-# the per-step and per-validation metrics of every run so far, one JSON object per line:
+# the metrics of each training step and each validation of every run so far, one JSON object per line:
 jq -c 'select(.event == "valid")' "$ARTIFACTS/metrics.jsonl"
 
 # assume /some/path/ contains a different training config file, e.g. with a different LR schedule:

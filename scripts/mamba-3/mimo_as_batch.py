@@ -383,7 +383,7 @@ for t in range(T):
     gram = np.einsum("in,mn->im", C[t], B[t])
     gram_raw = np.einsum("in,mn->im", C_raw[t], B_raw[t])
     err_gram = max(err_gram, np.max(np.abs(gram - gram_raw)))
-ok("shared rotation: every one of the M^2 same-step read/write Grams is time-invariant",
+ok("shared rotation: every one of the M^2 same-position read/write Grams is time-invariant",
    err_gram < 1e-11)
 ok("cross-token Grams do move — that is where the accumulated rotation shows up",
    not close(C[5] @ B[1].T, C_raw[5] @ B_raw[1].T, 1e-3))

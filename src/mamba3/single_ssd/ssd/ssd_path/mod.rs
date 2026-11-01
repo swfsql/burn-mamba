@@ -5,7 +5,7 @@
 //! [`Mamba3SingleSsdInput`] of this module runs **one** merged SSD pass that
 //! absorbs all terms: it scales `K` by `scaleₜ = γₜ + νₜ₊ₗₐ₉ (+ νⁱⁿᵗₜ₊₁)`. The
 //! diagonal contribution is different (it must use `γₜ`, not
-//! `scaleₜ`), and an explicit correction term inside each variant patches it.
+//! `scaleₜ`), and an explicit correction term inside each SSD path patches it.
 //!
 //! Reference kernels, in `state-spaces/mamba`:
 //! - `mamba_ssm/ops/triton/mamba3/mamba3_siso_fwd.py`

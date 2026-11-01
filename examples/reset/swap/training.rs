@@ -152,9 +152,9 @@ type Dataloader = std::sync::Arc<dyn DataLoader<ResetSwapBatch> + 'static>;
 pub type ClassTrainer =
     Trainer<MambaLatentNet, (Tensor<3>, Tensor<2, Int>), (Tensor<2>, Tensor<1, Int>)>;
 
-/// Train `trainer` for (the rest of) one epoch, one training step per batch. It saves
-/// checkpoints and validates (on `valid_loaders`) at the cadence of the
-/// `session`. It stops early at the end of the session budget
+/// Train `trainer` for (the rest of) one epoch, one training step per batch.
+/// It saves checkpoints and validates (on `valid_loaders`) at the cadence of
+/// the `session`. It stops early at the end of the session budget
 /// (`--max-batches` / `--max-seconds`).
 #[allow(clippy::too_many_arguments)]
 pub fn epoch_train(

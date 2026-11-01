@@ -59,7 +59,7 @@ impl Mamba3 {
     /// which also tells why that band never has to enter the kernel.
     ///
     /// Under [`TapPattern::None`] there is no second pass to fuse. The composite
-    /// key scale is `γ`, and the γ correction is the whole diagonal. So
+    /// key scale is `γ`, and the γ-correction is the whole diagonal. So
     /// this *is* the double-SSD form (`h' ≡ h` at every position, not only at
     /// boundaries), and the call delegates to `forward_double_ssd`. It does not
     /// run a strict-mask kernel plus a correction that puts back what the mask
@@ -270,7 +270,7 @@ impl Mamba3 {
         // This is the `Δ̃` collapse (`info/mamba-3/trapezoid-as-integration.md`
         // §5). The collapse theorem of §9 is why it holds unchanged for the
         // wider lag and for a second tap: still one scalar per sample, so one
-        // pass. Only the γ correction widens from the diagonal to a
+        // pass. Only the γ-correction widens from the diagonal to a
         // `lag`-wide band (see [`crate::mamba3::single_ssd::token_band`]).
         let lag = self.tap_lag();
         // νₜ₊ₗ, the mass that a later position pays to this one. Zero past the

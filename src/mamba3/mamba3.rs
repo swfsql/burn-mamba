@@ -482,7 +482,7 @@ impl Mamba3 {
     }
 
     /// Width of the trailing rotation sub-projections of the in-projection:
-    /// the per-step [`Self::num_rotation_channels`] once per micro-step,
+    /// the [`Self::num_rotation_channels`] of one micro-step, once per micro-step,
     /// because each micro-step turns the state by its own rotation.
     pub fn rotation_channels_total(&self) -> usize {
         self.micro_steps * self.num_rotation_channels

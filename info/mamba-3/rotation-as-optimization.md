@@ -600,13 +600,11 @@ per token or per micro-step:
 
 The ridge gradient step is per token, because the `u` corrective gradient
 steps share one interval (§7). `β` is per micro-step, because there are `u` of
-them. The two
-are independent. The phase of the decay acts on every plane, and the phase of
-the erase acts only in the plane that its own key spans. So for `n ≥ 2`, no
+them. The two are independent. The phase of the decay acts on every plane, and
+the phase of the erase acts only in the plane that its own key spans. So for `n ≥ 2`, no
 single decay phase with a real erase step `β` can reproduce a token with two
 erase phases. Each phase already uses an existing step size at the correct
-rate, so
-neither needs a configuration knob.
+rate, so neither needs a configuration knob.
 
 The ladder `ℝ ⊂ ℂ ⊂ ℍ` is uniform. This is worth a record, because it is why
 the rotation code of the crate has no branches:

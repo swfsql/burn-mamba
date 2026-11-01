@@ -27,8 +27,8 @@ const STAGE_STATE_RANK: usize = 32;
 /// The state rank of the blocks of the main stack.
 const MAIN_STATE_RANK: usize = 64;
 
-/// The target mean chunk length of each stage, in positions of its own input. At
-/// stage 0 that is characters: about a short word.
+/// The target mean chunk length of each stage, in positions of its own input.
+/// At stage 0 that is characters: about a short word.
 const RATIO_TARGETS: [f64; 2] = [4.0, 2.0];
 
 /// The learnable start embeddings that open every story (see
@@ -37,8 +37,8 @@ const RATIO_TARGETS: [f64; 2] = [4.0, 2.0];
 const N_START_EMBEDDINGS: usize = 4;
 
 /// `α`, ten times the reference value. Early in training, the encoders of a
-/// model this small make adjacent positions similar, and the router starts almost
-/// no chunk. The reference weight is then too weak to bring the chunks back.
+/// model this small make adjacent positions similar, and the router starts
+/// almost no chunk. The reference weight is then too weak to bring the chunks back.
 const RATIO_WEIGHT: f64 = 0.3;
 
 /// The H-Net and its training recipe: what a run saves as its model config.
@@ -53,7 +53,7 @@ pub struct HNetStoriesConfig {
     #[config(default = 0.03)]
     pub ratio_weight: f64,
     /// `λˢ`: the learning-rate multiplier of each stage, then of the main
-    /// network. The embedding and the heads take that of stage 0.
+    /// stack. The embedding and the heads take that of stage 0.
     pub lr_multipliers: Vec<f64>,
 }
 
@@ -75,7 +75,7 @@ impl ModelConfigExt for HNetStoriesConfig {
 /// ```
 ///
 /// A stage sees `Πᵢ Nⁱ` times more positions per training step than the main
-/// network: a larger effective batch. It is also narrower, which allows a
+/// stack: a larger effective batch. It is also narrower, which allows a
 /// larger rate per unit of width.
 pub fn lr_multipliers(widths: &[usize], main_width: usize, targets: &[f64]) -> Vec<f64> {
     let mut multipliers: Vec<f64> = (0..widths.len())
@@ -105,7 +105,7 @@ fn mamba3(d: usize, state_rank: usize) -> MambaBlockConfig {
 ///
 /// The layout follows the reference at a tiny size, with Mamba-3 in every
 /// stack. The reference has Mamba-2 in the stages and attention in the main
-/// network. The stacks at character resolution are short and block-only. The
+/// stack. The stacks at character resolution are short and block-only. The
 /// main stack is deeper and has a SwiGLU MLP. Every stack takes the
 /// reference init (`N(0, 0.02)`, with the residual rescale over the stacks
 /// down to it).

@@ -51,16 +51,16 @@ fn unfold_reads_micro_steps_in_order() {
 #[test]
 fn last_micro_takes_the_read_position() {
     let device = test_device();
-    let folded = Tensor::<1, burn::tensor::Int>::arange(0..12, &device)
+    let writes = Tensor::<1, burn::tensor::Int>::arange(0..12, &device)
         .float()
         .reshape([1, 12, 1, 1]);
-    let back = last_micro4(folded.clone(), MICRO);
+    let back = last_micro4(writes.clone(), MICRO);
     assert_eq!([1, 4, 1, 1], back.dims());
     let want = Tensor::<1>::from_floats([2., 5., 8., 11.], &device).reshape([1, 4, 1, 1]);
     assert_eq!(0.0, max_abs_diff(back, want));
     // The same positions `crate::mamba3::helpers::read_positions` slices out.
-    let rows = crate::mamba3::helpers::read_positions::<4, 5>(folded, 1, MICRO);
-    assert_eq!([1, 4, 1, 1], rows.dims());
+    let reads = crate::mamba3::helpers::read_positions::<4, 5>(writes, 1, MICRO);
+    assert_eq!([1, 4, 1, 1], reads.dims());
 }
 
 // ---------------------------------------------------------------------------

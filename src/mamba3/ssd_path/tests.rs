@@ -31,8 +31,8 @@ fn mimo_rank_divides_the_chunk() {
     assert_eq!(opt(8), 32);
 }
 
-/// `micro_steps` subdivides the chunk instead of shortening it: the folded
-/// width stays put (to within one token) and the token count carries the `u`.
+/// `micro_steps` subdivides the chunk instead of shortening it: the write
+/// length stays put (to within one token) and the token count carries the `u`.
 #[test]
 fn micro_steps_subdivides_the_chunk() {
     let base = Mamba3SsdPath::optimal_chunk_len(128, 64, 1, 1);

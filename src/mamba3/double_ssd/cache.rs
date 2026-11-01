@@ -1,6 +1,6 @@
 //! # Mamba-3 Caches (double-SSD pathway)
 //!
-//! The state that the block keeps between calls:
+//! The cache that the block keeps between calls:
 //!
 //! 1. **State**: `hₜ ∈ ℝ^{per_head_dim×state_rank}` per head, the
 //!    compressed context.

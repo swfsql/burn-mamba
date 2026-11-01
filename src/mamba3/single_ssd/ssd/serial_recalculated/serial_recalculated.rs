@@ -210,7 +210,7 @@ burn_stack::impl_backend_ext_for_burn_backends!(Mamba3SingleSsdBackendExt);
 // the strict-lower intra-chunk (LOWER), the γ-weighted diagonal (DIAG), and the
 // state-to-output (BLUE/Y_off) contributions. Forward-only; the backward
 // computes these gradients analytically. K1–K4 are reused from the double-SSD
-// forward (mode-agnostic).
+// forward (they do not depend on the pathway).
 
 /// SingleSsd chunk scan, on primitives.
 ///

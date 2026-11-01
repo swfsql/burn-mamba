@@ -211,7 +211,7 @@ ok("h_t = sum_s decay * w_s * v_s, with w_s = Dtil_s for s < t and gamma_t at s 
    all(close(reconstruct(t), H[t]) for t in range(T)))
 
 # Dtil is exactly the single-SSD composite key scale (single_ssd/ssd/diag.rs:
-# "scale_t = gamma_t + (1-lam_{t+1}) dt_{t+1}"), and the same-step gamma-correction
+# "scale_t = gamma_t + (1-lam_{t+1}) dt_{t+1}"), and the diagonal gamma-correction
 # is exactly the s = t entry above. The decomposition is not a curiosity; it is
 # what that pathway implements.
 ok("Dtil_s == the implementation's composite key scale gamma_s + (1-lam_{s+1}) dt_{s+1}",
@@ -487,7 +487,7 @@ for name, taps in LATTICE.items():
        all(close(collapse_taps(taps, t), Hx[t], 1e-9) for t in range(TF)))
 
 # For the vertical pattern the collapse gives the same composite key scale with
-# the index shifted from s+1 to s+u, and the same-step gamma-correction widens
+# the index shifted from s+1 to s+u, and the diagonal gamma-correction widens
 # from the diagonal to a u-wide band.
 Hv = run_taps(LATTICE["vertical (lag u)"])
 scale = gam_l.copy()
@@ -502,7 +502,7 @@ band = np.array([[(scale[s] - gam_l[s]) if (s <= t and t - s < U) else 0.0
 glob = np.array([[scale[s] if s <= t else 0.0 for s in range(TF)] for t in range(TF)])
 ok("global scaling minus a u-wide band correction gives the exact weights",
    close(glob - band, w_exact))
-ok("at u = 1 that band is the diagonal, i.e. the same-step correction of lag 1",
+ok("at u = 1 that band is the diagonal, i.e. the diagonal correction of lag 1",
    all(band[t, s] == 0.0 for t in range(TF) for s in range(TF) if s <= t and t - s >= U))
 
 Hh = run_taps(LATTICE["carry-over-horizontal (the default)"])
@@ -558,8 +558,7 @@ ok("reset-horizontal is carry-over-horizontal with lam = 1 at each token's start
    close(run_taps(*CRATE["HorizontalReset"]),
          run_taps([(1, (1 - lam_reset) * dtp, en_all)], lam_reset * dtp)))
 
-# ...and the always-open two-tap member is the *join* of the two implemented
-# ones:
+# ...and the always-open two-tap member is the *join* of the two implemented ones:
 # mu is a per-(head, micro-step) interpolation between them, not a third model.
 taps_c, _ = CRATE["VerticalPlusHorizontalCarryOver"]
 for label, m, target in [("mu = 1 is carry-over-horizontal", np.ones(TF), Hh),

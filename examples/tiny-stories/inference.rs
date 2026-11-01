@@ -278,7 +278,8 @@ fn open(
 const PREFILL_WINDOW: usize = 256;
 
 /// A [`Prefill`] of `model` in windows of [`PREFILL_WINDOW`], captured unless
-/// `--no-graph`. Hold it across prompts: they share its opening and its graph.
+/// `--no-graph`. Hold it across prompts: they share its opening and its
+/// recording.
 pub fn prefill<'a>(model: &'a MambaVocabNet, run: &Run, device: &Device) -> Prefill<'a, MambaCaches> {
     let ssd_path = run.ssd_path.clone();
     // Safety: the window reads only its arguments, `model` (borrowed for as long

@@ -92,13 +92,13 @@ impl Mamba3SsdPath {
         micro_steps: usize,
     ) -> usize {
         let micro_steps = micro_steps.max(1);
-        let write_len = (state_rank * per_head_dim)
+        let chunk_len = (state_rank * per_head_dim)
             .isqrt()
             .div_ceil(mimo_rank.max(1)) // the fused read axis is `chunk_tokens · m`.
             .next_multiple_of(32) // rule-of-thumb: common plane dimension.
             .clamp(32, 512); // rule-of-thumb: one plane minimum, ceiling at 512.
-        // A whole number of tokens per chunk, at (very nearly) that write length.
-        write_len.div_ceil(micro_steps) * micro_steps
+        // A whole number of tokens per chunk, at (very nearly) that chunk length.
+        chunk_len.div_ceil(micro_steps) * micro_steps
     }
 
     /// Tokens per chunk: `chunk_len / micro_steps`, the **read** axis of the

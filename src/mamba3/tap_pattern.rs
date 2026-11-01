@@ -100,7 +100,7 @@ pub enum TapPattern {
     ///   product.
     ///
     /// The two SSD pathways are the same here. With no second pass to fuse, the
-    /// composite key scale of single-SSD is `γ`, and its γ correction is the
+    /// composite key scale of single-SSD is `γ`, and its γ-correction is the
     /// whole diagonal. So
     /// [`forward_single_ssd`](crate::mamba3::mamba3::Mamba3::forward_single_ssd)
     /// runs the double-SSD code, and the caches convert by field identity at
@@ -142,7 +142,7 @@ pub enum TapPattern {
     /// - the tap is transported across its own `u`-position gap,
     /// - the tap buffer of the cache becomes a `u`-deep FIFO (exactly the
     ///   previous token),
-    /// - the single-SSD γ correction widens from the diagonal to a
+    /// - the single-SSD γ-correction widens from the diagonal to a
     ///   `u`-wide band. At the only positions whose output survives
     ///   (`j = u−1`), that band is **exactly the token**. So it is one small
     ///   intra-token contraction outside the chunked kernel, not a wider mask

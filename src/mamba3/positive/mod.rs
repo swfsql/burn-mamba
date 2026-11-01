@@ -1,4 +1,4 @@
-//! # Positive systems that set the gain
+//! # Positive systems that set coefficients of the plant
 //!
 //! A Mamba-3 head is a linear **parameter-varying** plant. Its transition,
 //! write and read are linear in the state, with coefficients `ρₜ = g(uₜ)` that
@@ -68,8 +68,7 @@
 //! - **a contraction:** for `q, γ > 0` the matrix is entrywise positive. By
 //!   Birkhoff's theorem, it contracts the Hilbert distance `|ln Λ − ln Λ'|` by
 //!   at least `tanh(¼·ln(1 + 1/(q·γ)))` per micro-step, with no `α` in the
-//!   bound. So
-//!   the block forgets the initial `Λ` of the cache, and any rounding in it,
+//!   bound. So the block forgets the initial `Λ` of the cache, and any rounding in it,
 //!   geometrically.
 //!
 //! The block also reads through `(Λₜ + ε)^(−ωₕ)` (`ω = 0` at init). `ω = 1`
