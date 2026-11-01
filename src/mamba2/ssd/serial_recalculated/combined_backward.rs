@@ -42,7 +42,7 @@ pub struct CombinedGrads<B: Backend> {
     pub d_c_bnlhr: F<B, 5>,
     /// Gradient of the per-head skip term `D`.
     pub d_d_h: F<B, 1>,
-    /// Gradient of the initial SSM state.
+    /// Gradient of the initial state.
     pub d_initial_state_bhpr: F<B, 4>,
     /// Gradient of the origin state of the resets (`None` without resets).
     pub d_origin_bhpr: Option<F<B, 4>>,
@@ -123,7 +123,7 @@ pub fn k3_ssd_chunk_state_extended<B: Backend>(
 ///
 /// # Arguments
 /// - `d_y_bnlhp` — upstream gradient of the SSD output
-/// - `d_final_bhpr` — upstream gradient of the final SSM state
+/// - `d_final_bhpr` — upstream gradient of the final state
 /// - `x_bnlhp`, `dt_discretized_bhnl`, `b_bnlhr`, `c_bnlhr`, `d_h`,
 ///   `initial_state_bhpr`, `a_decay_h` — the seven saved forward inputs
 /// - `restarts` — `(keep_bn, origin_bhpr)`, or `None`. `keep_bn` is the

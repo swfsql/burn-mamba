@@ -12,9 +12,9 @@
 //!
 //! Two properties make this a task for a single selective-decay block:
 //!
-//! - **It needs the SSM state.** The lookback has no bound (a reset can be
+//! - **It needs the state.** The lookback has no bound (a reset can be
 //!   arbitrarily far back), and the answer is not a function of the last
-//!   symbol. Mamba-3 has no short convolution, so the recurrent state is the
+//!   symbol. Mamba-3 has no short convolution, so the state is the
 //!   *only* memory of the model.
 //! - **It needs the state to be *selective*.** A fixed decay `ᾱ` cannot both
 //!   erase the past at a reset and keep an unweighted vote after it.

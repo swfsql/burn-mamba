@@ -53,7 +53,7 @@ fn random_input(
         Distribution::Normal(0.0, 1.0),
         device,
     );
-    // Random (general case) or zero (fresh-start) initial SSM state per
+    // Random (general case) or zero (fresh-start) initial state per
     // `random_init`, so the path-agreement check spans the whole
     // {zero, random} initial-state dimension.
     let initial_state = if random_init {

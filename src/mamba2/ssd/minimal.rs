@@ -37,7 +37,7 @@ impl Mamba2SsdInput {
     ///
     /// ### Step 1 — Intra-chunk outputs (Y_diag)
     ///
-    /// In each chunk, compute the output as if the initial hidden state were
+    /// In each chunk, compute the output as if the initial state were
     /// zero. This is the *quadratic attention form* of the SSD layer, on a
     /// window of `chunk_len` tokens (§4.1):
     ///
@@ -50,7 +50,7 @@ impl Mamba2SsdInput {
     ///
     /// ### Step 2 — Chunk state (state_bnhpr)
     ///
-    /// Compute the final SSM state of each chunk, from a zero initial state
+    /// Compute the final state of each chunk, from a zero initial state
     /// (§4.1, Eq. 20):
     ///
     /// ```text
@@ -61,7 +61,7 @@ impl Mamba2SsdInput {
     ///
     /// ### Step 3 — Inter-chunk state scan (state passing)
     ///
-    /// Carry the true hidden state across chunk boundaries with the
+    /// Carry the true state across chunk boundaries with the
     /// recurrence (§4.1, Eq. 22):
     ///
     /// ```text
@@ -235,7 +235,7 @@ impl Mamba2SsdInput {
         // STEP 2: Compute chunk state (input → state)
         // =============================================================
         //
-        // For each chunk n, compute the SSM state at the end of the chunk,
+        // For each chunk n, compute the state at the end of the chunk,
         // from a zero initial state (Eq. 20):
         //
         //   s[n] = Σ_{t ∈ [0, chunk_len)} exp(a_cumsum[n,-1] - a_cumsum[n,t]) · B̄[n,t] · x[n,t]ᵀ
@@ -292,7 +292,7 @@ impl Mamba2SsdInput {
         // STEP 3: Inter-chunk state scan (state passing)
         // =============================================================
         //
-        // Carry the hidden state across chunk boundaries. The recurrence is
+        // Carry the state across chunk boundaries. The recurrence is
         //
         //   h[n] = Ā_chunk[n] · h[n-1] + s[n]     (Eq. 22)
         //
@@ -302,7 +302,7 @@ impl Mamba2SsdInput {
         // chunk level: each new state is a weighted sum of all previous chunk
         // states. The same 1-SS segsum trick applies, over the nchunks axis.
         //
-        // The result is `new_state[n]`, the true hidden state entering chunk n,
+        // The result is `new_state[n]`, the true state entering chunk n,
         // for n ∈ {0, ..., nchunks-1}, plus the final state after all chunks.
         let (state_bnhpr, final_state_bhpr) = {
             // Prepend the initial state h₀ to the array of chunk state.
@@ -353,7 +353,7 @@ impl Mamba2SsdInput {
 
             // 1-SS inter-chunk decay matrix.
             //   decay_chunk[i, j] = exp(Σ_{k=j+1..i} a_cum_last[k])  (i ≥ j)
-            // Row i times the state vector gives the true hidden state
+            // Row i times the state vector gives the true state
             // entering chunk i.
             let decay_chunk_bhNN = segsum(a_chunk_pad_bhN).exp();
             assert_eq!(

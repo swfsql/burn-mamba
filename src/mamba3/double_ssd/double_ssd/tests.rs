@@ -23,7 +23,7 @@ fn small_config_mimo() -> Mamba3Config {
 /// across two runs that should be mathematically equivalent.
 struct RunGrads {
     out: Tensor<3>,
-    /// Final SSM hidden state from the returned cache.
+    /// Final state from the returned cache.
     final_ssm: Tensor<4>,
     /// Final tap-FIFO B from the returned cache; `None` for
     /// [`TapPattern::None`], which keeps no tap slots.
@@ -61,7 +61,7 @@ struct Heads {
 
 /// Build the initial cache passed to both `forward` and the `step`
 /// unrolling. With `random = false` it is zero (the standard fresh start);
-/// with `random = true` every field (SSM state, previous-token B/x, and
+/// with `random = true` every field (state, previous-token B/x, and
 /// cumulative rotation angle) holds random values, exercising parity from an
 /// arbitrary initial state.
 fn build_init_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3DoubleSsdCache {
@@ -295,7 +295,7 @@ fn param_input(input: &Tensor<3>) -> Param<Tensor<3>> {
 
 /// `forward(x)` is mathematically equivalent to repeatedly calling `step`
 /// token-by-token from the **same** initial cache. Outputs, every final
-/// cache field (SSM state, previous-token B/x, cumulative rotation angle), and
+/// cache field (state, previous-token B/x, cumulative rotation angle), and
 /// parameter gradients must all agree up to float-summation-order noise.
 ///
 /// With `random_init = true` the shared initial cache is random rather than

@@ -8,7 +8,7 @@
 //!    ([`qk_norm_expand_bias`]).
 //! 3. MIMO `V` construction: broadcast-multiply `x` by `mimo_x_hmp`
 //!    ([`build_v_with_mimo`]).
-//! 4. The rank-summed outer product `Σₘ v[m] ⊗ k[m]` that writes the SSM state
+//! 4. The rank-summed outer product `Σₘ v[m] ⊗ k[m]` that writes the state
 //!    ([`mimo_outer_sum`], SISO-branched).
 //! 5. [`split_trailing`]: removes an optional trailing segment from the
 //!    in-projection.

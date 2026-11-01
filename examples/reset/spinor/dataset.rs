@@ -19,9 +19,9 @@
 //!
 //! Three properties make this a task for a **quaternion** Mamba-3 block:
 //!
-//! - **It needs the SSM state.** The lookback has no bound, and the label is
+//! - **It needs the state.** The lookback has no bound, and the label is
 //!   not a function of the current symbol. Mamba-3 has no short convolution, so
-//!   the recurrent state is the only memory of the model.
+//!   the state is the only memory of the model.
 //! - **It needs the state to turn.** The label is periodic in every direction
 //!   (`i⁴ = 1`). No real state with non-negative eigenvalues can report that
 //!   (the argument of `reset-rotor`, one rung down).

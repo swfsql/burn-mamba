@@ -51,7 +51,7 @@ pub struct CombinedSingleSsdGrads<B: Backend> {
     pub d_gamma_bnth: F<B, 4>,
     /// Gradient of the key scale `scale` (at lag 1, `γ + (1−λ₊₁)·Δ₊₁`).
     pub d_scale_bnlh: F<B, 4>,
-    /// Gradient of the initial SSM state.
+    /// Gradient of the initial state.
     pub d_initial_state_bhpr: F<B, 4>,
     /// Gradient of the origin state of the resets (packed rows only).
     pub d_origin_bhpr: Option<F<B, 4>>,
@@ -74,7 +74,7 @@ pub struct CombinedSingleSsdGrads<B: Backend> {
 ///
 /// # Arguments
 /// - `d_y_bntmhp` — upstream gradient of the SSD output (read axis)
-/// - `d_final_bhpr` — upstream gradient of the final SSM state
+/// - `d_final_bhpr` — upstream gradient of the final state
 /// - `v_bnlmhp`, `da_bnlh`, `b_bnlmhr`, `c_bntmhr`, `gamma_bnth`, `scale_bnlh`,
 ///   `initial_state_bhpr` — the seven saved forward inputs
 /// - `read_stride` — folded positions per read row (see

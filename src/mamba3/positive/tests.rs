@@ -560,7 +560,7 @@ fn assert_slot(label: &str, name: &str, a: &Option<Tensor<2>>, b: &Option<Tensor
 
 fn assert_caches_match(label: &str, a: &Mamba3DoubleSsdCache, b: &Mamba3DoubleSsdCache) {
     let d = max_abs_diff(a.ssm_bhpr.clone(), b.ssm_bhpr.clone());
-    assert!(d < dtype_tol(1e-4), "{label}: ssm state differs by {d}");
+    assert!(d < dtype_tol(1e-4), "{label}: state differs by {d}");
     if let (Some(a), Some(b)) = (&a.v_state_buhp, &b.v_state_buhp) {
         assert!(max_abs_diff(a.clone(), b.clone()) < dtype_tol(1e-4), "{label}: tap slots");
     }

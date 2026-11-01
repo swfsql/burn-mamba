@@ -44,7 +44,7 @@ impl Mamba3 {
     /// algorithm.
     ///
     /// For MIMO (mimo_rank>1), B/C have mimo_rank parallel rank channels. All
-    /// ranks share the hidden state, and each rank writes to it independently.
+    /// ranks share the state, and each rank writes to it independently.
     ///
     /// `pad_bt` marks a right-padded batch of tokens, as in [`Self::forward`].
     ///
@@ -1063,7 +1063,7 @@ mod step {
                 write(beta_buh, x_prev_buhp, b_prev_bumhr)
             };
 
-            // ── SSM state update ──────────────────────────────────────────────
+            // ── State update ──────────────────────────────────────────────────
             let state_bhpr = alpha_total_bh11 * cache.ssm_bhpr.clone()
                 + write(proj.gamma_buh, proj.x_buhp.clone(), b_bumhr.clone());
             let state_bhpr = [

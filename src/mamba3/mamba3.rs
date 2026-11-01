@@ -122,7 +122,7 @@
 //!   outₜ  = Σₘ mimo_o[m] ⊙ silu(zₜ ⊙ mimo_z[m]) ⊙ yₜ[m]         (rank merge)
 //! ```
 //!
-//! All ranks share the hidden state hₜ. Each rank writes to it independently,
+//! All ranks share the state hₜ. Each rank writes to it independently,
 //! and each rank reads the full shared state for its output.
 //!
 //! ## 4. Combined formulation (everything together)
@@ -320,7 +320,7 @@ pub struct Mamba3 {
     /// Output projection: maps `d_inner → d_model`.
     pub out_proj: Linear,
 
-    /// Optional learnable initial hidden state `h₀`.
+    /// Optional learnable initial state `h₀`.
     /// Shape: `[nheads, per_head_dim, state_rank]`
     ///
     /// Each `forward` adds it to the incoming cache state. Only the `Minimal`
@@ -357,7 +357,7 @@ pub struct Mamba3 {
     /// [`Tropical::None`].
     pub tropical_readout_hp: Option<Param<Tensor<2>>>,
 
-    /// State rank — the latent dimension of the SSM hidden state.
+    /// State rank — the size of the `r` axis of the state.
     ///
     /// Paper: `N`. Python: `d_state`.
     pub state_rank: usize,
@@ -886,7 +886,7 @@ pub struct Mamba3Config {
     /// Paper: `D`. Python: `d_model`.
     pub d_model: usize,
 
-    /// State rank — the latent dimension of the SSM hidden state.
+    /// State rank — the size of the `r` axis of the state.
     /// **Must be even** for every rotating [`RotationKind`] (the rotation turns
     /// pairs of entries).
     /// [`RotationKind::Real1D`] makes no pairs, so it also accepts an odd rank
@@ -1020,7 +1020,7 @@ pub struct Mamba3Config {
     #[config(default = false)]
     pub has_proj_bias: bool,
 
-    /// Whether to allocate a learnable initial SSM state `h₀`. Only the
+    /// Whether to allocate a learnable initial state `h₀`. Only the
     /// `Minimal` SSD path supports it (see [`Mamba3::init_state_hpr`]).
     #[config(default = false)]
     pub has_learnable_init_state: bool,
@@ -1647,7 +1647,7 @@ impl Mamba3 {
     /// output and final cache.
     ///
     /// For MIMO (mimo_rank>1), B/C have mimo_rank parallel rank channels. All
-    /// ranks share the hidden state, and each rank writes to it independently.
+    /// ranks share the state, and each rank writes to it independently.
     ///
     /// `pad_bs` (`true` at padding, `None` ⇒ no padding) marks a right-padded
     /// batch of **tokens**. A padded token is absent:

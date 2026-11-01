@@ -16,7 +16,7 @@ struct RunGrads {
     out: Tensor<3>,
     /// Final convolution window from the returned cache.
     final_conv: Tensor<3>,
-    /// Final SSM hidden state from the returned cache.
+    /// Final state from the returned cache.
     final_ssm: Tensor<4>,
     d_input: Tensor<3>,
     d_in_proj_w: Tensor<2>,
@@ -40,7 +40,7 @@ struct Heads {
 /// Build the initial cache passed to both `forward` and the `step`
 /// unrolling. With `random = false` it is zero (the standard fresh start);
 /// with `random = true` it holds random values, exercising parity from an
-/// arbitrary initial state (conv window + SSM hidden state).
+/// arbitrary initial state (conv window + state).
 fn build_init_cache(cfg: &Mamba2Config, batch: usize, random: bool) -> Mamba2Cache {
     let device = test_device();
     let conv_dim = cfg.conv_dim();
@@ -66,7 +66,7 @@ fn build_init_cache(cfg: &Mamba2Config, batch: usize, random: bool) -> Mamba2Cac
     }
 }
 
-/// Compare the output and final cache (conv window + SSM state) of two runs.
+/// Compare the output and final cache (conv window + state) of two runs.
 fn assert_outputs_match(label: &str, a: &RunGrads, b: &RunGrads, tol: f32) {
     use burn_stack::utils::test_helpers::max_rel_diff;
     let tol = dtype_tol(tol);
@@ -83,7 +83,7 @@ fn assert_outputs_match(label: &str, a: &RunGrads, b: &RunGrads, tol: f32) {
     );
     assert!(
         d_ssm < tol,
-        "{label}: final SSM state max rel diff = {d_ssm:.6} (tol {tol})"
+        "{label}: final state max rel diff = {d_ssm:.6} (tol {tol})"
     );
 }
 
@@ -189,7 +189,7 @@ fn param_input(input: &Tensor<3>) -> Param<Tensor<3>> {
 
 /// `forward(x)` is mathematically equivalent to repeatedly calling `step`
 /// token-by-token from the **same** initial cache. Outputs, the final cache
-/// (conv window + SSM state), and parameter gradients must all agree up to
+/// (conv window + state), and parameter gradients must all agree up to
 /// float-summation-order noise.
 ///
 /// With `random_init = true` the shared initial cache is random rather than
@@ -330,7 +330,7 @@ fn step_matches_forward_norm_before_gate_random_init() {
 
 /// One longer `forward` over the whole sequence equals two consecutive
 /// `forward` calls (prefix then suffix) that thread the returned cache (conv
-/// window + SSM state) between them — outputs, final cache, and parameter
+/// window + state) between them — outputs, final cache, and parameter
 /// gradients all agree. The initial cache is random, so the chaining starts
 /// from a non-trivial state.
 ///

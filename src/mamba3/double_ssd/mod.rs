@@ -19,7 +19,7 @@
 //!
 //! `step` always uses this recurrence, for both cache variants.
 
-/// The double-SSD cache (SSM state, tap FIFO, rotation, positive-system slots;
+/// The double-SSD cache (state, tap FIFO, rotation, positive-system slots;
 /// no conv cache).
 pub mod cache;
 /// `forward_double_ssd` / `step_double_ssd` and their step helpers.

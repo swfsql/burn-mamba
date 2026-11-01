@@ -54,7 +54,7 @@ fn cfg_real1d_scalar() -> Mamba3Config {
 /// Build a matched pair of initial caches for cross-algorithm parity
 /// (`forward_double_ssd`/`step_double_ssd` use [`Mamba3DoubleSsdCache`];
 /// `forward_single_ssd` uses [`Mamba3SingleSsdCache`]).
-/// With `random = true` the SSM state and cumulative rotation angle are random
+/// With `random = true` the state and cumulative rotation angle are random
 /// while the previous-token K/V history is **zero** — so the single-ssd form's
 /// boundary-β seed is zero and both forms share the exact same logical initial state.
 /// With `random = false` everything is zero.
@@ -429,7 +429,7 @@ fn guard_random_init_consumed(
 
 /// forward_single_ssd ≡ forward_double_ssd on values and gradients, from the same
 /// initial state. With `random_init = true` the shared logical initial state
-/// is random (random SSM state + cumulative rotation angle; zero previous-token
+/// is random (random state + cumulative rotation angle; zero previous-token
 /// history so the single-ssd and double-ssd forms coincide). The output and all
 /// parameter gradients must agree. The single-ssd cache SSM accumulator itself is
 /// not compared here (different semantics from the double-form state); the

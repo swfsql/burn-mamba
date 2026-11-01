@@ -18,7 +18,7 @@
 
 ## Abstract
 
-Linear RNNs have a reading in which the recurrent state is a fast-weight
+Linear RNNs have a reading in which the state is a fast-weight
 matrix that is fit online, one gradient step per token. The transition is the
 quadratic term of a local objective, and the write is its linear term. Under
 that reading, the complex ("rotational") transition of Mamba-3 is usually

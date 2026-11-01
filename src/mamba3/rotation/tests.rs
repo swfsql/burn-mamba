@@ -1156,7 +1156,7 @@ fn quaternion_split_prefill_matches_full_kind(kind: RotationKind) {
         "{kind:?} split-prefill output mismatch: {d_out:.6}"
     );
 
-    // Final SSM state must also match. A fresh cache now defaults to the
+    // Final state must also match. A fresh cache now defaults to the
     // single-ssd pathway for Quaternion4D too (forward_single_ssd supports it).
     let s_full = cache_full.single_ssd().unwrap().ssm_bhpr;
     let s_split = cache_split.single_ssd().unwrap().ssm_bhpr;
@@ -1257,7 +1257,7 @@ fn rotor_forward_step_grad_parity() {
     quaternion_forward_step_grad_parity_kind(RotationKind::Rotor4D);
 }
 
-/// Every field of a Mamba-3 cache, compared: the SSM state, the tap FIFO, and
+/// Every field of a Mamba-3 cache, compared: the state, the tap FIFO, and
 /// the cumulative rotation.
 ///
 /// The rotation is compared as the rotation it *stands for*, not as the number
@@ -1273,7 +1273,7 @@ fn assert_cache_parity(
     let (a, b) = (a.single_ssd().expect(missing), b.single_ssd().expect(missing));
 
     let d = max_abs_diff(a.ssm_bhpr, b.ssm_bhpr);
-    assert!(d < dtype_tol(VAL_TOL), "{label}: ssm state: {d:.3e}");
+    assert!(d < dtype_tol(VAL_TOL), "{label}: state: {d:.3e}");
 
     let slots = "the default carry-over tap keeps its slots";
     let d = max_abs_diff(a.k_state_bumhr.expect(slots), b.k_state_bumhr.expect(slots));

@@ -42,7 +42,7 @@ use burn_mamba::prelude::{
 ///   accumulator. The state is a *scalar*, and the other rungs of the ladder do
 ///   exactly what this one cannot. (`Real1D` is also the one kind that accepts
 ///   an odd `state_rank`: there is no pair to rotate.)
-/// - Mamba-3 has no short convolution, so the SSM state is the only memory of
+/// - Mamba-3 has no short convolution, so the state is the only memory of
 ///   the model. There is no local window to use as a shortcut.
 /// - `TapPattern::None`: the construction pins `λ ≈ 1`, so the `β` tap is dead
 ///   weight. Switching it off is structural: no `λ` sub-projection in the

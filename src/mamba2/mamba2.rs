@@ -16,7 +16,7 @@
 //! ```
 //!
 //! where:
-//! - `hₜ ∈ ℝ^{state_rank×per_head_dim}` is the hidden state
+//! - `hₜ ∈ ℝ^{state_rank×per_head_dim}` is the state
 //! - `Āₜ = exp(Δₜ A) ∈ ℝ` is a scalar decay. This is the key SSD constraint:
 //!   `Āₜ = αₜ · I` is a scalar times the identity, not a diagonal matrix.
 //! - `B̄ₜ = Δₜ Bₜ ∈ ℝᴺ`  is the (discretised) input projection
@@ -183,7 +183,7 @@ pub struct Mamba2 {
     /// Output projection: maps `d_inner → d_model`.
     pub out_proj: Linear,
 
-    /// Optional learnable initial hidden state `h₀`.
+    /// Optional learnable initial state `h₀`.
     ///
     /// Shape: `[nheads, per_head_dim, state_rank]`.
     ///
@@ -193,8 +193,8 @@ pub struct Mamba2 {
     /// two serial paths panic. [`Self::step`] does not read it.
     pub init_state_hpr: Option<Param<Tensor<3>>>,
 
-    /// `state_rank` — the number of latent dimensions in the SSM hidden
-    /// state `h ∈ ℝ^{state_rank×per_head_dim}` per head.
+    /// `state_rank` — the size of the `r` axis of the state
+    /// `h ∈ ℝ^{state_rank×per_head_dim}` per head.
     ///
     /// Paper: `N`. Python: `d_state`.
     pub state_rank: usize,
@@ -320,7 +320,7 @@ pub struct Mamba2Config {
     /// Paper: `D`. Python: `d_model`.
     pub d_model: usize,
 
-    /// State rank — the latent dimension of the SSM hidden state.
+    /// State rank — the size of the `r` axis of the state.
     ///
     /// A larger `state_rank` gives a more expressive state, but more memory
     /// and compute per step. The paper uses N ∈ {64, 128, 256} in most
@@ -403,9 +403,9 @@ pub struct Mamba2Config {
     #[config(default = true)]
     pub has_conv_bias: bool,
 
-    /// Whether to allocate a learnable initial SSM state `h₀`.
+    /// Whether to allocate a learnable initial state `h₀`.
     ///
-    /// `false` (default) ⇒ the hidden state starts at zero for every sequence.
+    /// `false` (default) ⇒ the state starts at zero for every sequence.
     /// `true` ⇒ the block has a trainable `init_state_hpr` of shape
     /// `[nheads, per_head_dim, state_rank]`. Only
     /// [`Mamba2SsdPath::Minimal`] supports it (see [`Mamba2::init_state_hpr`]).
@@ -672,7 +672,7 @@ impl Mamba2 {
     ///
     /// If `sequence % chunk_len ≠ 0`, the block pads the sequence with zeros
     /// to the next multiple of `chunk_len`. A zero pad is an identity step
-    /// (`Δ = 0  ⇒  Ā = exp(0) = 1,  B̄ = 0`): the SSM state goes through it
+    /// (`Δ = 0  ⇒  Ā = exp(0) = 1,  B̄ = 0`): the state goes through it
     /// unchanged. Thus the final state of the padded last chunk is the true
     /// final state.
     ///
@@ -687,7 +687,7 @@ impl Mamba2 {
     /// - `input_bsm` : `[batch, sequence, d_model]`
     /// - `pad_bs`    : `[batch, sequence]`
     /// - output      : `[batch, sequence, d_model]`
-    /// - cache (out) : updated convolution window and SSM state
+    /// - cache (out) : updated convolution window and state
     pub fn forward(
         &self,
         input_bsm: Tensor<3>,
@@ -991,7 +991,7 @@ impl Mamba2 {
         san(&y_bnlhp);
         san(&final_state_bhpr);
 
-        // Update the SSM state in the cache for the next call.
+        // Update the state in the cache for the next call.
         cache.ssm_bhpr = final_state_bhpr;
         assert_eq!(
             [batch, nheads, per_head_dim, state_rank],
@@ -1229,7 +1229,7 @@ mod step {
             let dta_bh = (dt_bh.clone() * a_head_decay_h.unsqueeze()).exp();
             assert_eq!([batch, nheads], dta_bh.dims());
 
-            // ── SSM state update:  hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜᵀ ───────────────────
+            // ── State update:  hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜᵀ ───────────────────────
             // The cache holds h_{t-1} with shape _bhpr.
             // Āₜ is a scalar per head, broadcast over per_head_dim and state_rank.
             // B̄ₜ xₜᵀ is an outer product: one _pr matrix per _bh.

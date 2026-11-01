@@ -53,7 +53,7 @@ fn random_input(
         device,
     );
     let d = Tensor::<1>::random([nheads], Distribution::Normal(0.0, 0.1), device);
-    // The initial SSM state is random (the general case) or zero (the
+    // The initial state is random (the general case) or zero (the
     // standard fresh-start case) per `random_init`. All paths must agree on
     // both, so the comparison spans the whole {zero, random} dimension.
     let initial_state = if random_init {

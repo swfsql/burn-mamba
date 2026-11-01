@@ -990,7 +990,7 @@ fn latent_network_multi_gate_class_markers_prime_step_matches_forward() {
         );
         assert!(
             max_rel_diff(s.ssm_bhpr.clone(), f.ssm_bhpr.clone()) < dtype_tol(1e-4),
-            "layer {i} ssm state disagrees"
+            "layer {i} state disagrees"
         );
     }
 }

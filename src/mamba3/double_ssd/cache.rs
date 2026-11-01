@@ -2,7 +2,7 @@
 //!
 //! The state that the block keeps between calls:
 //!
-//! 1. **SSM hidden state**: `hₜ ∈ ℝ^{per_head_dim×state_rank}` per head, the
+//! 1. **State**: `hₜ ∈ ℝ^{per_head_dim×state_rank}` per head, the
 //!    compressed context.
 //! 2. **Previous K state**: the `B` of the last `lag` positions, oldest first,
 //!    `[batch, lag, mimo_rank, nheads, state_rank]`. The β term of the
@@ -84,7 +84,7 @@ impl Mamba3DoubleSsdCachesConfig {
 /// cache with all tensors updated.
 #[derive(Module, Debug)]
 pub struct Mamba3DoubleSsdCache {
-    /// **SSM hidden state** `hₜ`.
+    /// **State** `hₜ`.
     ///
     /// The (double-ssd) trapezoidal recurrence updates it:
     /// `hₜ = αₜ hₜ₋₁ + βₜ (sumₘ Kₜ₋₁[m] ⊗ (Vₜ₋₁ * mimo_x[m])) + γₜ (sumₘ Bₜ[m] ⊗ (xₜ * mimo_x[m]))`

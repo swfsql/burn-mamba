@@ -9,7 +9,7 @@
 //!    the depthwise Conv1d. With it, each step applies the causal filter
 //!    without processing earlier tokens again.
 //!
-//! 2. **SSM hidden state** — the per-channel state matrix. It compresses the
+//! 2. **State** — the per-channel state matrix. It compresses the
 //!    full past into a fixed size, for any number of tokens.
 //!
 //! Mirrors [`crate::mamba2::cache`]. The Mamba-1 state has no head axis.
@@ -34,7 +34,7 @@ pub struct Mamba1Cache {
     /// Shape: `[batch, d_inner, conv_kernel]`
     pub conv_bik: Tensor<3>,
 
-    /// **SSM hidden state.**
+    /// **State.**
     ///
     /// The O(d_inner·state_rank) compressed summary of all earlier tokens. The
     /// selective-scan recurrence updates it at each step.
@@ -57,7 +57,7 @@ pub struct Mamba1CacheConfig {
     /// Batch size.
     pub batch: usize,
 
-    /// State rank — the latent dimension of the SSM hidden state.
+    /// State rank — the size of the `r` axis of the state.
     /// Corresponds to `state_rank` in [`Mamba1Config`].
     #[config(default = 16)]
     pub state_rank: usize,
@@ -86,7 +86,7 @@ impl Mamba1CacheConfig {
     /// Allocate zero-initialised cache tensors on `device`.
     ///
     /// Zeros are correct: a zero convolution window means "no previous tokens"
-    /// (the causal zero padding), and a zero SSM state is the standard initial
+    /// (the causal zero padding), and a zero state is the standard initial
     /// condition `h₀ = 0`.
     pub fn init(&self, device: &Device) -> Mamba1Cache {
         let conv_bik = Tensor::zeros([self.batch, self.d_inner, self.conv_kernel], device);

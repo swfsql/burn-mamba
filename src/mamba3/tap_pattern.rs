@@ -319,7 +319,7 @@ impl TapPattern {
     /// How many `(B, x)` tap slots a cache holds for this pattern at
     /// `micro_steps`: the depth of the FIFO that the tap reads, so exactly
     /// [`tap_lag`](Self::tap_lag). A lag-`L` tap needs the last `L` positions.
-    /// The SSM state is always one matrix. Only the tap buffer of the trapezoid
+    /// The state is always one matrix. Only the tap buffer of the trapezoid
     /// changes.
     ///
     /// A slot is a *layout*. It does not mean that something crosses the call
@@ -552,7 +552,7 @@ mod tests {
                     .expect("a missing cache defaults to the single-ssd pathway");
                 assert!(
                     max_abs_diff(cache_single.ssm_bhpr, cache_step.ssm_bhpr.clone()) < dtype_tol(1e-4),
-                    "{label}: final ssm state"
+                    "{label}: final state"
                 );
                 // Nothing to carry: the slots are absent, not zeroed.
                 assert!(cache_step.k_state_bumhr.is_none(), "{label}");
@@ -721,7 +721,7 @@ mod tests {
                     let d = max_abs_diff(out, out_step.clone());
                     assert!(d < dtype_tol(1e-4), "{label} {pathway}: forward vs step: {d:.3e}");
                     let d = max_abs_diff(ssm, cache_step.ssm_bhpr.clone());
-                    assert!(d < dtype_tol(1e-4), "{label} {pathway}: final ssm state: {d:.3e}");
+                    assert!(d < dtype_tol(1e-4), "{label} {pathway}: final state: {d:.3e}");
                 }
 
                 // The tap FIFO is the previous token, `u` slots deep.
@@ -972,7 +972,7 @@ mod tests {
                         let d = max_abs_diff(out, out_step.clone());
                         assert!(d < dtype_tol(1e-4), "{label} {pathway}: forward vs step: {d:.3e}");
                         let d = max_abs_diff(ssm, cache_step.ssm_bhpr.clone());
-                        assert!(d < dtype_tol(1e-4), "{label} {pathway}: final ssm state: {d:.3e}");
+                        assert!(d < dtype_tol(1e-4), "{label} {pathway}: final state: {d:.3e}");
                     }
 
                     let slots = pattern.tap_slots(micro_steps);
@@ -1322,7 +1322,7 @@ mod tests {
                     let d = max_abs_diff(out, out_step.clone());
                     assert!(d < dtype_tol(1e-4), "{label} {pathway}: forward vs step: {d:.3e}");
                     let d = max_abs_diff(ssm, cache_step.ssm_bhpr.clone());
-                    assert!(d < dtype_tol(1e-4), "{label} {pathway}: final ssm state: {d:.3e}");
+                    assert!(d < dtype_tol(1e-4), "{label} {pathway}: final state: {d:.3e}");
                 }
             }
         }

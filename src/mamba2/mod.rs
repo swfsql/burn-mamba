@@ -7,7 +7,7 @@
 //! the full SSD math.
 //!
 //! - [`mamba2`](crate::mamba2::mamba2) — the SSD block.
-//! - [`cache`](crate::mamba2::cache) — the conv window and the SSM state that
+//! - [`cache`](crate::mamba2::cache) — the conv window and the state that
 //!   the block carries between calls.
 //! - [`ssd`](crate::mamba2::ssd) — the pluggable chunkwise SSD algorithms
 //!   (Minimal / Serial / SerialRecalculated) and the backend extension trait.

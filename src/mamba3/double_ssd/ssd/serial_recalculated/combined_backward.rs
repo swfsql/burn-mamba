@@ -45,7 +45,7 @@ pub struct CombinedGrads<B: Backend> {
     pub d_b_bnlmhr: F<B, 6>,
     /// Gradient of the output projection `C`, on the read axis of the chunk.
     pub d_c_bntmhr: F<B, 6>,
-    /// Gradient of the initial SSM state.
+    /// Gradient of the initial state.
     pub d_initial_state_bhpr: F<B, 4>,
     /// Gradient of the origin state of the resets (`None` without resets).
     pub d_origin_bhpr: Option<F<B, 4>>,
@@ -104,7 +104,7 @@ pub fn k3_ssd_chunk_state_extended<B: Backend>(
 ///
 /// # Arguments
 /// - `d_y_bntmhp` — upstream gradient of the SSD output (read axis)
-/// - `d_final_bhpr` — upstream gradient of the final SSM state
+/// - `d_final_bhpr` — upstream gradient of the final state
 /// - `v_bnlmhp`, `da_bnlh`, `b_bnlmhr`, `c_bntmhr`, `initial_state_bhpr` —
 ///   the five saved forward inputs
 /// - `read_stride` — folded positions per read row (`micro_steps`)

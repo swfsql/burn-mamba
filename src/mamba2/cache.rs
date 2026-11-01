@@ -16,11 +16,11 @@
 //!    Conv1d. With it, each decoding step applies the causal filter without
 //!    processing earlier tokens again.
 //!
-//! 2. **SSM hidden state** — the matrix `hₜ ∈ ℝ^{per_head_dim×state_rank}` per
+//! 2. **State** — the matrix `hₜ ∈ ℝ^{per_head_dim×state_rank}` per
 //!    head. It compresses the full past into a fixed size, for any number of
 //!    tokens. This is the memory advantage of SSMs over attention: the
 //!    KV-cache of a Transformer grows linearly with the sequence length, but
-//!    the SSM state is always O(per_head_dim·state_rank).
+//!    the state is always O(per_head_dim·state_rank).
 
 use crate::mamba2::prelude::*;
 use burn_stack::modules::sanity as san;
@@ -102,7 +102,7 @@ pub struct Mamba2Cache {
     ///   - `conv_kernel` is typically 4
     pub conv_bvk: Tensor<3>,
 
-    /// **SSM hidden state** `hₜ`.
+    /// **State** `hₜ`.
     ///
     /// The O(per_head_dim·state_rank) compressed summary of all earlier
     /// tokens. Each decoding step applies `hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜ`.
@@ -128,8 +128,8 @@ pub struct Mamba2CacheConfig {
     /// Batch size.
     pub batch: usize,
 
-    /// `state_rank` — the number of latent dimensions in the SSM hidden
-    /// state.  Corresponds to `state_rank` in [`Mamba2Config`].
+    /// `state_rank` — the size of the `r` axis of the state. Corresponds to
+    /// `state_rank` in [`Mamba2Config`].
     #[config(default = 128)]
     pub state_rank: usize,
 
@@ -169,7 +169,7 @@ impl Mamba2CacheConfig {
     /// Zeros are correct:
     /// - A zero convolution cache means "no previous tokens" (the causal zero
     ///   padding).
-    /// - A zero SSM state is the standard initial condition `h₀ = 0`. If the
+    /// - A zero state is the standard initial condition `h₀ = 0`. If the
     ///   block has a learnable initial state, [`Mamba2::forward`] adds it to
     ///   this state.
     pub fn init(&self, device: &Device) -> Mamba2Cache {

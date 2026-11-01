@@ -16,9 +16,9 @@
 //!
 //! Four properties make this a task for a single **Mamba-3** block:
 //!
-//! - **It needs the SSM state.** The lookback has no bound, and the label is
+//! - **It needs the state.** The lookback has no bound, and the label is
 //!   not a function of the current symbol. Mamba-3 has no short convolution at
-//!   all, so the recurrent state is the only memory of the model.
+//!   all, so the state is the only memory of the model.
 //! - **It needs the decay to be selective**, the same requirement that
 //!   `reset-majority` isolates. `R` must erase the past fully, and the turns
 //!   after it must keep equal weights.

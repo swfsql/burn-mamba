@@ -289,7 +289,7 @@ fn worst_family(model: &MambaLatentNet, count: usize, device: &Device) -> (f64, 
 // ---------------------------------------------------------------------------
 
 /// Every weight is in closed form. There is no training. `Δ = 1e-12` in every
-/// head, so the SSM state stays at zero: the register gives the answer.
+/// head, so the state stays at zero: the register gives the answer.
 #[test]
 #[cfg_attr(
     feature = "dev-f16",

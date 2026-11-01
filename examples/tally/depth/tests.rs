@@ -197,7 +197,7 @@ fn worst_family(model: &MambaLatentNet, count: usize, device: &Device) -> (f64, 
 // ---------------------------------------------------------------------------
 
 /// Every weight is in closed form. There is no training. The `Δ` of the plant
-/// is `1e-12` in both heads, so the SSM state stays at zero: the register gives
+/// is `1e-12` in both heads, so the state stays at zero: the register gives
 /// the answer.
 #[test]
 fn handmade_register_solves_every_family() {

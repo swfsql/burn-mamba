@@ -23,7 +23,7 @@ easy to read, verify, and learn from.
 ## What is Mamba?
 
 Mamba is a family of **selective state space models** for sequence modeling.
-Like an RNN, it carries a fixed-size hidden state. But its *selective*
+Like an RNN, it carries a fixed-size state. But its *selective*
 parameters depend on the input, so at each step it can choose what to remember
 or forget. This gives it two modes:
 

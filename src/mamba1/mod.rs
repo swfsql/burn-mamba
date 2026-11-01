@@ -4,7 +4,7 @@
 //! selective scan**. It has no SSD and no backend-extension trait.
 //!
 //! - [`mamba1`](crate::mamba1::mamba1) — the selective-SSM block.
-//! - [`cache`](crate::mamba1::cache) — the conv window and the SSM state that
+//! - [`cache`](crate::mamba1::cache) — the conv window and the state that
 //!   the block carries between calls.
 //!
 //! The residual layers, the networks and the bidirectional stacks are the

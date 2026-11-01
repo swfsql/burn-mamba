@@ -181,7 +181,7 @@ pub fn k2_ssd_bmm(c_bntmhr: Tensor<6>, b_bnlmhr: Tensor<6>) -> Tensor<5> {
 // K3 — intra-chunk state (chunk-end state assuming zero initial state)
 // ---------------------------------------------------------------------------
 
-/// Compute the SSM state at the end of each chunk, assuming zero initial hidden state.
+/// Compute the state at the end of each chunk, assuming a zero state at its start.
 ///
 /// Uses the pre-scaled V tensor — no `dt·B` scaling is performed here.
 ///
@@ -234,7 +234,7 @@ pub fn k3_ssd_chunk_state(
 // K4 — inter-chunk state scan (sequential loop)
 // ---------------------------------------------------------------------------
 
-/// Propagate hidden state across chunk boundaries using a sequential scan.
+/// Propagate the state across chunk boundaries using a sequential scan.
 ///
 /// The walk is deliberate. `hₙ = dₙ·hₙ₋₁ + sₙ` has a **scalar** `dₙ`, so it is
 /// the affine monoid `(d₁,s₁)∘(d₂,s₂) = (d₁d₂, d₂s₁+s₂)` and the whole stream

@@ -6,7 +6,7 @@
 //! [`Mamba3DoubleSsdCache`](crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCache),
 //! but the **SSM accumulator has different semantics** mid-sequence:
 //!
-//! - double-SSD: `ssm_bhpr` holds the trapezoidal hidden state
+//! - double-SSD: `ssm_bhpr` holds the trapezoidal state
 //!   `hₜ = αₜ hₜ₋₁ + βₜ Bₜ₋₁ ⊗ xₜ₋₁ + γₜ Bₜ ⊗ xₜ` (at the default lag 1).
 //! - single-SSD: `ssm_bhpr` holds the **trapezoid accumulator**
 //!   `h'ₜ = αₜ h'ₜ₋₁ + scaleₜ Bₜ ⊗ xₜ`, with

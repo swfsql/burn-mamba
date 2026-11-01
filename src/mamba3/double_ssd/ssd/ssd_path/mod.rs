@@ -54,7 +54,7 @@ pub struct Mamba3DoubleSsdInput {
     /// read row. `1` for stock Mamba-3, where the two axes are equal.
     pub read_stride: usize,
 
-    /// Initial SSM hidden state.
+    /// Initial state.
     ///
     /// # Shape
     /// - `[batch, nheads, per_head_dim, state_rank]`

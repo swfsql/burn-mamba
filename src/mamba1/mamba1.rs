@@ -22,7 +22,7 @@
 //! Unlike Mamba-2/3, the recurrence is a plain **sequential selective scan**,
 //! not a chunkwise SSD. There is no pluggable SSD path. [`Mamba1::forward`]
 //! (full sequence) and [`Mamba1::step`] (single token) carry the same
-//! [`Mamba1Cache`] (convolution window + SSM state).
+//! [`Mamba1Cache`] (convolution window + state).
 //!
 //! ## Notation / Dimension Keys
 //!
@@ -36,7 +36,7 @@
 //! | `d`    | `d_model`                         | 768     |
 //! | `i`    | `d_inner` = `expand`·`d_model`     | 2·d_model |
 //! | `k`    | `conv_kernel`                     | 4       |
-//! | `r`    | `state_rank` (latent SSM state)   | 16      |
+//! | `r`    | `state_rank` (rank of the state)  | 16      |
 //!
 //! The Δ-projection rank `dt_rank` has no single-letter key. A tensor with a
 //! `dt_rank` axis has an explicit shape comment.
@@ -111,7 +111,7 @@ pub struct Mamba1Config {
     /// Hidden dimension.
     pub d_model: usize,
 
-    /// State rank — the latent dimension of the SSM hidden state
+    /// State rank — the size of the `r` axis of the state
     /// (`N` in Algorithm 2 from the Mamba paper).
     #[config(default = 16)]
     pub state_rank: usize,
@@ -373,7 +373,7 @@ impl Mamba1 {
     /// See also [`Self::step`].
     ///
     /// Mirrors [`crate::mamba2::mamba2::Mamba2::forward`]. An optional `cache`
-    /// supplies the initial convolution window and SSM state (zeros when
+    /// supplies the initial convolution window and state (zeros when
     /// `None`). The function returns the updated cache, so a caller can process
     /// a sequence in segments (prefill then decode, or chunked prefill).
     ///
@@ -398,7 +398,7 @@ impl Mamba1 {
         let device = x.device();
         assert!(sequence > 0, "sequence length must be at least 1");
 
-        // Zero-initialise the cache (conv window + SSM state) when not provided.
+        // Zero-initialise the cache (conv window + state) when not provided.
         let mut cache = cache.unwrap_or_else(|| Mamba1Cache {
             conv_bik: Tensor::zeros([batch, d_inner, conv_kernel], &device),
             ssm_bir: Tensor::zeros([batch, d_inner, state_rank], &device),
@@ -675,7 +675,7 @@ mod step {
             let [_d_inner, state_rank] = self.a_log.dims();
             let device = x.device();
 
-            // Zero-initialise the cache (conv window + SSM state) when not
+            // Zero-initialise the cache (conv window + state) when not
             // provided, as `forward` and the Mamba-2/3 blocks do.
             let mut cache = cache.unwrap_or_else(|| Mamba1Cache {
                 conv_bik: Tensor::zeros([batch, d_inner, conv_kernel], &device),

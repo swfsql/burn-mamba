@@ -10,7 +10,7 @@
 //! change `scaleₜ` (see [`Mamba3SingleSsdInput::scale_bnlh`]) and, at lag `u`,
 //! widen the correction (see [`crate::mamba3::single_ssd::token_band`]).
 //!
-//! The double-ssd trapezoid hidden state is
+//! The double-ssd trapezoid state is
 //!
 //! ```text
 //!   hₜ = αₜ hₜ₋₁ + βₜ (Bₜ₋₁ ⊗ xₜ₋₁) + γₜ (Bₜ ⊗ xₜ)

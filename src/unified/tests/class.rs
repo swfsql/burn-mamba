@@ -673,7 +673,7 @@ fn per_layer_class_latents_step_matches_forward() {
         );
         assert!(
             max_rel_diff(sf.clone(), ss.clone()) < dtype_tol(1e-4),
-            "layer {i} ssm state disagrees"
+            "layer {i} state disagrees"
         );
     }
     // Gradients (input, a block weight, and both class-latent embeddings).
@@ -870,7 +870,7 @@ fn prime_emits_the_class_markers_a_step_would_drop() {
         );
         assert!(
             max_rel_diff(f.ssm_bhpr.clone(), s.ssm_bhpr.clone()) < dtype_tol(1e-4),
-            "layer {i} ssm state disagrees"
+            "layer {i} state disagrees"
         );
     }
 }
@@ -941,7 +941,7 @@ fn prime_runs_a_per_layer_latent_with_an_empty_stream() {
         );
         assert!(
             max_rel_diff(f.ssm_bhpr.clone(), s.ssm_bhpr.clone()) < dtype_tol(1e-4),
-            "layer {i} ssm state disagrees"
+            "layer {i} state disagrees"
         );
     }
 }
@@ -1064,7 +1064,7 @@ fn prime_on_a_network_covers_every_class_level() {
         );
         assert!(
             max_rel_diff(f.ssm_bhpr.clone(), s.ssm_bhpr.clone()) < dtype_tol(1e-4),
-            "layer {i} ssm state disagrees"
+            "layer {i} state disagrees"
         );
     }
 }
@@ -1361,7 +1361,7 @@ fn class_markers_split_forward_matches_single_forward() {
         );
         assert!(
             max_rel_diff(f.ssm_bhpr.clone(), s.ssm_bhpr.clone()) < dtype_tol(1e-4),
-            "layer {i} ssm state disagrees"
+            "layer {i} state disagrees"
         );
     }
     // Every marker landed exactly once: 4 stack latents, then 1 per-layer one.
@@ -1429,7 +1429,7 @@ fn class_markers_step_matches_forward_with_full_len() {
         );
         assert!(
             max_rel_diff(f.ssm_bhpr.clone(), s.ssm_bhpr.clone()) < dtype_tol(1e-4),
-            "layer {i} ssm state disagrees"
+            "layer {i} state disagrees"
         );
     }
 }
@@ -1745,7 +1745,7 @@ fn end_closes_the_sequence_custom_never_does() {
         );
         assert!(
             max_rel_diff(f.ssm_bhpr.clone(), s.ssm_bhpr.clone()) < dtype_tol(1e-4),
-            "layer {i} ssm state disagrees"
+            "layer {i} state disagrees"
         );
     }
 }
@@ -1836,7 +1836,7 @@ fn step_output_and_state_follow_the_last_emitted_token() {
             );
             assert!(
                 max_rel_diff(sa.clone(), sb.clone()) < dtype_tol(1e-4),
-                "{who}: layer {i} ssm state disagrees"
+                "{who}: layer {i} state disagrees"
             );
         }
     };

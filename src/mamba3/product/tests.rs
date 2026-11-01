@@ -142,7 +142,7 @@ fn forward_matches_step_double(kind: RotationKind, micro_steps: usize) {
     );
     assert!(
         max_abs_diff(cache_fwd.ssm_bhpr, cache_step.ssm_bhpr) < dtype_tol(1e-4),
-        "{label}: final ssm state"
+        "{label}: final state"
     );
     // The tap slots are absent under `TapPattern::None`, in both caches.
     assert_eq!(
