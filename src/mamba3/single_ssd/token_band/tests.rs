@@ -25,7 +25,7 @@ fn reference(
     for token in 0..tokens {
         let read = token * u + (u - 1);
         let mut acc = Tensor::zeros([batch, mimo_rank, nheads, per_head_dim], &device);
-        // C at the read — one row per token, the read axis's own resolution.
+        // C at the read — one position per token, the read axis's own resolution.
         let c_bmhr: Tensor<4> = c_btmhr.clone().narrow(1, token, 1).squeeze_dim(1);
         for j in 0..u - 1 {
             let tap = token * u + j;
@@ -70,7 +70,7 @@ fn matches_the_direct_sum() {
         let sequence = tokens * u;
         let v = Tensor::<5>::random([batch, sequence, mimo_rank, nheads, per_head_dim], dist, &device);
         let b = Tensor::<5>::random([batch, sequence, mimo_rank, nheads, state_rank], dist, &device);
-        // `C` is on the read axis: one row per token.
+        // `C` is on the read axis: one position per token.
         let c = Tensor::<5>::random([batch, tokens, mimo_rank, nheads, state_rank], dist, &device);
         let excess = Tensor::<3>::random([batch, sequence, nheads], dist, &device);
         // `da = Δ·A ≤ 0`, so the decay it exponentiates is in (0, 1].

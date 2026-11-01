@@ -1058,7 +1058,7 @@ pub fn rotate_bc_forward(
             // cumulative angle of that position only. That is `u`× less work
             // than a turn of a broadcast copy at every micro-step.
             let cum_angles_btmha =
-                helpers::read_rows::<5, 6>(cum_angles_bsmha, 1, read_stride);
+                helpers::read_positions::<5, 6>(cum_angles_bsmha, 1, read_stride);
             let c = apply_rope_partial::<5>(c_btmhr, cum_angles_btmha, rotation_dim, rotate_pairwise);
             let last = wrap_angle(
                 cum_angles_bsha
@@ -1132,7 +1132,7 @@ pub fn rotate_bc_forward(
             };
             // `C`'s copy, at the one write position per token it reads at.
             let over_mimo_read = |q_bshj4: Tensor<5>| {
-                helpers::read_rows::<5, 6>(q_bshj4, 1, read_stride)
+                helpers::read_positions::<5, 6>(q_bshj4, 1, read_stride)
                     .unsqueeze_dim::<6>(2)
                     .expand([batch, tokens, mimo_rank, nheads, blocks, 4])
             };

@@ -27,7 +27,7 @@ use super::serial_recalculated::{
     cat_chunk_groups, k1_ssd_chunk_cumsum, k2_ssd_bmm, k4_ssd_state_passing,
     k4_ssd_state_passing_backward,
 };
-use crate::mamba3::helpers::prim::{read_causal_mask, read_rows, scatter_read_rows};
+use crate::mamba3::helpers::prim::{read_causal_mask, read_positions, scatter_read_positions};
 use crate::mamba3::ssd_path::Mamba3SsdPath;
 use burn_stack::utils::fprim::{F, san};
 use burn::backend::Backend;
@@ -107,7 +107,7 @@ pub fn k3_ssd_chunk_state_extended<B: Backend>(
 /// - `d_final_bhpr` — upstream gradient of the final state
 /// - `v_bnlmhp`, `da_bnlh`, `b_bnlmhr`, `c_bntmhr`, `initial_state_bhpr` —
 ///   the five saved forward inputs
-/// - `read_stride` — write positions per read row (`micro_steps`)
+/// - `read_stride` — write positions per read position (`micro_steps`)
 /// - `restarts` — `(keep_bn, origin_bhpr)`, or `None`. `keep_bn` is the
 ///   constant reset factor of the forward (`0` at a chunk that starts a new
 ///   segment). `origin_bhpr` is the state that those chunks start from.
@@ -182,7 +182,7 @@ pub fn combined_backward<B: Backend>(
         .unsqueeze_dim::<5>(4) // da_cumsum_bhnl1
         .expand([batch, nheads, nchunks, chunk_len, mimo_rank]) // da_cumsum_bhnlm
         .reshape([batch, nheads, nchunks, fused]); // da_cumsum_bhnLM
-    let da_cumsum_bhnTM = read_rows::<B, 4, 5>(da_cumsum_bhnl.clone(), 3, read_stride)
+    let da_cumsum_bhnTM = read_positions::<B, 4, 5>(da_cumsum_bhnl.clone(), 3, read_stride)
         .unsqueeze_dim::<5>(4)
         .expand([batch, nheads, nchunks, chunk_tokens, mimo_rank])
         .reshape([batch, nheads, nchunks, read]);
@@ -294,8 +294,8 @@ pub fn combined_backward<B: Backend>(
         san(&d_da_blue_bnhTM);
 
         // Reduce fused TM → t (sum the mimo_rank copies K5 broadcast), then
-        // scatter back onto the write axis: a read row's `da` is one position.
-        let d_da_blue_bnhl: F<B, 4> = scatter_read_rows::<B, 4, 5>(
+        // scatter back onto the write axis: a read position's `da` is one position.
+        let d_da_blue_bnhl: F<B, 4> = scatter_read_positions::<B, 4, 5>(
             d_da_blue_bnhTM
                 .reshape([batch, n, nheads, chunk_tokens, mimo_rank]) // d_da_blue_bnhtm
                 .sum_dim(4) // d_da_blue_bnht1
@@ -366,7 +366,7 @@ pub fn combined_backward<B: Backend>(
             .sum_dim(3) // d_diff_bnh1LMₛ
             .squeeze_dim::<4>(3); // d_da_source_bnhLMₛ
 
-        let d_da_target_bnhl: F<B, 4> = scatter_read_rows::<B, 4, 5>(
+        let d_da_target_bnhl: F<B, 4> = scatter_read_positions::<B, 4, 5>(
             d_da_target_bnhTM
                 .reshape([batch, n, nheads, chunk_tokens, mimo_rank])
                 .sum_dim(4)

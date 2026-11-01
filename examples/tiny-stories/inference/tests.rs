@@ -139,16 +139,16 @@ fn check_decode(
     // `forward` over the prompt and the continuation.
     let whole = [tokens, continuation].concat();
     let (all, _) = net.forward(pairs(&whole, device), None, run.ssd_path.clone(), None, None);
-    // The rows of the latents come first, then one row per token.
+    // The positions of the latents come first, then one position per token.
     let lead = all.dims()[1] - whole.len();
-    assert_eq!(lead, N_LATENTS, "one row per latent, then one per token");
-    let row = |i: usize| all.clone().narrow(1, lead + i, 1).squeeze_dim::<2>(1);
+    assert_eq!(lead, N_LATENTS, "one position per latent, then one per token");
+    let at = |i: usize| all.clone().narrow(1, lead + i, 1).squeeze_dim::<2>(1);
     let mut decoded = vec![logits];
-    let mut scored = vec![row(len - 1)];
+    let mut scored = vec![at(len - 1)];
     let mut openings = [(caches, class), (one_pass_caches, one_pass_class)];
     for (k, &token) in continuation.iter().enumerate().take(continuation.len() - 1) {
         let x = Tensor::<1, Int>::from_ints(pair(token), device).reshape([1, 2]);
-        let want = row(len + k);
+        let want = at(len + k);
         for (path, (caches, class)) in ["prefill", "one pass"].iter().zip(&mut openings) {
             let (got, next) = net.step(x.clone(), Some(caches.clone()), Some(class));
             *caches = next;

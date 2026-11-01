@@ -37,7 +37,7 @@ use rand_chacha::ChaCha8Rng;
 /// `n_stories` validation stories, `batch` sequences per `forward` (see
 /// [`crate::common::context`]). Each sequence opens with the start embeddings
 /// (one `forward_opened`), as the validation scores the first window of a
-/// story. The start embeddings are the lead rows of the measure.
+/// story. The start embeddings are the lead positions of the measure.
 pub fn context_use(
     model_config: HNetStoriesConfig,
     device: Device,
@@ -182,7 +182,7 @@ fn tokens(tokens: &[u8], device: &Device) -> Tensor<3, Int> {
 /// where stage 1 also starts one, and `⦀` deeper.
 ///
 /// It runs one `forward_opened` over the start embeddings, the prompt and the
-/// text. Stage `s + 1` routes the rows where stage `s` started a chunk. So
+/// text. Stage `s + 1` routes the positions where stage `s` started a chunk. So
 /// the depth of a character is the number of stages that start a chunk at it.
 pub fn show_chunks(model: &MambaHNetVocabNet, run: &Run, device: &Device, prompt_tokens: &[u8], text: &str) -> String {
     let text_tokens = VOCAB.encode_cased(text);
@@ -192,14 +192,14 @@ pub fn show_chunks(model: &MambaHNetVocabNet, run: &Run, device: &Device, prompt
     }
     let (_, _, routing) = model.forward_opened(tokens(&all, device), run.paths.clone(), None);
     let n_start = model.n_start();
-    // The rows (of the whole opened sequence) that each stage routes.
-    let mut rows: Vec<usize> = (0..n_start + all.len()).collect();
-    let mut depth = vec![0usize; rows.len()];
+    // The positions (of the whole opened sequence) that each stage routes.
+    let mut positions: Vec<usize> = (0..n_start + all.len()).collect();
+    let mut depth = vec![0usize; positions.len()];
     for r in &routing {
         let chunk_boundary: Vec<bool> = r.chunk_boundary_bs.clone().int().into_data().iter::<i64>().map(|v| v != 0).collect();
-        rows = rows.iter().zip(&chunk_boundary).filter(|(_, b)| **b).map(|(&row, _)| row).collect();
-        for &row in &rows {
-            depth[row] += 1;
+        positions = positions.iter().zip(&chunk_boundary).filter(|(_, b)| **b).map(|(&p, _)| p).collect();
+        for &p in &positions {
+            depth[p] += 1;
         }
     }
     let mut out = String::new();

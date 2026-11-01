@@ -209,7 +209,7 @@ impl Wrap {
     }
 }
 
-/// Print the chunk ratio `F` of each stage (the share of its rows that start
+/// Print the chunk ratio `F` of each stage (the share of its positions that start
 /// a chunk), against its target `1/Nˢ`.
 fn log_chunks(routing: &[Routing], targets: &[f64]) {
     let stages: Vec<String> = routing

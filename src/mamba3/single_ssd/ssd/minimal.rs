@@ -145,14 +145,14 @@ impl Mamba3SingleSsdInput {
             let cb_bnhTMLM = c_bnhTMr.matmul(k_bnhrLM);
 
             // L_strict_base[i, j] = exp(cumA[row(i)] - cumA[j]) for row(i) > j,
-            // else 0 — rectangular, the read rows against every source.
+            // else 0 — rectangular, the read positions against every source.
             //
             // Like `segsum` but with -inf on the diagonal as well (so exp = 0
             // there), i.e. `triu(0)` rather than `triu(1)`.
             let l_strict_base_bhntl = {
                 let x_cumsum = a_bhnl.clone().cumsum(3);
                 let row: Tensor<5> =
-                    helpers::read_rows::<4, 5>(x_cumsum.clone(), 3, read_stride).unsqueeze_dim(4); // [..., t, 1]
+                    helpers::read_positions::<4, 5>(x_cumsum.clone(), 3, read_stride).unsqueeze_dim(4); // [..., t, 1]
                 let col: Tensor<5> = x_cumsum.unsqueeze_dim(3); // [..., 1, l]
                 let diff = row - col; // [..., t, l]
                 let neg_inf_strict =
@@ -185,11 +185,11 @@ impl Mamba3SingleSsdInput {
         //
         // y_diag[t, m_out, h, p] = γₜ · Σ_{m_in} (C[t, m_out, h, ·] · B[t, m_in, h, ·]) · PsiV[t, m_in, h, p]
         // =============================================================
-        // The same position is the *read* row, so V and B enter at those
+        // The same position is the *read* position, so V and B enter at those
         // positions.
         let y_diag_bntmhp = y_diag_correction(
-            helpers::read_rows::<6, 7>(input.v_bnlmhp, 2, read_stride),
-            helpers::read_rows::<6, 7>(input.b_bnlmhr, 2, read_stride),
+            helpers::read_positions::<6, 7>(input.v_bnlmhp, 2, read_stride),
+            helpers::read_positions::<6, 7>(input.b_bnlmhr, 2, read_stride),
             input.c_bntmhr,
             input.gamma_bnth,
             input.siso_specialization,
@@ -280,7 +280,7 @@ impl Mamba3SingleSsdInput {
         // y_off[n, t*M+m] = C[t*M+m]^T · exp(cumA[t]) · h'[n-1]
         // =============================================================
         let y_off_bnTMhp = {
-            let state_decay_bhnTM = helpers::read_rows::<4, 5>(a_cumsum_bhnl, 3, read_stride)
+            let state_decay_bhnTM = helpers::read_positions::<4, 5>(a_cumsum_bhnl, 3, read_stride)
                 .unsqueeze_dim::<5>(4)
                 .expand([batch, nheads, nchunks, chunk_tokens, mimo_rank])
                 .reshape([batch, nheads, nchunks, read])

@@ -357,7 +357,7 @@ pub fn k4_ssd_state_passing(
 ///   (the read axis)
 /// - `cb_bnhTMLM`: `[batch, nchunks, nheads, chunk_tokens·mimo_rank, chunk_len·mimo_rank]` from K2
 /// - `chunk_input_state_bnhpr`: `[batch, nchunks, nheads, per_head_dim, state_rank]`
-/// - `read_stride`: write positions per read row (`micro_steps`)
+/// - `read_stride`: write positions per read position (`micro_steps`)
 ///
 /// # Returns
 /// - `y_bntmhp`: `[batch, nchunks, chunk_tokens, mimo_rank, nheads, per_head_dim]`
@@ -380,13 +380,13 @@ pub fn k5_ssd_chunk_scan(
     let c_bnTMhr = c_bntmhr.reshape([batch, nchunks, read, nheads, state_rank]);
 
     // Expand base da_cumsum to fused length: [b, nheads, n, l] → [b, nheads, n, L],
-    // and to the read rows the target axis needs.
+    // and to the read positions the target axis needs.
     let da_cumsum_bhnLM = da_cumsum_bhnl
         .clone()
         .unsqueeze_dim::<5>(4) // da_cumsum_bhnl1
         .expand([batch, nheads, nchunks, chunk_len, mimo_rank]) // da_cumsum_bhnlm
         .reshape([batch, nheads, nchunks, fused]); // da_cumsum_bhnLM
-    let da_cumsum_bhnTM = helpers::read_rows::<4, 5>(da_cumsum_bhnl, 3, read_stride)
+    let da_cumsum_bhnTM = helpers::read_positions::<4, 5>(da_cumsum_bhnl, 3, read_stride)
         .unsqueeze_dim::<5>(4)
         .expand([batch, nheads, nchunks, chunk_tokens, mimo_rank])
         .reshape([batch, nheads, nchunks, read]);

@@ -7,13 +7,15 @@
 //! reads positions past the training window.
 //!
 //! The measure does not depend on the model. As [`super::context`], it reads
-//! the model through a [`LogitsFn`], with the lead rows in front of the tokens.
+//! the model through a [`LogitsFn`], with the lead positions in front of the
+//! tokens.
 //!
 //! It reads the validation stories that are longer than [`MIN_CHARS`]
 //! characters, from the whole validation split (not only the stories of the
 //! validation loss). About 1.5% of the stories are that long. It scores each
 //! story over its whole length in one `forward`, from a fresh state, with the
-//! lead rows in front (the last lead row predicts the first character). It
+//! lead positions in front (the last lead position predicts the first
+//! character). It
 //! reports the bits per character of the segments that [`BOUNDS`] cut, and of
 //! each [`BIN`] characters (the position profile). The bits are those of the
 //! cased text, as the validation scores it ([`cased_log_probs`]).
@@ -78,10 +80,13 @@ pub fn score(logits_of: &LogitsFn, device: &Device, tokens: &[Vec<u8>], batch: u
         }
         let x = Tensor::<1, Int>::from_ints(pairs.as_slice(), device).reshape([b, len, 2]);
         let logits = logits_of(x);
-        // The lead rows come first, then one row per token. The row of token
-        // `k − 1` predicts token `k`.
+        // The lead positions come first, then one position per token. The
+        // position of token `k − 1` predicts token `k`.
         let lead = logits.dims()[1] - len;
-        assert!(lead >= 1, "no row predicts the first character: the model has no lead rows");
+        assert!(
+            lead >= 1,
+            "no position predicts the first character: the model has no lead positions"
+        );
         let log_p = cased_log_probs(logits.narrow(1, lead - 1, len));
         let column = |cols: Vec<i32>| Tensor::<1, Int>::from_ints(cols.as_slice(), device).reshape([b, len, 1]);
         let weight = |w: Vec<f32>| Tensor::<1>::from_floats(w.as_slice(), device).reshape([b, len]);

@@ -679,7 +679,7 @@ impl Mamba2 {
     /// ## Right padding
     ///
     /// `pad_bs` (`true` at padding, `None` ⇒ no padding) marks a right-padded
-    /// batch. A padded row is absent. It gets `Δ = 0` (the same identity update
+    /// batch. A padded position is absent. It gets `Δ = 0` (the same identity update
     /// as the chunk padding above), and each row reads its conv window at its
     /// own end (see [`burn_stack::modules::Block::block_forward`]).
     ///
@@ -702,12 +702,13 @@ impl Mamba2 {
     /// sequences one after another. Each one starts from the `origin` cache (a
     /// fresh one for `origin = None`).
     ///
-    /// `reset_bs` (`[batch, sequence]`, `true` at the first row of a segment)
-    /// marks each start. It must be at the first row of a chunk (every
-    /// `chunk_len` rows), and `chunk_len` must be at least `conv_kernel − 1`.
-    /// The rows before the first reset of a row continue from `cache`, as in
-    /// [`Self::forward`]. So a sequence can continue from the previous call. A
-    /// segment can end with pad rows (`pad_bs`) up to the next start. The
+    /// `reset_bs` (`[batch, sequence]`, `true` at the first position of a
+    /// segment) marks each start. It must be at the first position of a chunk
+    /// (every `chunk_len` positions), and `chunk_len` must be at least
+    /// `conv_kernel − 1`.
+    /// The positions before the first reset of a row continue from `cache`, as
+    /// in [`Self::forward`]. So a sequence can continue from the previous call.
+    /// A segment can end with padded positions (`pad_bs`) up to the next start. The
     /// result for each sequence is that of its own `forward` calls from
     /// `origin`. The returned cache is that of the last segment of each row.
     /// `origin` has no effect without resets. See [`crate::packing`].
@@ -748,7 +749,7 @@ impl Mamba2 {
         let chunk_len = ssd_path.chunk_len_or_optimal(state_rank, per_head_dim);
         assert!(chunk_len > 0);
         let reset_bn = reset_bs.map(|reset_bs| crate::packing::chunk_resets(reset_bs, chunk_len));
-        // A conv tap reads `conv_kernel − 1` rows back, and only the first
+        // A conv tap reads `conv_kernel − 1` positions back, and only the first
         // chunk of a segment checks for a restart (see [`crate::packing`]).
         assert!(
             reset_bn.is_none() || chunk_len + 1 >= conv_kernel,
@@ -924,7 +925,7 @@ impl Mamba2 {
         assert_eq!([1, 1, nheads], dt_bias_11h.dims());
 
         let dt_bsh = softplus(dt_raw_bsh + dt_bias_11h).clamp(self.dt_limit.0, self.dt_limit.1);
-        // A padded row is the identity update the chunk padding below inserts.
+        // A padded position is the identity update the chunk padding below inserts.
         let dt_bsh = match &pad_bs {
             Some(pad_bs) => crate::padding::fill_padded(dt_bsh, pad_bs, 0.0),
             None => dt_bsh,
@@ -1029,9 +1030,10 @@ impl Mamba2 {
     ///
     /// `Conv1d` computes `yₜ = bias + Σᵢ wᵢ · x̃ₜ₊ᵢ` over the causally padded
     /// input `x̃` (`conv_kernel − 1` cached columns, then the input). So tap
-    /// `i` reads `back = conv_kernel − 1 − i` rows back. At row `q < back` of
-    /// a segment, it reads column `i + q` of the origin's padding: the last
-    /// `back` columns of the `conv_kernel − 1` newest ones, in order.
+    /// `i` reads `back = conv_kernel − 1 − i` positions back. At position
+    /// `q < back` of a segment, it reads column `i + q` of the origin's
+    /// padding: the last `back` columns of the `conv_kernel − 1` newest ones,
+    /// in order.
     ///
     /// # Shapes
     /// - `xbc_padded_bvS` : `[batch, conv_dim, (conv_kernel − 1) + sequence]`
@@ -1061,8 +1063,8 @@ impl Mamba2 {
         for i in 0..conv_kernel {
             let back = conv_kernel - 1 - i;
             let tap_bvs = xbc_padded_bvS.clone().narrow(2, i, sequence);
-            // A read `back` rows back crosses a segment start in the first
-            // `back` rows of a chunk that starts with a reset.
+            // A read `back` positions back crosses a segment start in the first
+            // `back` positions of a chunk that starts with a reset.
             let tap_bvs = if back == 0 {
                 tap_bvs
             } else {

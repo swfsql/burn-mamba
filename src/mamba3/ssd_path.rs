@@ -80,7 +80,7 @@ impl Mamba3SsdPath {
     ///
     /// So `u` subdivides the chunk and does not shorten it, and `nchunks` grows
     /// like `u`, not `u²`. The returned length is a multiple of `micro_steps`.
-    /// So each chunk is a whole number of tokens, and their rows are a
+    /// So each chunk is a whole number of tokens, and their positions are a
     /// contiguous run. It is on the 32 grid exactly when `micro_steps` divides
     /// it.
     ///
@@ -138,7 +138,7 @@ impl Mamba3SsdPath {
     ///
     /// With that rounding, the read axis is a plain reshape. With
     /// `chunk_len = T·u`, a chunk covers write positions `[cL, (c+1)L)`, that
-    /// is tokens `[cT, (c+1)T)`, and the surviving rows (`≡ u−1 mod u`) are a
+    /// is tokens `[cT, (c+1)T)`, and the surviving positions (`≡ u−1 mod u`) are a
     /// contiguous run of them. At `micro_steps = 1` the rounding does nothing.
     pub fn chunk_len_or_optimal(&self, block: &Mamba3) -> usize {
         match self.chunk_len() {

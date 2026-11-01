@@ -111,10 +111,10 @@
 //!   micro-step *writes* to the state, so `B`, `x`, `Δ`, `A`, `λ` and the
 //!   rotation are on the write axis. The token is *read* once, so `C` stays at
 //!   token resolution, and so does the `y` that the SSD returns. That is the
-//!   **read axis** of the chunk (`helpers::read_rows`). `u` widens only the
+//!   **read axis** of the chunk (`helpers::read_positions`). `u` widens only the
 //!   write axis of a chunk. So the intra-chunk score, the state-to-output
 //!   product and the QK-norm/rotation of `C` are `u`-invariant. The block does
-//!   not compute `u`× the output to discard all rows but one.
+//!   not compute `u`× the output to discard all positions but one.
 //! - **`z`, the `D` skip and the output gate are per token.** The skip takes
 //!   the `x` of the last micro-step, which is contemporaneous with the readout
 //!   ([`last_micro4`]).
@@ -206,7 +206,7 @@ pub fn unfold_micro_b(t_bW: Tensor<2>, micro_steps: usize) -> Tensor<3> {
 /// write axis back to the read axis for the `D` skip.
 ///
 /// The output `y` needs no such collapse. The SSD computes only the readout
-/// row (the read axis of the chunk, see `helpers::read_rows`), so it already
+/// position (the read axis of the chunk, see `helpers::read_positions`), so it already
 /// returns token resolution.
 ///
 /// # Shapes

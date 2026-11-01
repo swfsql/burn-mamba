@@ -378,7 +378,7 @@ impl Mamba1 {
     /// a sequence in segments (prefill then decode, or chunked prefill).
     ///
     /// `pad_bs` (`true` at padding, `None` ⇒ no padding) is right padding. A
-    /// padded row is absent: it has `Δ = 0`, and each row reads its conv
+    /// padded position is absent: it has `Δ = 0`, and each row reads its conv
     /// window at its own end (see [`burn_stack::modules::Block::block_forward`]).
     ///
     /// # Shapes
@@ -484,8 +484,8 @@ impl Mamba1 {
 
     /// Computes the selective-SSM parameters (Δ, A, B, C) from the conv output
     /// and runs the [`Self::selective_scan`] recurrence over the full sequence.
-    /// A padded row (`pad_bs`) gets `Δ = 0`. Then `exp(ΔA) = 1` and `ΔBu = 0`,
-    /// so the state goes through that row unchanged.
+    /// A padded position (`pad_bs`) gets `Δ = 0`. Then `exp(ΔA) = 1` and
+    /// `ΔBu = 0`, so the state goes through that position unchanged.
     ///
     /// # Shapes
     ///   - Input u `[batch, sequence, d_inner]`

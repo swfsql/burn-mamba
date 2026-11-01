@@ -3,9 +3,9 @@
 //!
 //! The measure does not depend on the model. It reads the model through a
 //! [`LogitsFn`], so each example (`tiny-stories`, `hnet-stories`) gives its own
-//! `forward`. The *lead rows* of a model are the rows that its `forward` puts in
-//! front of the tokens (the class latents of `tiny-stories`, the start
-//! embeddings of `hnet-stories`).
+//! `forward`. The *lead positions* of a model are the positions that its
+//! `forward` puts in front of the tokens (the class latents of `tiny-stories`,
+//! the start embeddings of `hnet-stories`).
 //!
 //! The validation loss mixes two kinds of prediction. The local one
 //! (spelling, grammar, stock phrases) is most of it. The use of the earlier
@@ -15,7 +15,7 @@
 //! Each validation story with at least [`PROMPT`] + [`CONTINUATION`]
 //! characters gives a prompt `P` (its first [`PROMPT`] characters) and a
 //! continuation `C` (the next [`CONTINUATION`] characters). [`score`] scores
-//! `C` as the validation scores it (one `forward`, the lead rows in front):
+//! `C` as the validation scores it (one `forward`, the lead positions in front):
 //! after its own `P`, and after the `P` of another story (story `i`
 //! reads the prompt of story `i + 1`, and in a second pairing of story
 //! `i + 2`, whose spread is the noise). The use is the difference, in bits
@@ -33,7 +33,7 @@
 //!
 //! **Coherence boosting** (Malkin et al. 2022) shows whether the readout gives
 //! the prompt too little weight. [`score`] also scores `C` with no prompt (the
-//! lead rows, then `C`). Then it scores `C` after each prompt with the
+//! lead positions, then `C`). Then it scores `C` after each prompt with the
 //! boosted log-probabilities, for each α of [`ALPHAS`]:
 //!
 //! `log_softmax((1 + α)·log p(· | P, C<k) − α·log p(· | C<k))`
@@ -63,7 +63,7 @@ use std::path::Path;
 
 /// The trained model, as the measure reads it: the logits
 /// `[b, lead + s, VOCAB_SIZE + 1]` of the token pairs `[b, s, 2]`. Each
-/// sequence starts fresh (no cache), and the `lead` rows of the model come
+/// sequence starts fresh (no cache), and the `lead` positions of the model come
 /// first (see the module header). The measure finds `lead` from the shapes.
 pub type LogitsFn<'a> = dyn Fn(Tensor<3, Int>) -> Tensor<3> + 'a;
 
@@ -133,7 +133,7 @@ pub fn mean_se(xs: &[f64]) -> (f64, f64) {
 /// continuations.
 #[derive(Clone, Debug)]
 pub struct Scores {
-    /// With no prompt: the lead rows, then the continuation.
+    /// With no prompt: the lead positions, then the continuation.
     pub none: Vec<Bits>,
     /// `pairings[j][a]`: after the prompts of pairing `j`, boosted by
     /// `alphas[a]`.
@@ -166,9 +166,9 @@ fn boost(full: Tensor<3>, none: Tensor<3>, alpha: f64) -> Tensor<3> {
 
 /// The log-probabilities (see [`cased_log_probs`]) of the continuations of
 /// `rows`. Each continuation follows the first `p` characters of the prompt
-/// that `pair_of` gives it, with the lead rows in front (as the validation
-/// scores it). With `p = 0`, the readout of the last lead row predicts the
-/// first character.
+/// that `pair_of` gives it, with the lead positions in front (as the
+/// validation scores it). With `p = 0`, the readout of the last lead position
+/// predicts the first character.
 #[allow(clippy::too_many_arguments)]
 fn log_probs(
     logits_of: &LogitsFn,
@@ -187,17 +187,20 @@ fn log_probs(
         .collect();
     let x = Tensor::<1, Int>::from_ints(pairs.as_slice(), device).reshape([b, p + c, 2]);
     let logits = logits_of(x);
-    // The lead rows come first, then one row per token. The row of token
-    // `p + k − 1` predicts `continuations[i][k]`.
+    // The lead positions come first, then one position per token. The
+    // position of token `p + k − 1` predicts `continuations[i][k]`.
     let lead = logits.dims()[1] - (p + c);
-    assert!(lead + p >= 1, "no row predicts the first character: no prompt and no lead rows");
+    assert!(
+        lead + p >= 1,
+        "no position predicts the first character: no prompt and no lead positions"
+    );
     cased_log_probs(logits.narrow(1, lead + p - 1, c))
 }
 
 /// Score each continuation with no prompt, and after the prompt that each
 /// pairing gives it: `continuations[i]` follows `prompts[pairings[j](i)]`.
 /// After a prompt, score it at each boost strength of `alphas` (see the module
-/// header). The lead rows are in front, as the validation scores it. All
+/// header). The lead positions are in front, as the validation scores it. All
 /// prompts have one length, and all continuations another. One call of
 /// `logits_of` takes `batch` sequences. Each [`Bits`] holds the mean bits per character of
 /// the first `join` characters of one continuation, and of the rest. For each

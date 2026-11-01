@@ -56,10 +56,10 @@ pub(crate) fn window<const D: usize>(
     x.gather(axis, idx_bw.reshape(shape).expand(dims))
 }
 
-/// `pad_bt` with every row repeated `u` times in place: the padding of a token
+/// `pad_bt` with every position repeated `u` times in place: the padding of a token
 /// spread over its `u` micro-steps on the write axis (`[batch, tokens]` →
 /// `[batch, tokens·u]`).
-pub(crate) fn repeat_rows(pad_bt: Tensor<2, Bool>, u: usize) -> Tensor<2, Bool> {
+pub(crate) fn repeat_positions(pad_bt: Tensor<2, Bool>, u: usize) -> Tensor<2, Bool> {
     let [batch, tokens] = pad_bt.dims();
     pad_bt
         .unsqueeze_dim::<3>(2)
@@ -67,7 +67,7 @@ pub(crate) fn repeat_rows(pad_bt: Tensor<2, Bool>, u: usize) -> Tensor<2, Bool> 
         .reshape([batch, tokens * u])
 }
 
-/// `x` with the entries of every padded row replaced by `value`. `x` is
+/// `x` with the entries of every padded position replaced by `value`. `x` is
 /// `[batch, sequence, …]` and `pad_bs` is `[batch, sequence]`.
 pub(crate) fn fill_padded<const D: usize>(x: Tensor<D>, pad_bs: &Tensor<2, Bool>, value: f32) -> Tensor<D> {
     let [batch, sequence] = pad_bs.dims();

@@ -27,7 +27,7 @@ const STAGE_STATE_RANK: usize = 32;
 /// The state rank of the blocks of the main network.
 const MAIN_STATE_RANK: usize = 64;
 
-/// The target mean chunk length of each stage, in rows of its own input. At
+/// The target mean chunk length of each stage, in positions of its own input. At
 /// stage 0 that is characters: about a short word.
 const RATIO_TARGETS: [f64; 2] = [4.0, 2.0];
 
@@ -37,7 +37,7 @@ const RATIO_TARGETS: [f64; 2] = [4.0, 2.0];
 const N_START_EMBEDDINGS: usize = 4;
 
 /// `α`, ten times the reference value. Early in training, the encoders of a
-/// model this small make adjacent rows similar, and the router starts almost
+/// model this small make adjacent positions similar, and the router starts almost
 /// no chunk. The reference weight is then too weak to bring the chunks back.
 const RATIO_WEIGHT: f64 = 0.3;
 
@@ -74,9 +74,9 @@ impl ModelConfigExt for HNetStoriesConfig {
 ///   λˢ = √( Dᴹ/Dˢ · Πᵢ₌ₛ^{S−1} Nⁱ )
 /// ```
 ///
-/// A stage sees `Πᵢ Nⁱ` times more rows per training step than the main network: a
-/// larger effective batch. It is also narrower, which allows a larger rate
-/// per unit of width.
+/// A stage sees `Πᵢ Nⁱ` times more positions per training step than the main
+/// network: a larger effective batch. It is also narrower, which allows a
+/// larger rate per unit of width.
 pub fn lr_multipliers(widths: &[usize], main_width: usize, targets: &[f64]) -> Vec<f64> {
     let mut multipliers: Vec<f64> = (0..widths.len())
         .map(|s| (main_width as f64 / widths[s] as f64 * targets[s..].iter().product::<f64>()).sqrt())

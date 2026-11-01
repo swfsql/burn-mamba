@@ -71,7 +71,7 @@ surrounding whitespace. Nothing goes between two stories: a story is a
 self-contained example.
 
 - Four `ClassLatent::Start` registers mark its start. They are learnable
-  `d_model`-wide rows that the stack puts in front of the sequence.
+  `d_model`-wide positions that the stack puts in front of the sequence.
 - The **last of them is scored against the first character of the story**. So
   the model learns "what does a story start with?" from the latents alone.
 

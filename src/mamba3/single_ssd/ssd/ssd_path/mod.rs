@@ -48,7 +48,7 @@ pub struct Mamba3SingleSsdInput {
     pub b_bnlmhr: Tensor<6>,
 
     /// Q/C tensor: the same processing as `b_bnlmhr`, but on the **read** axis
-    /// of the chunk: one row per token, not per write position.
+    /// of the chunk: one position per token, not per write position.
     ///
     /// Every micro-step of a token writes to the accumulator. The token is read
     /// once, at its last micro-step
@@ -109,7 +109,7 @@ pub struct Mamba3SingleSsdInput {
     /// axis *is* the chunk and every shape below reduces to `chunk_len`.
     ///
     /// `chunk_len` is a multiple of it. So a chunk holds a whole number of
-    /// tokens, and their rows are the contiguous run
+    /// tokens, and their positions are the contiguous run
     /// `[chunk · chunk_tokens, (chunk+1) · chunk_tokens)`.
     pub read_stride: usize,
 

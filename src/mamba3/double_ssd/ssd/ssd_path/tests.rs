@@ -40,7 +40,7 @@ fn random_input(
         Distribution::Normal(0.0, 1.0),
         device,
     );
-    // `C` lives on the chunk's read axis (one row per token).
+    // `C` lives on the chunk's read axis (one position per token).
     let c = Tensor::<6>::random(
         [
             batch,
@@ -126,26 +126,26 @@ struct PathRun {
 }
 
 // ---------------------------------------------------------------------------
-// The read axis, spelled out row by row
+// The read axis, spelled out position by position
 //
 // Re-derived here one `narrow` at a time rather than reusing
-// `helpers::read_rows` / `scatter_read_rows`: a test that calls the
+// `helpers::read_positions` / `scatter_read_positions`: a test that calls the
 // implementation it is verifying proves nothing about it.
 // ---------------------------------------------------------------------------
 
-/// The write positions a read row sits at: `i·stride + (stride − 1)`.
-fn kept_rows<const D: usize>(t: Tensor<D>, dim: usize, stride: usize) -> Tensor<D> {
-    let rows = t.dims()[dim] / stride;
+/// The write positions a read position sits at: `i·stride + (stride − 1)`.
+fn kept_reads<const D: usize>(t: Tensor<D>, dim: usize, stride: usize) -> Tensor<D> {
+    let reads = t.dims()[dim] / stride;
     Tensor::cat(
-        (0..rows)
+        (0..reads)
             .map(|i| t.clone().narrow(dim, i * stride + stride - 1, 1))
             .collect(),
         dim,
     )
 }
 
-/// [`kept_rows`]' transpose: put each row back where it came from, zero between.
-fn scatter_rows<const D: usize>(t: Tensor<D>, dim: usize, stride: usize) -> Tensor<D> {
+/// [`kept_reads`]' transpose: put each row back where it came from, zero between.
+fn scatter_reads<const D: usize>(t: Tensor<D>, dim: usize, stride: usize) -> Tensor<D> {
     let dims = t.dims();
     let device = t.device();
     let mut gap = dims;
@@ -354,8 +354,8 @@ fn paths_agree_single_chunk_zero_init() {
     run_minimal_matches_serial(2, 1, 4, 1, 1, 2, 8, 8, false);
 }
 
-/// The chunk's **read axis**: `micro_steps > 1` narrows `C` and `y` to one row
-/// per token while the writes stay on the write axis. All three algorithms —
+/// The chunk's **read axis**: `micro_steps > 1` narrows `C` and `y` to one
+/// position per token while the writes stay on the write axis. All three algorithms —
 /// and, for `SerialRecalculated`, its hand-written backward's scatter back onto
 /// the write axis — have to agree there too.
 #[test]
@@ -371,7 +371,7 @@ fn paths_agree_with_a_read_stride_mimo() {
 
 /// The read axis against the **undecimated** kernel.
 ///
-/// `read_stride = 1` is that kernel: `read_rows` and `scatter_read_rows` are
+/// `read_stride = 1` is that kernel: `read_positions` and `scatter_read_positions` are
 /// the identity there, and the rectangular mask reduces to the full `triu`. So
 /// one set of inputs run both ways compares the decimated algorithm against
 /// the undecimated one, not against a sibling of itself.
@@ -390,7 +390,7 @@ fn read_axis_matches_the_undecimated_kernel() {
 
     for (chunk_len, stride, mimo_rank) in [(4, 2, 1), (6, 3, 1), (6, 3, 2), (4, 4, 2)] {
         // One draw: `v`/`b`/`da` on the write axis, `c` on the read one.
-        let (v, da, b, c_rows, init) = random_input(
+        let (v, da, b, c_reads, init) = random_input(
             batch,
             nchunks,
             chunk_len,
@@ -404,9 +404,9 @@ fn read_axis_matches_the_undecimated_kernel() {
         );
         // The same `C` the full kernel would have been handed. What sits at the
         // positions it never reads is arbitrary — zero says so loudest.
-        let c_full = scatter_rows(c_rows.clone(), 2, stride);
+        let c_full = scatter_reads(c_reads.clone(), 2, stride);
 
-        let y_head_rows = Tensor::<6>::random(
+        let y_head_reads = Tensor::<6>::random(
             [
                 batch,
                 nchunks,
@@ -418,9 +418,9 @@ fn read_axis_matches_the_undecimated_kernel() {
             Distribution::Normal(0.0, 1.0),
             &device,
         );
-        // Zero between the read rows, so the full run's loss sees exactly the
-        // rows the decimated one produces.
-        let y_head_full = scatter_rows(y_head_rows.clone(), 2, stride);
+        // Zero between the read positions, so the full run's loss sees exactly the
+        // positions the decimated one produces.
+        let y_head_full = scatter_reads(y_head_reads.clone(), 2, stride);
         let s_head = Tensor::<4>::random(
             [batch, nheads, per_head_dim, state_rank],
             Distribution::Normal(0.0, 1.0),
@@ -439,11 +439,11 @@ fn read_axis_matches_the_undecimated_kernel() {
                     v.clone(),
                     da.clone(),
                     b.clone(),
-                    c_rows.clone(),
+                    c_reads.clone(),
                     init.clone(),
                     stride,
                 ),
-                y_head_rows.clone(),
+                y_head_reads.clone(),
                 s_head.clone(),
             );
             let full = run_path(
@@ -460,11 +460,11 @@ fn read_axis_matches_the_undecimated_kernel() {
                 s_head.clone(),
             );
 
-            // Same values at the read rows … (relative to the full kernel:
+            // Same values at the read positions … (relative to the full kernel:
             // some gradients reach 32).
             let d_c_full = full.d_c;
             for (what, d) in [
-                ("y", max_rel_diff(read.y, kept_rows(full.y, 2, stride))),
+                ("y", max_rel_diff(read.y, kept_reads(full.y, 2, stride))),
                 ("final_state", max_rel_diff(read.state, full.state)),
                 ("grad v", max_rel_diff(read.d_v, full.d_v)),
                 ("grad b", max_rel_diff(read.d_b, full.d_b)),
@@ -475,21 +475,21 @@ fn read_axis_matches_the_undecimated_kernel() {
                 ),
                 (
                     "grad c",
-                    max_rel_diff(read.d_c, kept_rows(d_c_full.clone(), 2, stride)),
+                    max_rel_diff(read.d_c, kept_reads(d_c_full.clone(), 2, stride)),
                 ),
             ] {
                 assert!(d < dtype_tol(1e-4), "{label}: {what} max rel diff = {d:.3e}");
             }
 
-            // … and, off the read rows, nothing to compute.
-            let dropped = scatter_rows(kept_rows(d_c_full.clone(), 2, stride), 2, stride);
+            // … and, off the read positions, nothing to compute.
+            let dropped = scatter_reads(kept_reads(d_c_full.clone(), 2, stride), 2, stride);
             let d = max_abs_diff(
                 d_c_full - dropped,
                 Tensor::<6>::zeros([1, 1, 1, 1, 1, 1], &device),
             );
             assert!(
                 d < 1e-6,
-                "{label}: grad c is non-zero between the read rows ({d:.3e})",
+                "{label}: grad c is non-zero between the read positions ({d:.3e})",
             );
         }
     }

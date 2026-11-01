@@ -20,7 +20,7 @@
 use crate::mamba3::double_ssd::ssd::serial_recalculated::{
     k1_ssd_chunk_cumsum, k2_ssd_bmm, k3_ssd_chunk_state, k4_ssd_state_passing,
 };
-use crate::mamba3::helpers::prim::{read_causal_mask, read_rows};
+use crate::mamba3::helpers::prim::{read_causal_mask, read_positions};
 use crate::mamba3::single_ssd::prelude::*;
 use crate::mamba3::single_ssd::ssd::serial_recalculated::diag::y_diag_correction;
 use burn_stack::utils::fprim::{F, san};
@@ -105,7 +105,7 @@ pub trait Mamba3SingleSsdBackendExt: Backend {
     /// - `scale_bnlh`:         `[batch, nchunks, chunk_len, nheads]` — `scaleₜ` (see
     ///   [`Mamba3SingleSsdInput::scale_bnlh`])
     /// - `initial_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
-    /// - `read_stride`:        `micro_steps` — write positions per read row, so
+    /// - `read_stride`:        `micro_steps` — write positions per read position, so
     ///   `chunk_tokens = chunk_len / read_stride` (see
     ///   [`Mamba3SingleSsdInput::read_stride`])
     /// - `siso_specialization`: allow the specialized `mimo_rank == 1`
@@ -258,7 +258,7 @@ fn k5_single_ssd_chunk_scan<B: Backend>(
         .unsqueeze_dim::<5>(4)
         .expand([batch, nheads, nchunks, chunk_len, mimo_rank])
         .reshape([batch, nheads, nchunks, fused]);
-    let da_cumsum_bhnTM = read_rows::<B, 4, 5>(da_cumsum_bhnl, 3, read_stride)
+    let da_cumsum_bhnTM = read_positions::<B, 4, 5>(da_cumsum_bhnl, 3, read_stride)
         .unsqueeze_dim::<5>(4)
         .expand([batch, nheads, nchunks, chunk_tokens, mimo_rank])
         .reshape([batch, nheads, nchunks, read]);
@@ -286,7 +286,7 @@ fn k5_single_ssd_chunk_scan<B: Backend>(
         .expand([batch, nchunks, nheads, read, fused]);
     let diff_bnhTMLM = target_da_cumsum_bnhTMLM - source_da_cumsum_bnhTMLM;
 
-    // Strict-upper -inf mask over (read row, write source) on the base time
+    // Strict-upper -inf mask over (read position, write source) on the base time
     // grid, then interleave-expand both axes so MIMO same-time blocks are
     // zeroed.
     let inf_upper_bnhTMLM = read_causal_mask::<B>(chunk_len, read_stride, 0, &device, dtype)
@@ -315,10 +315,10 @@ fn k5_single_ssd_chunk_scan<B: Backend>(
     let v_bnhLMp = v_bnLMhp.swap_dims(2, 3);
     let y_lower_bnhTMp = masked_cb_bnhTMLM.matmul(v_bnhLMp);
 
-    // ── Y_diag: γ-weighted diagonal correction, at the read rows ────────────
+    // ── Y_diag: γ-weighted diagonal correction, at the read positions ────────────
     let y_diag_bntmhp = y_diag_correction::<B>(
-        read_rows::<B, 6, 7>(v_bnlmhp, 2, read_stride),
-        read_rows::<B, 6, 7>(b_bnlmhr, 2, read_stride),
+        read_positions::<B, 6, 7>(v_bnlmhp, 2, read_stride),
+        read_positions::<B, 6, 7>(b_bnlmhr, 2, read_stride),
         c_bntmhr,
         gamma_bnth,
         siso_specialization,

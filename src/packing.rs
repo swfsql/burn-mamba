@@ -31,11 +31,11 @@
 //! per-chunk flag is all that those sites need, and no scan runs over the row
 //! for them. This needs a read that reaches back one chunk at most:
 //!
-//! - A Mamba-2 conv tap reads `conv_kernel − 1` rows back. So
+//! - A Mamba-2 conv tap reads `conv_kernel − 1` positions back. So
 //!   `Mamba2::forward_packed` asserts `chunk_len ≥ conv_kernel − 1`.
 //! - A Mamba-3 tap reads `u` positions (one token) back at most.
 //!
-//! A segment can end with pad rows (`pad`), up to the next chunk start. The official Mamba-3 varlen kernels also start each
+//! A segment can end with padded positions (`pad`), up to the next chunk start. The official Mamba-3 varlen kernels also start each
 //! sequence at a chunk start, with a padded last chunk.
 //!
 //! Some scans run over the whole row: the cumulative rotation of Mamba-3 and
@@ -296,7 +296,7 @@ pub(crate) fn restart_window<const D: usize>(
     let device = x_all.device();
     let start_bw = last_start_b.reshape([batch, 1]).expand([batch, width]);
     // In `[start | last segment]`, the window starts at the real length of
-    // the segment (zero for a segment with no real row).
+    // the segment (zero for a segment with no real token).
     let local_end_bw = (end_b.reshape([batch, 1]).expand([batch, width]) - start_bw.clone()).clamp_min(0);
     let local_bw = Tensor::<1, Int>::arange(0..width as i64, &device)
         .reshape([1, width])

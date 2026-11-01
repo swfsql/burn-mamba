@@ -98,7 +98,7 @@ impl Mamba3 {
         // A padded token pads all of its micro-steps. `end_b` is one past the
         // last real position of each row on the write axis, where its cache
         // fields are read.
-        let pad_bs = pad_bt.map(|pad_bt| crate::padding::repeat_rows(pad_bt, micro_steps));
+        let pad_bs = pad_bt.map(|pad_bt| crate::padding::repeat_positions(pad_bt, micro_steps));
         let end_b = pad_bs.as_ref().map(crate::padding::real_end_b);
 
         // A reset is at the first token of a chunk, which is its first
@@ -487,7 +487,7 @@ impl Mamba3 {
 
         // ── Step 10: Unpad ────────────────────────────────────────────────────
         // The SSD returns token resolution: the readout is after all `u`
-        // writes, and the kernel computed only that row. From here, `t`
+        // writes, and the kernel computed only that position. From here, `t`
         // (`tokens`) is the time axis again: the read axis.
         let y_bTmhp = y_bntmhp.reshape([batch, tokens_padded, mimo_rank, nheads, per_head_dim]);
         let y_btmhp = if pad == 0 {
@@ -978,7 +978,7 @@ mod step {
 
             // ── Cumulative rotation, applied to B at every write and to C ─────
             // at the one read: the routine of `forward` at `sequence = u`,
-            // `tokens = 1`, `read_stride = u`. The read row is the last
+            // `tokens = 1`, `read_stride = u`. The read position is the last
             // micro-step, so `C` gets exactly the cumulative rotation of the
             // readout.
             let (b_bumhr, c_b1mhr, new_rotation) = rotate_bc_forward(
@@ -1075,7 +1075,7 @@ mod step {
             .fold(state_bhpr, |state, write| state + write);
             san(&state_bhpr);
 
-            // The inputs of the readout: `C` at the one read row of the block,
+            // The inputs of the readout: `C` at the one read position of the block,
             // and the value of the `D` skip at the micro-step of that read (the
             // last one).
             let c_bmhr = c_b1mhr.squeeze_dim::<4>(1);
@@ -1089,9 +1089,9 @@ mod step {
             let out_m_bmhp = Self::step_readout(state_bhpr.clone(), c_bmhr, siso);
             san(&out_m_bmhp);
 
-            // ── The ports of the positive systems, at the one read row ────────
+            // ── The ports of the positive systems, at the one read position ───
             // The tail of `forward` on a one-token axis: the last micro-step of
-            // the block is both the read row and the next carry.
+            // the block is both the read position and the next carry.
             let (out_b1mhp, log_precision_bh, tropical_bh) = self.positive_tail(
                 out_m_bmhp.unsqueeze_dim::<5>(1),
                 proj.log_precision_buh,

@@ -26,7 +26,7 @@ use crate::mamba3::double_ssd::ssd::serial_recalculated::{
     cat_chunk_groups, k1_ssd_chunk_cumsum, k2_ssd_bmm, k4_ssd_state_passing,
     k4_ssd_state_passing_backward,
 };
-use crate::mamba3::helpers::prim::{read_causal_mask, read_rows, scatter_read_rows};
+use crate::mamba3::helpers::prim::{read_causal_mask, read_positions, scatter_read_positions};
 use crate::mamba3::single_ssd::ssd::serial_recalculated::diag::{
     DiagGrads, y_diag_correction_backward,
 };
@@ -77,7 +77,7 @@ pub struct CombinedSingleSsdGrads<B: Backend> {
 /// - `d_final_bhpr` — upstream gradient of the final state
 /// - `v_bnlmhp`, `da_bnlh`, `b_bnlmhr`, `c_bntmhr`, `gamma_bnth`, `scale_bnlh`,
 ///   `initial_state_bhpr` — the seven saved forward inputs
-/// - `read_stride` — write positions per read row (see
+/// - `read_stride` — write positions per read position (see
 ///   [`Mamba3SingleSsdInput::read_stride`](crate::mamba3::single_ssd::ssd::Mamba3SingleSsdInput))
 /// - `siso_specialization` — the forward's γ-correction branch choice, replayed
 ///   here so the backward matches it (performance-only; both agree)
@@ -165,7 +165,7 @@ pub fn combined_backward<B: Backend>(
         .unsqueeze_dim::<5>(4)
         .expand([batch, nheads, nchunks, chunk_len, mimo_rank])
         .reshape([batch, nheads, nchunks, fused]);
-    let da_cumsum_bhnTM = read_rows::<B, 4, 5>(da_cumsum_bhnl.clone(), 3, read_stride)
+    let da_cumsum_bhnTM = read_positions::<B, 4, 5>(da_cumsum_bhnl.clone(), 3, read_stride)
         .unsqueeze_dim::<5>(4)
         .expand([batch, nheads, nchunks, chunk_tokens, mimo_rank])
         .reshape([batch, nheads, nchunks, read]);
@@ -184,8 +184,8 @@ pub fn combined_backward<B: Backend>(
     //   qk_dot[m_out, m_in] = Σ_r C[m_out, r] · B[m_in, r]
     //   y_diag[m_out, p]    = γ · Σ_{m_in} qk_dot[m_out, m_in] · V[m_in, p]
     // ═══════════════════════════════════════════════════════════════════════
-    // The same position is the *read* row, so V and B enter at those positions and
-    // their gradients are scattered back onto the write axis.
+    // The same position is the *read* position, so V and B enter at those
+    // positions and their gradients are scattered back onto the write axis.
     let DiagGrads {
         d_v_bnlmhp: d_v_diag_bntmhp,
         d_c_bnlmhr: d_c_diag_bntmhr,
@@ -193,14 +193,14 @@ pub fn combined_backward<B: Backend>(
         d_gamma_bnlh: d_gamma_bnth,
     } = y_diag_correction_backward(
         d_y_bntmhp.clone(),
-        read_rows::<B, 6, 7>(v_bnlmhp.clone(), 2, read_stride),
-        read_rows::<B, 6, 7>(b_bnlmhr.clone(), 2, read_stride),
+        read_positions::<B, 6, 7>(v_bnlmhp.clone(), 2, read_stride),
+        read_positions::<B, 6, 7>(b_bnlmhr.clone(), 2, read_stride),
         c_bntmhr.clone(),
         gamma_bnth.clone(),
         siso_specialization,
     );
-    let d_v_diag_bnlmhp = scatter_read_rows::<B, 6, 7>(d_v_diag_bntmhp, 2, read_stride);
-    let d_b_diag_bnlmhr = scatter_read_rows::<B, 6, 7>(d_b_diag_bntmhr, 2, read_stride);
+    let d_v_diag_bnlmhp = scatter_read_positions::<B, 6, 7>(d_v_diag_bntmhp, 2, read_stride);
+    let d_b_diag_bnlmhr = scatter_read_positions::<B, 6, 7>(d_b_diag_bntmhr, 2, read_stride);
     san(&d_gamma_bnth);
 
     // Reusable [chunk_tokens, chunk_len] -inf strict-upper mask (triu(0) on the
@@ -294,7 +294,7 @@ pub fn combined_backward<B: Backend>(
             .squeeze_dim::<4>(4);
         // The row's own `da` is one of the write positions, so its gradient
         // goes back to that one and nowhere else.
-        let d_da_blue_bnhl: F<B, 4> = scatter_read_rows::<B, 4, 5>(
+        let d_da_blue_bnhl: F<B, 4> = scatter_read_positions::<B, 4, 5>(
             d_da_blue_bnhTM
                 .reshape([batch, n, nheads, chunk_tokens, mimo_rank])
                 .sum_dim(4)
@@ -357,11 +357,11 @@ pub fn combined_backward<B: Backend>(
         let d_decay_strict_bnhTMLM = d_prod_bnhTMLM * cb_bnhTMLM;
         let d_diff_bnhTMLM = d_decay_strict_bnhTMLM * decay_strict_bnhTMLM;
 
-        // The target term lands on the read rows (scattered back onto the
+        // The target term lands on the read positions (scattered back onto the
         // write axis), the source term on every write position.
         let d_da_target_bnhTM: F<B, 4> = d_diff_bnhTMLM.clone().sum_dim(4).squeeze_dim::<4>(4);
         let d_da_source_bnhLM: F<B, 4> = d_diff_bnhTMLM.sum_dim(3).squeeze_dim::<4>(3);
-        let d_da_target_bnhl: F<B, 4> = scatter_read_rows::<B, 4, 5>(
+        let d_da_target_bnhl: F<B, 4> = scatter_read_positions::<B, 4, 5>(
             d_da_target_bnhTM
                 .reshape([batch, n, nheads, chunk_tokens, mimo_rank])
                 .sum_dim(4)

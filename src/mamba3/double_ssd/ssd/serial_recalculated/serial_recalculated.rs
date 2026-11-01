@@ -16,7 +16,7 @@
 #![allow(non_snake_case)]
 
 use crate::mamba3::double_ssd::prelude::*;
-use crate::mamba3::helpers::prim::{read_causal_mask, read_rows};
+use crate::mamba3::helpers::prim::{read_causal_mask, read_positions};
 use burn_stack::utils::fprim::{F, san};
 use burn::backend::tensor::FloatTensor;
 use burn::backend::{Backend, Dispatch, backend_extension};
@@ -84,7 +84,7 @@ pub trait Mamba3DoubleSsdBackendExt: Backend {
     /// - `b_bnlmhr`:           `[batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]`
     /// - `c_bntmhr`:           `[batch, nchunks, chunk_tokens, mimo_rank, nheads, state_rank]`
     /// - `initial_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
-    /// - `read_stride`:        `micro_steps` — write positions per read row, so
+    /// - `read_stride`:        `micro_steps` — write positions per read position, so
     ///   `chunk_tokens = chunk_len / read_stride`
     /// - `keep_bn`:            `[batch, nchunks]`, `0` at a chunk that starts
     ///   a new segment of a packed row. Read only when `resets` is `true`.
@@ -439,13 +439,13 @@ fn k5_ssd_chunk_scan<B: Backend>(
     let c_bnTMhr = c_bntmhr.reshape([batch, nchunks, read, nheads, state_rank]);
 
     // Expand base da_cumsum to fused length: [b, nheads, n, l] → [b, nheads, n, L],
-    // and to the read rows the target axis needs.
+    // and to the read positions the target axis needs.
     let da_cumsum_bhnLM = da_cumsum_bhnl
         .clone()
         .unsqueeze_dim::<5>(4) // da_cumsum_bhnl1
         .expand([batch, nheads, nchunks, chunk_len, mimo_rank]) // da_cumsum_bhnlm
         .reshape([batch, nheads, nchunks, fused]); // da_cumsum_bhnLM
-    let da_cumsum_bhnTM = read_rows::<B, 4, 5>(da_cumsum_bhnl, 3, read_stride)
+    let da_cumsum_bhnTM = read_positions::<B, 4, 5>(da_cumsum_bhnl, 3, read_stride)
         .unsqueeze_dim::<5>(4)
         .expand([batch, nheads, nchunks, chunk_tokens, mimo_rank])
         .reshape([batch, nheads, nchunks, read]);

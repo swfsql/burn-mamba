@@ -608,7 +608,7 @@ impl Mamba3 {
     /// - the scan of the register,
     /// - the carry of each system for the next call (the last position of the
     ///   run),
-    /// - the two readout ports at the read rows ([`Self::positive_read`]).
+    /// - the two readout ports at the read positions ([`Self::positive_read`]).
     ///
     /// Returns `(y, ln Λ carry, c carry)`.
     ///
@@ -684,11 +684,11 @@ impl Mamba3 {
         let tropical_bh = tropical_bsh.as_ref().map(|t_bsh| {
             last_bh(t_bsh, tropical_carry_bh, packed.and_then(|p| p.origin.tropical_bh.clone()))
         });
-        let read_rows = |t_bsh: Tensor<3>| crate::mamba3::helpers::read_rows::<3, 4>(t_bsh, 1, u);
+        let read_positions = |t_bsh: Tensor<3>| crate::mamba3::helpers::read_positions::<3, 4>(t_bsh, 1, u);
         let y_btmhp = self.positive_read(
             y_btmhp,
-            log_precision_bsh.map(read_rows),
-            tropical_bsh.map(read_rows),
+            log_precision_bsh.map(read_positions),
+            tropical_bsh.map(read_positions),
         );
         (y_btmhp, log_precision_bh, tropical_bh)
     }
@@ -704,8 +704,8 @@ impl Mamba3 {
     ///
     /// # Shapes
     /// - `y_btmhp`            : `[batch, tokens, mimo_rank, nheads, per_head_dim]`
-    /// - `log_precision_bth`  : `[batch, tokens, nheads]`, `ln Λ` at the read rows
-    /// - `tropical_bth`       : `[batch, tokens, nheads]`, `c` at the read rows
+    /// - `log_precision_bth`  : `[batch, tokens, nheads]`, `ln Λ` at the reads
+    /// - `tropical_bth`       : `[batch, tokens, nheads]`, `c` at the reads
     pub(crate) fn positive_read(
         &self,
         y_btmhp: Tensor<5>,

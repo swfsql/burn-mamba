@@ -82,12 +82,12 @@ impl Mamba3DoubleSsdInput {
             // [batch, nchunks, nheads, chunk_tokens*mimo_rank, chunk_len*mimo_rank]
             let cb_bnhTMLM = c_bnhTMr.matmul(b_bnhrLM);
 
-            // The causal decay over (read row, write source): `segsum`'s
+            // The causal decay over (read position, write source): `segsum`'s
             // rectangular counterpart, which is what it *is* at `read_stride = 1`.
             // l_base_bhntl[i,j] = exp(cumA[row(i)] - cumA[j]) if row(i) >= j, else 0
             let l_base_bhntl = {
                 let row: Tensor<5> =
-                    helpers::read_rows::<4, 5>(a_cumsum_bhnl.clone(), 3, read_stride)
+                    helpers::read_positions::<4, 5>(a_cumsum_bhnl.clone(), 3, read_stride)
                         .unsqueeze_dim(4); // [..., t, 1]
                 let col: Tensor<5> = a_cumsum_bhnl.clone().unsqueeze_dim(3); // [..., 1, l]
                 let neg_inf =
@@ -214,8 +214,8 @@ impl Mamba3DoubleSsdInput {
         // Y_off[n, t*m+r] = C[t*m+r]ᵀ · exp(cumA[t]) · h[n-1]
         // =============================================================
         let y_off_bnTMhp = {
-            // Expand the read rows' cumsum to fused, then exp:
-            let state_decay_bhnTM = helpers::read_rows::<4, 5>(a_cumsum_bhnl, 3, read_stride)
+            // Expand the read positions' cumsum to fused, then exp:
+            let state_decay_bhnTM = helpers::read_positions::<4, 5>(a_cumsum_bhnl, 3, read_stride)
                 .unsqueeze_dim::<5>(4) // a_cumsum_bhnt1
                 .expand([batch, nheads, nchunks, chunk_tokens, mimo_rank]) // a_cumsum_bhntm
                 .reshape([batch, nheads, nchunks, read]) // a_cumsum_bhnTM

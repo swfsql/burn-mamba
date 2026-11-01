@@ -18,7 +18,7 @@
 //! 7. [`prefix_sum`]: the blocked inclusive scan that replaces
 //!    `Tensor::cumsum` for every cumulative sum over the write axis, and
 //!    [`sub_periods`], its reduction on the circle.
-//! 8. The **read axis** ([`read_rows`], [`read_causal_mask`], and their
+//! 8. The **read axis** ([`read_positions`], [`read_causal_mask`], and their
 //!    primitive twins in [`prim`]).
 //!
 //! Most helpers are generic over the rank `D` of the data tensors, so one
@@ -293,19 +293,19 @@ pub fn prefix_sum<const D: usize, const DP1: usize>(
 // A chunk has two axes, and `micro_steps` widens only one of them. Each of the
 // `u` micro-steps of a token **writes** to the state, so the source axis is
 // the `chunk_len` of the write axis. The block **reads** the token once, at
-// its last micro-step, so the target axis is `chunk_len / u`: the rows whose `y`
-// survives (a zero gradient multiplies all the others). `read_stride` is that
+// its last micro-step, so the target axis is `chunk_len / u`: the positions
+// whose `y` survives (a zero gradient multiplies all the others). `read_stride` is that
 // `u`, or `1` where there is no fold (Mamba-2, `micro_steps = 1`), where both
 // helpers below are the identity. `step` also reads this axis: its token is a
-// block of `u` positions with one read row.
+// block of `u` positions with one read position.
 //
 // The alignment keeps this a reshape, not a gather. `chunk_len` is a multiple
 // of `read_stride`
 // ([`Mamba3SsdPath::chunk_len_or_optimal`](crate::mamba3::ssd_path::Mamba3SsdPath::chunk_len_or_optimal)),
 // so chunk `c` covers write positions `[c·L, (c+1)·L)` = tokens
-// `[c·T, (c+1)·T)`, and its read rows are a **contiguous run** of them.
+// `[c·T, (c+1)·T)`, and its read positions are a **contiguous run** of them.
 
-/// The read rows of a write axis: index `i·stride + (stride − 1)` for each
+/// The read positions of a write axis: index `i·stride + (stride − 1)` for each
 /// `i`, i.e. the last position of every run of `stride`.
 ///
 /// The identity at `stride = 1`.
@@ -315,7 +315,7 @@ pub fn prefix_sum<const D: usize, const DP1: usize>(
 /// - out   : `[…, len / stride, …]`
 ///
 /// `DP1 = D + 1`.
-pub fn read_rows<const D: usize, const DP1: usize>(
+pub fn read_positions<const D: usize, const DP1: usize>(
     t: Tensor<D>,
     dim: usize,
     stride: usize,
@@ -342,7 +342,7 @@ pub fn read_rows<const D: usize, const DP1: usize>(
     t.reshape(split).narrow(dim + 1, stride - 1, 1).reshape(out)
 }
 
-/// The additive causal mask over `(read row, write source)`:
+/// The additive causal mask over `(read position, write source)`:
 /// `0` where the source is early enough to contribute, `−∞` where it is not.
 ///
 /// `diagonal` goes to [`Tensor::triu`] on the **write** grid, so it has the
@@ -363,14 +363,14 @@ pub fn read_causal_mask(
     device: &Device,
 ) -> Tensor<2> {
     // The rows of the full write-axis mask at the readout positions. That is what
-    // `read_rows` selects, so it is the same op.
+    // `read_positions` selects, so it is the same op.
     let full = Tensor::<2>::full([chunk_len, chunk_len], f32::NEG_INFINITY, device).triu(diagonal);
-    read_rows::<2, 3>(full, 0, stride)
+    read_positions::<2, 3>(full, 0, stride)
 }
 
 /// The read axis on primitives, for the recompute-backward math.
 ///
-/// The same definitions as [`read_rows`] / [`read_causal_mask`] one module up,
+/// The same definitions as [`read_positions`] / [`read_causal_mask`] one module up,
 /// on [`F`] instead of `Tensor`. Every kernel in this crate has this split: a
 /// `Tensor` body, and an `F<B, _>` body that a
 /// [`Backward`](burn::backend::autodiff::ops::Backward) node can run (see
@@ -382,8 +382,8 @@ pub mod prim {
     use burn::backend::tensor::Device;
     use burn::backend::FloatDType;
 
-    /// [`super::read_rows`] on primitives.
-    pub fn read_rows<B: Backend, const D: usize, const DP1: usize>(
+    /// [`super::read_positions`] on primitives.
+    pub fn read_positions<B: Backend, const D: usize, const DP1: usize>(
         t: F<B, D>,
         dim: usize,
         stride: usize,
@@ -411,17 +411,17 @@ pub mod prim {
             .reshape::<D>(out)
     }
 
-    /// The transpose of [`read_rows`]: scatter a read-row tensor back onto the
-    /// write axis, with zeros at the positions that have no readout.
+    /// The transpose of [`read_positions`]: scatter a read-position tensor back
+    /// onto the write axis, with zeros at the positions that have no readout.
     ///
-    /// This is the gradient of `read_rows`. The hand-written backward uses it
+    /// This is the gradient of `read_positions`. The hand-written backward uses it
     /// where autodiff does the same for the `Minimal` / `Serial` paths. The
     /// identity at `stride = 1`.
     ///
     /// # Shapes
     /// - `t`  : `[…, len / stride, …]` at `dim`
     /// - out  : `[…, len, …]`
-    pub fn scatter_read_rows<B: Backend, const D: usize, const DP1: usize>(
+    pub fn scatter_read_positions<B: Backend, const D: usize, const DP1: usize>(
         t: F<B, D>,
         dim: usize,
         stride: usize,
@@ -466,7 +466,7 @@ pub mod prim {
             dtype,
         )
         .triu(diagonal);
-        read_rows::<B, 2, 3>(full, 0, stride)
+        read_positions::<B, 2, 3>(full, 0, stride)
     }
 }
 

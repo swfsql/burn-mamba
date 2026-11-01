@@ -135,7 +135,7 @@ impl Mamba3SingleSsdInput {
 /// SingleSsd chunk scan.
 ///
 /// Computes the per-chunk output from three contributions, at the chunk's
-/// **read** rows (`t1 = i·stride + stride−1`; see
+/// **read** positions (`t1 = i·stride + stride−1`; see
 /// [the read axis](crate::mamba3::product)) over all of its
 /// write sources `t2`:
 /// - **Strict lower triangular intra-chunk** (`t1 > t2`):
@@ -198,7 +198,7 @@ pub fn k5_single_ssd_chunk_scan(
         .expand([batch, nheads, nchunks, chunk_len, mimo_rank])
         .reshape([batch, nheads, nchunks, fused]);
     let da_cumsum_bhnTM =
-        helpers::read_rows::<4, 5>(da_cumsum_bhnl, 3, read_stride)
+        helpers::read_positions::<4, 5>(da_cumsum_bhnl, 3, read_stride)
             .unsqueeze_dim::<5>(4)
             .expand([batch, nheads, nchunks, chunk_tokens, mimo_rank])
             .reshape([batch, nheads, nchunks, read]);
@@ -230,7 +230,7 @@ pub fn k5_single_ssd_chunk_scan(
         .expand([batch, nchunks, nheads, read, fused]);
     let diff_bnhTMLM = target_da_cumsum_bnhTMLM - source_da_cumsum_bnhTMLM;
 
-    // Strict-upper -inf mask over (read row, write source) on the base time
+    // Strict-upper -inf mask over (read position, write source) on the base time
     // grid, then interleave-expand both axes so that MIMO same-time blocks are
     // zeroed out.
     let inf_upper_tl = helpers::read_causal_mask(chunk_len, read_stride, 0, &device);
@@ -265,13 +265,13 @@ pub fn k5_single_ssd_chunk_scan(
     //
     // y_diag[t, m_out, h, p] = γ[t] · Σ_{m_in} (Σ_n C[t,m_out,n] · B[t,m_in,n]) · V[t,m_in,p]
     //
-    // The same position is the *read* row, so V and B enter it at those
+    // The same position is the *read* position, so V and B enter it at those
     // positions only. Computed fresh (small same-position product) rather than
     // extracting the block-diagonal from `cb_bnhTMLM` (which would require a
     // fiddly reshape).
     let y_diag_bntmhp = y_diag_correction(
-        helpers::read_rows::<6, 7>(v_bnlmhp, 2, read_stride),
-        helpers::read_rows::<6, 7>(b_bnlmhr, 2, read_stride),
+        helpers::read_positions::<6, 7>(v_bnlmhp, 2, read_stride),
+        helpers::read_positions::<6, 7>(b_bnlmhr, 2, read_stride),
         c_bntmhr,
         gamma_bnth,
         siso_specialization,

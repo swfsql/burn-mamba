@@ -7,7 +7,7 @@ are placeholders until a parameter search.
 
 An H-Net does not read a fixed tokenization. Each **stage** runs a stack at
 the resolution of its input, and a router decides where a chunk starts. The
-stage keeps only the rows that start a chunk, the next level runs on that
+stage keeps only the positions that start a chunk, the next level runs on that
 shorter sequence, and the stage expands the result back. The innermost level
 is the **main network**. The H-Net itself is block-generic and lives in
 `burn_stack::modules::hnet` (its module header holds the math). This example
@@ -47,7 +47,7 @@ cargo run --release --example hnet-stories --features backend-flex -- --inferenc
 The model config (`HNetStoriesConfig`) also holds the recipe, so a resumed
 run keeps it:
 
-- **The ratio loss** of each stage steers the share of rows that start a
+- **The ratio loss** of each stage steers the share of positions that start a
   chunk toward `1/Nˢ` (`ratio_targets`, 4 characters per chunk at stage 0).
   Its weight is `ratio_weight`: `0.3`, ten times the reference value. Early
   in training, the router of a model this small can start almost no chunk.
@@ -55,8 +55,8 @@ run keeps it:
   `-- --chunk-log N` prints the chunk ratio of each stage every `N` windows.
 - **A learning rate per stage.** Each stage trains at the rate of the
   schedule times `λˢ` (`lr_multipliers`). The default is the heuristic of the
-  paper, normalised to `1` at the main network. A stage sees more rows per
-  training step and is narrower, so it takes a larger rate.
+  paper, normalised to `1` at the main network. A stage sees more positions
+  per training step and is narrower, so it takes a larger rate.
 - **Runs of windows.** A story trains window by window, and the state carries
   from one window to the next (see "Runs and the frontier" in the
   `tiny-stories` README). A window holds 1024 characters (`-- --seq-len`), so

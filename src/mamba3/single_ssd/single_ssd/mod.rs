@@ -136,7 +136,7 @@ impl Mamba3 {
         // A padded token pads all of its micro-steps. `end_b` is one past the
         // last real position of each row on the write axis, where its cache
         // fields are read.
-        let pad_bs = pad_bt.map(|pad_bt| crate::padding::repeat_rows(pad_bt, micro_steps));
+        let pad_bs = pad_bt.map(|pad_bt| crate::padding::repeat_positions(pad_bt, micro_steps));
         let end_b = pad_bs.as_ref().map(crate::padding::real_end_b);
 
         // A reset is at the first token of a chunk, which is its first
@@ -484,7 +484,7 @@ impl Mamba3 {
 
         // `C` and `γ` are on the read axis of the chunk, so they pad by whole
         // tokens. `chunk_len` is a multiple of `u`, so `pad` is too.
-        let gamma_bth = helpers::read_rows::<3, 4>(gamma_bsh, 1, u);
+        let gamma_bth = helpers::read_positions::<3, 4>(gamma_bsh, 1, u);
         let tokens_padded = sequence_padded / u;
         let pad_tokens = tokens_padded - tokens;
 
@@ -546,7 +546,7 @@ impl Mamba3 {
 
         // ── Step 8: Unpad ─────────────────────────────────────────────────────
         // The SSD returns token resolution: the readout is after all `u`
-        // writes, and the kernel computed only that row.
+        // writes, and the kernel computed only that position.
         let y_bTmhp = y_bntmhp.reshape([batch, tokens_padded, mimo_rank, nheads, per_head_dim]);
         let y_bsmhp = if pad == 0 {
             y_bTmhp

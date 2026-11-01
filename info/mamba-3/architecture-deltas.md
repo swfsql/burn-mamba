@@ -409,7 +409,7 @@ the two schedules differ by `2.5×` (§8.4).
 
 This crate fuses the rank onto the chunk axis: `[L·M, L·M]` intra-chunk
 matrices in `single_ssd/ssd/serial.rs`. (§8.7 gives the general `[T·M, L·M]`,
-where `T` is the read rows of the chunk. At `u = 1`, the two are the same.) So
+where `T` is the read positions of the chunk. At `u = 1`, the two are the same.) So
 the same arithmetic applies without change, and
 `Mamba3SsdPath::optimal_chunk_len` implements it: `√(N·P)` divided by
 `mimo_rank`, then rounded up to a multiple of 32 and clamped to `32..=512`.
@@ -426,7 +426,7 @@ C·M]`, that is, `batch · sequence · heads · C · M²` elements, with no `u` 
 it (§8.7). The rank is on *both* axes, so it divides the chunk. `u` is on one
 axis, so it only subdivides the chunk. Hence the second half of the schedule:
 round the width up to a multiple of `u`. Then a chunk is a whole number of
-tokens, and its read rows are a contiguous run of them: a reshape, not a
+tokens, and its read positions are a contiguous run of them: a reshape, not a
 gather.
 
 The alternative is to also divide by `u`, because a chunk of `C` positions
@@ -447,7 +447,7 @@ The write side stays linear in `u`, and this cannot be reduced: the state
 recurrence really takes `u` micro-steps per token. The read side is `u`-invariant in
 FLOPs and in memory: the score, the state-to-output product, and the QK-norm
 and rotation of `C`. The block evaluates it only where the readout occurs
-(`helpers::read_rows`, and the kernels take the stride as
+(`helpers::read_positions`, and the kernels take the stride as
 `Mamba3*SsdInput::read_stride`). A model that wants a different trade can
 give an explicit chunk length (`Mamba3SsdPath::SerialRecalculated(Some(n))`).
 It has priority over the schedule, and the block rounds it up to a whole
