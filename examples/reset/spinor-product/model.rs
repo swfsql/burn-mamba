@@ -13,7 +13,7 @@ pub const D_MODEL: usize = 8;
 
 /// A Mamba-3 block at `state_rank = 4` with [`RotationKind::Quaternion4D`]
 /// carries a cumulative **unit quaternion** per head, and an ordered product
-/// builds it. The micro-steps fold into the sequence axis (`u` = `micro_steps`
+/// builds it. The micro-steps fold into the write axis (`u` = `micro_steps`
 /// micro-steps per token, see `burn_mamba::mamba3::product`). One token runs:
 ///
 /// ```ignore

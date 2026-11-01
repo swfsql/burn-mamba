@@ -357,7 +357,7 @@ pub fn k4_ssd_state_passing(
 ///   (the read axis)
 /// - `cb_bnhTMLM`: `[batch, nchunks, nheads, chunk_tokens·mimo_rank, chunk_len·mimo_rank]` from K2
 /// - `chunk_input_state_bnhpr`: `[batch, nchunks, nheads, per_head_dim, state_rank]`
-/// - `read_stride`: folded positions per read row (`micro_steps`)
+/// - `read_stride`: write positions per read row (`micro_steps`)
 ///
 /// # Returns
 /// - `y_bntmhp`: `[batch, nchunks, chunk_tokens, mimo_rank, nheads, per_head_dim]`

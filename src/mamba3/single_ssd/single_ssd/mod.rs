@@ -50,7 +50,7 @@ impl Mamba3 {
     ///
     /// "Equivalent" covers **everything that a caller can observe**: the
     /// returned output and every field of the returned cache. It does not cover
-    /// the intermediate `y` of the SSD core at each *folded* position. Under a
+    /// the intermediate `y` of the SSD core at each *write* position. Under a
     /// lag-`u` pattern such as [`TapPattern::Vertical`], the correction band
     /// applies only at the last micro-step of each token (the readout). So the
     /// `u−1` per-token partial sums that this pathway discards do not match the
@@ -134,13 +134,13 @@ impl Mamba3 {
         san(&input_bsm);
 
         // A padded token pads all of its micro-steps. `end_b` is one past the
-        // last real position of each slot on the folded axis, where its cache
+        // last real position of each slot on the write axis, where its cache
         // fields are read.
         let pad_bs = pad_bt.map(|pad_bt| crate::padding::repeat_rows(pad_bt, micro_steps));
         let end_b = pad_bs.as_ref().map(crate::padding::real_end_b);
 
         // A reset is at the first token of a chunk, which is its first
-        // micro-step on the folded axis. See [`crate::packing`].
+        // micro-step on the write axis. See [`crate::packing`].
         let chunk_len = ssd_path.chunk_len_or_optimal(self);
         let segments = reset_bt.map(|reset_bt| {
             let chunk_tokens = Mamba3SsdPath::chunk_tokens(chunk_len, micro_steps);
@@ -249,7 +249,7 @@ impl Mamba3 {
             self.gain_input(noise_bsh, cache.log_precision_bh.clone(), packed.as_ref()),
         )
         .padded(pad_bs.as_ref());
-        // The tropical register's inputs, on the same folded axis.
+        // The tropical register's inputs, on the same write axis.
         let tropical_ab_bsh = tropical_btH.map(|(a_btH, b_btH)| {
             (unfold_micro_bs(a_btH, u), unfold_micro_bs(b_btH, u))
         });
@@ -265,7 +265,7 @@ impl Mamba3 {
         // the tap slots. This also makes the accumulator `h'` equal to the
         // state at a cache boundary, hence the field-identity `From` impls.
         //
-        // `t+lag` is a later *folded* position: lag 1 is
+        // `t+lag` is a later *write* position: lag 1 is
         // [`TapPattern::HorizontalCarryOver`], lag `u` is [`TapPattern::Vertical`].
         // This is the `Δ̃` collapse (`info/mamba-3/trapezoid-as-integration.md`
         // §5). The collapse theorem of §9 is why it holds unchanged for the

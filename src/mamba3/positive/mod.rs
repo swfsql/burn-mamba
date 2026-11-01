@@ -102,7 +102,7 @@
 //!
 //! ## Resolution
 //!
-//! Both run on the folded axis, like the recurrence (one matrix per micro-step
+//! Both run on the write axis, like the recurrence (one matrix per micro-step
 //! under [`crate::mamba3::product`]). The `C` and `D` ports read the value at
 //! the last micro-step of each token (the read axis). The mimo ranks share one
 //! state, thus one transition, thus one `Λ` per head, broadcast over them.

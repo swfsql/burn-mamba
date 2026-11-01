@@ -107,7 +107,7 @@ fn in_proj_repeats_only_the_per_micro_step_sub_projections() {
 
 /// Unroll `step` token by token and compare against `forward` over the same
 /// sequence — the property that pins the fold: `forward` runs the recurrence on
-/// the folded sequence, `step` runs `u` explicit micro-steps, and they must
+/// the write axis, `step` runs `u` explicit micro-steps, and they must
 /// agree on outputs *and* on every cache field.
 fn forward_matches_step_double(kind: RotationKind, micro_steps: usize) {
     let device = test_device();

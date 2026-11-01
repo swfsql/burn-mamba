@@ -69,7 +69,7 @@ fn quat_scan_backward<B: Backend>(
     // Pₜ = qₜ ⊗ … ⊗ q₀ (prefix product, no carry) — recomputed, not stored.
     let p = quat_prefix_product_soa::<B>(q);
 
-    // cum[t] = Pₜ ⊗ init (broadcast over the sequence axis).
+    // cum[t] = Pₜ ⊗ init (broadcast over the write axis).
     let cum = p.clone().mul(init.clone());
 
     // S[t] = Σ_{s≥t} conj(Pₛ) ⊗ d_cum[s] — suffix-sum (reverse cumsum) per component.

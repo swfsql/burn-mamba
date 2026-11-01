@@ -186,7 +186,7 @@ fn elements(da_bsh: &Tensor<3>, ln_q_bsh: &Tensor<3>, masses: &LogMasses) -> Mob
     Mobius { m00, m01, m10, m11 }
 }
 
-/// Run the gain over a folded run of positions (the whole sequence in
+/// Run the gain over a write-axis run of positions (the whole sequence in
 /// `forward`, the `u` micro-steps of one token in `step`).
 ///
 /// # Shapes

@@ -84,7 +84,7 @@ pub trait Mamba3DoubleSsdBackendExt: Backend {
     /// - `b_bnlmhr`:           `[batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]`
     /// - `c_bntmhr`:           `[batch, nchunks, chunk_tokens, mimo_rank, nheads, state_rank]`
     /// - `initial_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
-    /// - `read_stride`:        `micro_steps` — folded positions per read row, so
+    /// - `read_stride`:        `micro_steps` — write positions per read row, so
     ///   `chunk_tokens = chunk_len / read_stride`
     /// - `keep_bn`:            `[batch, nchunks]`, `0` at a chunk that starts
     ///   a new segment of a packed row. Read only when `resets` is `true`.

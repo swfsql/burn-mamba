@@ -675,7 +675,7 @@ because any `M` is `I − GP` for a symmetric `G` and a general `P`:
 `Mamba3Config::micro_steps` (`u`) runs `u` full Mamba-3 micro-steps per
 token. Each micro-step takes its own `x`, `Δ`, `A`, `λ`, `B` and rotation from its
 own slice of the input projection. The block evaluates them with the
-micro-steps folded into the sequence axis. By §7–§8, this is *not* the
+micro-steps folded into the write axis. By §7–§8, this is *not* the
 mechanism of DeltaProduct carried over (that mechanism has no instance here).
 It is the same construction with the other dial turned:
 

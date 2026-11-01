@@ -12,8 +12,8 @@
 //! 4. **MambaProduct** ([`product`](crate::mamba3::product)):
 //!    [`micro_steps`](crate::mamba3::mamba3::Mamba3Config::micro_steps)
 //!    micro-steps per token, so the transition of one token is a
-//!    **product** of `u` micro-steps. The micro-steps fold into the sequence axis, so
-//!    MambaProduct needs no new kernel.
+//!    **product** of `u` micro-steps. The micro-steps fold into the write
+//!    axis, so MambaProduct needs no new kernel.
 //!
 //! See [`mamba3`](crate::mamba3::mamba3) for the full combined math.
 //!

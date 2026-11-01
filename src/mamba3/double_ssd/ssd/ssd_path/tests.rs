@@ -133,7 +133,7 @@ struct PathRun {
 // implementation it is verifying proves nothing about it.
 // ---------------------------------------------------------------------------
 
-/// The folded positions a read row sits at: `i·stride + (stride − 1)`.
+/// The write positions a read row sits at: `i·stride + (stride − 1)`.
 fn kept_rows<const D: usize>(t: Tensor<D>, dim: usize, stride: usize) -> Tensor<D> {
     let rows = t.dims()[dim] / stride;
     Tensor::cat(
@@ -355,9 +355,9 @@ fn paths_agree_single_chunk_zero_init() {
 }
 
 /// The chunk's **read axis**: `micro_steps > 1` narrows `C` and `y` to one row
-/// per token while the writes stay on the folded axis. All three algorithms —
+/// per token while the writes stay on the write axis. All three algorithms —
 /// and, for `SerialRecalculated`, its hand-written backward's scatter back onto
-/// the folded axis — have to agree there too.
+/// the write axis — have to agree there too.
 #[test]
 fn paths_agree_with_a_read_stride() {
     run_minimal_matches_serial(2, 3, 4, 2, 1, 2, 8, 8, true);

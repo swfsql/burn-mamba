@@ -54,7 +54,7 @@ pub enum Mamba3SsdPath {
 }
 
 impl Mamba3SsdPath {
-    /// Optimal chunk length, in **folded positions**: `√(state_rank ·
+    /// Optimal chunk length, in **write positions**: `√(state_rank ·
     /// per_head_dim)` divided by `mimo_rank`, rounded up to a multiple of 32,
     /// clamped to `32 ..= 512`. `micro_steps` does not change this width:
     /// [`Self::chunk_tokens`] absorbs it.
@@ -74,7 +74,8 @@ impl Mamba3SsdPath {
     ///   token once, at its last micro-step. So the score is
     ///   `[batch, nchunks, heads, T·m, T·u·m]` for `T` = [`Self::chunk_tokens`],
     ///   with `batch · sequence · heads · T · u · m²` elements. To keep that flat
-    ///   in `u`, keep `T · u` (the *folded* chunk) flat and use fewer tokens.
+    ///   in `u`, keep `T · u` (the chunk on the *write* axis) flat and use fewer
+    ///   tokens.
     ///   Memory is the binding constraint here, because no fused kernel hides it.
     ///
     /// So `u` subdivides the chunk and does not shorten it, and `nchunks` grows
@@ -91,19 +92,19 @@ impl Mamba3SsdPath {
         micro_steps: usize,
     ) -> usize {
         let micro_steps = micro_steps.max(1);
-        let folded = (state_rank * per_head_dim)
+        let write_len = (state_rank * per_head_dim)
             .isqrt()
             .div_ceil(mimo_rank.max(1)) // the fused read axis is `chunk_tokens · m`.
             .next_multiple_of(32) // rule-of-thumb: common plane dimension.
             .clamp(32, 512); // rule-of-thumb: one plane minimum, ceiling at 512.
-        // A whole number of tokens per chunk, at (very nearly) that folded width.
-        folded.div_ceil(micro_steps) * micro_steps
+        // A whole number of tokens per chunk, at (very nearly) that write length.
+        write_len.div_ceil(micro_steps) * micro_steps
     }
 
     /// Tokens per chunk: `chunk_len / micro_steps`, the **read** axis of the
     /// chunk.
     ///
-    /// `chunk_len` counts folded positions (one per micro-step). The SSD reads
+    /// `chunk_len` counts write positions (one per micro-step). The SSD reads
     /// each token once, at its last micro-step. So this is the row count of the
     /// score and of the `y` that the kernels return. See
     /// [`Self::optimal_chunk_len`].
@@ -136,7 +137,7 @@ impl Mamba3SsdPath {
     /// number of tokens.
     ///
     /// With that rounding, the read axis is a plain reshape. With
-    /// `chunk_len = T·u`, a chunk covers folded positions `[cL, (c+1)L)`, that
+    /// `chunk_len = T·u`, a chunk covers write positions `[cL, (c+1)L)`, that
     /// is tokens `[cT, (c+1)T)`, and the surviving rows (`≡ u−1 mod u`) are a
     /// contiguous run of them. At `micro_steps = 1` the rounding does nothing.
     pub fn chunk_len_or_optimal(&self, block: &Mamba3) -> usize {

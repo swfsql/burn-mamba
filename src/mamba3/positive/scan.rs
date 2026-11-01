@@ -247,8 +247,8 @@ impl Element for Affine {
 /// one-launch in-block scan that this element does not have: the log-semiring
 /// product is not `+`, and the [`Mobius`] one is not even commutative. So an
 /// in-block pass would itself be a doubling or a loop. The schedule is thus
-/// that of `quat_scan`: `⌈log₂ len⌉` full-width rounds over the whole folded
-/// sequence. Each round is about fifty kernels for [`Mobius`] (four [`lse`]s,
+/// that of `quat_scan`: `⌈log₂ len⌉` full-width rounds over the whole write
+/// axis. Each round is about fifty kernels for [`Mobius`] (four [`lse`]s,
 /// the renormalising shift, the new floors) and a dozen for [`Affine`]. The
 /// tensors are `[batch, len, nheads]`, with no `per_head_dim·state_rank`
 /// factor, so the cost that grows with `len` is mostly launches, not bytes.

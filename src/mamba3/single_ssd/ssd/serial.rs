@@ -137,7 +137,7 @@ impl Mamba3SingleSsdInput {
 /// Computes the per-chunk output from three contributions, at the chunk's
 /// **read** rows (`t1 = i·stride + stride−1`; see
 /// [the read axis](crate::mamba3::product)) over all of its
-/// folded sources `t2`:
+/// write sources `t2`:
 /// - **Strict lower triangular intra-chunk** (`t1 > t2`):
 ///   `(cb[i,j] · scale[t2] · exp(cumA[t1] − cumA[t2])) · V[t2]`
 /// - **Diagonal (`t1 == t2`) γ-correction**:
@@ -230,7 +230,7 @@ pub fn k5_single_ssd_chunk_scan(
         .expand([batch, nchunks, nheads, read, fused]);
     let diff_bnhTMLM = target_da_cumsum_bnhTMLM - source_da_cumsum_bnhTMLM;
 
-    // Strict-upper -inf mask over (read row, folded source) on the base time
+    // Strict-upper -inf mask over (read row, write source) on the base time
     // grid, then interleave-expand both axes so that MIMO same-time blocks are
     // zeroed out.
     let inf_upper_tl = helpers::read_causal_mask(chunk_len, read_stride, 0, &device);

@@ -794,7 +794,7 @@ micro-step correctly. Only the composition does not.
   - The four heads read the four components of the relative quaternion.
 
   `micro_steps` needed no new construction, because it is not a new kernel. The
-  micro-steps fold into the sequence axis, and the recurrence runs at length
+  micro-steps fold into the write axis, and the recurrence runs at length
   `tokens · u`.
 - **The dial is the transition, not the memory.** The state is one
   `[nheads, per_head_dim, state_rank]` matrix at every `u`. The in-projection

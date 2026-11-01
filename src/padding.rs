@@ -56,7 +56,7 @@ pub(crate) fn window<const D: usize>(
 }
 
 /// `pad_bt` with every row repeated `u` times in place: the padding of a token
-/// spread over its `u` folded micro-steps (`[batch, tokens]` →
+/// spread over its `u` micro-steps on the write axis (`[batch, tokens]` →
 /// `[batch, tokens·u]`).
 pub(crate) fn repeat_rows(pad_bt: Tensor<2, Bool>, u: usize) -> Tensor<2, Bool> {
     let [batch, tokens] = pad_bt.dims();

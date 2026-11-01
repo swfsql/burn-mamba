@@ -107,7 +107,7 @@ pub fn k3_ssd_chunk_state_extended<B: Backend>(
 /// - `d_final_bhpr` — upstream gradient of the final state
 /// - `v_bnlmhp`, `da_bnlh`, `b_bnlmhr`, `c_bntmhr`, `initial_state_bhpr` —
 ///   the five saved forward inputs
-/// - `read_stride` — folded positions per read row (`micro_steps`)
+/// - `read_stride` — write positions per read row (`micro_steps`)
 /// - `restarts` — `(keep_bn, origin_bhpr)`, or `None`. `keep_bn` is the
 ///   constant reset factor of the forward (`0` at a chunk that starts a new
 ///   segment). `origin_bhpr` is the state that those chunks start from.
@@ -294,7 +294,7 @@ pub fn combined_backward<B: Backend>(
         san(&d_da_blue_bnhTM);
 
         // Reduce fused TM → t (sum the mimo_rank copies K5 broadcast), then
-        // scatter back onto the folded axis: a read row's `da` is one position.
+        // scatter back onto the write axis: a read row's `da` is one position.
         let d_da_blue_bnhl: F<B, 4> = scatter_read_rows::<B, 4, 5>(
             d_da_blue_bnhTM
                 .reshape([batch, n, nheads, chunk_tokens, mimo_rank]) // d_da_blue_bnhtm
@@ -355,8 +355,8 @@ pub fn combined_backward<B: Backend>(
         let d_decay_bnhTMLM = d_w_bnhTMLM * cb_bnhTMLM;
         let d_diff_bnhTMLM = d_decay_bnhTMLM * decay_bnhTMLM;
 
-        // d_da_target[TMₜ] = Σ_{LMₛ} d_diff[TMₜ, LMₛ] (scattered onto the folded
-        // axis); d_da_source[LMₛ] = Σ_{TMₜ} d_diff[TMₜ, LMₛ] (already folded);
+        // d_da_target[TMₜ] = Σ_{LMₛ} d_diff[TMₜ, LMₛ] (scattered onto the write
+        // axis); d_da_source[LMₛ] = Σ_{TMₜ} d_diff[TMₜ, LMₛ] (already on it);
         // d_da_orange = d_da_target − d_da_source  (diff = target − source).
         let d_da_target_bnhTM: F<B, 4> = d_diff_bnhTMLM
             .clone()

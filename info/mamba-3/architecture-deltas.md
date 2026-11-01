@@ -418,7 +418,7 @@ At `N = 128`, `P = 64`, that is `96 / 64 / 32` for a rank of `1 / 2 / ≥4`
 puts it at 384 (§8.6). A SISO block does not change: the divisor is 1.
 
 **`micro_steps` is the other widening, and it is a different one.**
-Micro-steps fold into the sequence axis, but they fold only the *writes*.
+Micro-steps fold into the write axis, but they fold only the *writes*.
 Each of the `u` micro-steps of a token writes to the state, and the SSD
 **reads** the token once, at its last micro-step. So a chunk has two axes:
 `C` writes by `C/u` reads. Its score is `[batch, nchunks, heads, (C/u)·M,

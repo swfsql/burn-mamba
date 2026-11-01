@@ -71,7 +71,7 @@ pub fn parse_rotation(value: &str) -> Result<burn_mamba::prelude::RotationKind, 
 
 /// A `--ssd-path <path>[:<chunk_len>]` value (`recalc | serial | minimal`),
 /// for `pico_args::Arguments::opt_value_from_fn`. The chunk length counts
-/// folded positions, as `Mamba3SsdPath` does.
+/// write positions, as `Mamba3SsdPath` does.
 pub fn parse_ssd_path(arg: &str) -> Result<burn_mamba::prelude::Mamba3SsdPath, String> {
     use burn_mamba::prelude::Mamba3SsdPath;
     let (path, chunk_len) = match arg.split_once(':') {

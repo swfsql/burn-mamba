@@ -105,7 +105,7 @@ pub trait Mamba3SingleSsdBackendExt: Backend {
     /// - `scale_bnlh`:         `[batch, nchunks, chunk_len, nheads]` — `scaleₜ` (see
     ///   [`Mamba3SingleSsdInput::scale_bnlh`])
     /// - `initial_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
-    /// - `read_stride`:        `micro_steps` — folded positions per read row, so
+    /// - `read_stride`:        `micro_steps` — write positions per read row, so
     ///   `chunk_tokens = chunk_len / read_stride` (see
     ///   [`Mamba3SingleSsdInput::read_stride`])
     /// - `siso_specialization`: allow the specialized `mimo_rank == 1`
@@ -286,7 +286,7 @@ fn k5_single_ssd_chunk_scan<B: Backend>(
         .expand([batch, nchunks, nheads, read, fused]);
     let diff_bnhTMLM = target_da_cumsum_bnhTMLM - source_da_cumsum_bnhTMLM;
 
-    // Strict-upper -inf mask over (read row, folded source) on the base time
+    // Strict-upper -inf mask over (read row, write source) on the base time
     // grid, then interleave-expand both axes so MIMO same-time blocks are
     // zeroed.
     let inf_upper_bnhTMLM = read_causal_mask::<B>(chunk_len, read_stride, 0, &device, dtype)

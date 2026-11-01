@@ -1288,7 +1288,7 @@ fn assert_cache_parity(
 }
 
 /// Full parity — **output, cache and gradients** — for the abelian angle scan,
-/// at folded lengths on both sides of
+/// at write lengths on both sides of
 /// [`prefix_sum`](crate::mamba3::helpers::prefix_sum)'s blocking threshold.
 ///
 /// `step` scans one token's `micro_steps` at a time and carries the rest
@@ -1299,11 +1299,11 @@ fn assert_cache_parity(
 /// blocked scan now, whatever replaces it — which is the whole point of pinning
 /// the contract here rather than against the op.
 ///
-/// The cases are the branch cases: a folded axis inside one block, one spanning
+/// The cases are the branch cases: a write axis inside one block, one spanning
 /// several exactly, and one with a partial last block — the middle one reached
 /// through `micro_steps`, which is what multiplies the axis and made the scan's
 /// cost matter in the first place. Every *other* `Complex2D` forward/step test
-/// in the crate runs at a folded length of 18 or less, i.e. entirely on the
+/// in the crate runs at a write length of 18 or less, i.e. entirely on the
 /// unblocked branch, so this is the one that covers the blocked one; the
 /// [`scan_block`](crate::mamba3::helpers::scan_block) assertion fails loudly
 /// rather than silently losing that coverage if the block rule is re-tuned.
@@ -1316,11 +1316,11 @@ fn complex_angle_scan_forward_step_parity() {
     let device = test_device();
     // (tokens, micro_steps, expected to take the blocked branch)
     for (tokens, micro_steps, blocked) in [(8, 1, false), (16, 2, true), (24, 1, true)] {
-        let folded = tokens * micro_steps;
-        let label = format!("tokens={tokens} u={micro_steps} folded={folded}");
+        let write_len = tokens * micro_steps;
+        let label = format!("tokens={tokens} u={micro_steps} write_len={write_len}");
         assert_eq!(
             blocked,
-            scan_block(folded) < folded,
+            scan_block(write_len) < write_len,
             "{label}: the scan's branch moved — re-pick the lengths so both \
              branches stay covered"
         );
@@ -1339,7 +1339,7 @@ fn complex_angle_scan_forward_step_parity() {
         let p_fwd = Param::from_tensor(Tensor::from_inner(x.clone()));
         let p_step = Param::from_tensor(Tensor::from_inner(x));
 
-        // Chunked: one scan over the whole folded axis.
+        // Chunked: one scan over the whole write axis.
         let (out_fwd, cache_fwd) = model.forward(p_fwd.val(), None, Mamba3SsdPath::default(), None);
 
         // Recurrent: `micro_steps` plain adds per token, no scan anywhere.
@@ -1390,7 +1390,7 @@ fn complex_angle_scan_forward_step_parity() {
 /// offset rather than costing a pass of its own, so getting it wrong (dropped,
 /// or broadcast along the wrong axis) is invisible to any test whose second call
 /// is short — which, before this one, was all of them: the existing split-prefill
-/// tests continue into calls of 12 folded positions or fewer, entirely on the
+/// tests continue into calls of 12 write positions or fewer, entirely on the
 /// unblocked branch.
 #[test]
 fn complex_angle_scan_split_prefill_parity() {

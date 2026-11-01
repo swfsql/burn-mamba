@@ -48,7 +48,7 @@ pub struct Mamba3SingleSsdInput {
     pub b_bnlmhr: Tensor<6>,
 
     /// Q/C tensor: the same processing as `b_bnlmhr`, but on the **read** axis
-    /// of the chunk: one row per token, not per folded position.
+    /// of the chunk: one row per token, not per write position.
     ///
     /// Every micro-step of a token writes to the accumulator. The token is read
     /// once, at its last micro-step
@@ -72,7 +72,7 @@ pub struct Mamba3SingleSsdInput {
     ///
     /// On the **read** axis, like `c_bntmhr`: γ weights only the diagonal term
     /// of the output of a row (the recurrence of the accumulator runs on
-    /// `scale_bnlh`). So the folded positions between the reads never use it.
+    /// `scale_bnlh`). So the write positions between the reads never use it.
     ///
     /// # Shape
     /// - `[batch, nchunks, chunk_tokens, nheads]`
@@ -104,8 +104,8 @@ pub struct Mamba3SingleSsdInput {
     /// - `[nheads, per_head_dim, state_rank]`
     pub init_state_hpr: Option<Tensor<3>>,
 
-    /// The read stride of the chunk: `micro_steps`, the number of folded
-    /// positions (writes) in a token. `1` for stock Mamba-3, where the read
+    /// The read stride of the chunk: `micro_steps`, the number of write
+    /// positions in a token. `1` for stock Mamba-3, where the read
     /// axis *is* the chunk and every shape below reduces to `chunk_len`.
     ///
     /// `chunk_len` is a multiple of it. So a chunk holds a whole number of

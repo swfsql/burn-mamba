@@ -12,7 +12,7 @@ use burn_mamba::prelude::*;
 
 /// `-- --help`, below the corpus knobs.
 const HELP: &str = concat!(
-    "    --ssd-path <PATH[:L]>  The SSD path of every chunkwise forward: recalc (default), serial or minimal. L sets the chunk length, in folded positions (default: from the block shape)\n",
+    "    --ssd-path <PATH[:L]>  The SSD path of every chunkwise forward: recalc (default), serial or minimal. L sets the chunk length, in write positions (default: from the block shape)\n",
     "    --pack-align <N>       With --pack, start each story at a multiple of N tokens. N must be a multiple of the chunk length (default: the chunk length)\n",
     "    --prompt <TEXT>        At inference, continue TEXT instead of the built-in prompts. Give the flag again for each prompt\n",
     "    --continuations <N>    At inference, the number of continuations of each prompt, each with its own seed (default 1)\n",

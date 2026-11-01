@@ -5,7 +5,7 @@
 //! across the gap between them (`helpers::trapezoidal_coefficients`). At
 //! [`micro_steps`](crate::mamba3::mamba3::Mamba3Config::micro_steps) `= 1`,
 //! "earlier" can only mean the previous token, so there is no choice. At
-//! `u > 1`, the folded sequence has `u` positions per token
+//! `u > 1`, the write axis has `u` positions per token
 //! ([`crate::mamba3::product`]), and the choice is real.
 //!
 //! [`TapPattern`] names the members of that lattice.
@@ -16,7 +16,7 @@
 //!
 //! ## One rule for every member
 //!
-//! A pattern says which earlier samples are **admissible** at each folded
+//! A pattern says which earlier samples are **admissible** at each write
 //! position. Their *weight* is not a second decision. Two learned per-(head,
 //! micro-step) scalars split the mass `Δₚ` of the micro-step. A tap that is not
 //! admissible gives its mass back one level. The lag-1 tap of a two-tap
@@ -177,8 +177,8 @@ pub enum TapPattern {
     /// layout, not information.
     HorizontalReset,
 
-    /// **Lag 1, always** (the default): one tap per position of the folded
-    /// sequence. So `1/u` of the taps cross a token boundary, and `(u−1)/u`
+    /// **Lag 1, always** (the default): one tap per position of the write
+    /// axis. So `1/u` of the taps cross a token boundary, and `(u−1)/u`
     /// pair two projections of the same token (§8). The cache holds one
     /// `(B, x)` slot: the last micro-step of the last token.
     #[default]
@@ -187,12 +187,12 @@ pub enum TapPattern {
     /// [`Vertical`](Self::Vertical) **and**
     /// [`HorizontalReset`](Self::HorizontalReset) at once. `μ` shares the
     /// left-endpoint mass between them, so the two jobs do not share one `λ`.
-    /// Its tap graph is not a single lag on the folded chain. On the
+    /// Its tap graph is not a single lag on the write axis. On the
     /// `token × micro-step` grid, *two* taps write cell `(t, j)`: `(t−1, j)`
     /// above it, and `(t, j−1)` beside it (for `j ≥ 1` only).
     ///
     /// Only the graph is 2-D, not the algorithm. Each tap is transported
-    /// across its own gap (`1` and `u` positions of the same folded chain), so
+    /// across its own gap (`1` and `u` positions of the same write axis), so
     /// the collapse of §9 still applies term by term. The state stays one
     /// matrix, and sample `s` still carries **one** scalar,
     /// `γₛ + νⁱⁿᵗₛ₊₁ + νᶠᵃʳₛ₊ᵤ`, into every later micro-step. So single-SSD still
@@ -249,7 +249,7 @@ impl TapPattern {
         self != TapPattern::None
     }
 
-    /// How far back the `β` tap reaches, in **folded** positions
+    /// How far back the `β` tap reaches, in **write** positions
     /// ([`crate::mamba3::product`]): `0` with no tap, `1` for the lag-1
     /// patterns, `u` for the lag-`u` ones.
     ///

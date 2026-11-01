@@ -21,7 +21,7 @@
 //! through the accumulator at the start of the chunk could not be
 //! un-weighted. But it does not have to enter the kernel. The only outputs of `forward` are at the
 //! **last** micro-step of each token (the [read axis](crate::mamba3::product)
-//! of the chunk). For a read at folded position `p = τ·u + (u−1)`, the band
+//! of the chunk). For a read at write position `p = τ·u + (u−1)`, the band
 //! `{p−u+1 … p}` is *exactly token `τ`*. So the correction is one small
 //! contraction per token, applied after the kernel at token resolution. It
 //! needs no mask change, no chunk-length constraint and no cross-chunk term.
@@ -30,7 +30,7 @@
 //! stay equivalent on **everything that a caller can observe**: the output of
 //! the block and every field of the returned cache. That is all that
 //! `forward_single_ssd` promises. The correction does not apply to the
-//! intermediate `y` at the `u−1` folded positions per token that the read axis
+//! intermediate `y` at the `u−1` write positions per token that the read axis
 //! does not read (and does not compute): partial sums on the way to the read,
 //! never a value that the block returns. The **state** is exact at every
 //! position in both pathways. The caches carry it, and a split prefill
@@ -77,7 +77,7 @@ use burn::prelude::*;
 /// - `excess_bsh`, `da_bsh`: `[batch, sequence, nheads]`
 /// - out                   : `[batch, tokens, mimo_rank, nheads, per_head_dim]`
 ///
-/// where `sequence = tokens · micro_steps` is the folded axis.
+/// where `sequence = tokens · micro_steps` is the write axis.
 #[allow(non_snake_case)]
 pub fn token_band_correction(
     v_bsmhp: Tensor<5>,

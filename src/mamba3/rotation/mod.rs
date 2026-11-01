@@ -736,7 +736,7 @@ pub fn split_rotor<const D: usize>(q: Tensor<D>) -> (Tensor<D>, Tensor<D>) {
 // ---------------------------------------------------------------------------
 
 /// Cumulative (ordered, left-accumulating) quaternion product along the
-/// sequence axis, with a cross-chunk carry.
+/// write axis, with a cross-chunk carry.
 ///
 /// This is the non-abelian analogue of the cumulative *sum of angles* of
 /// `Complex2D`. Complex rotations compose by adding angles. Quaternions compose
@@ -956,10 +956,10 @@ pub fn generator_increment<const D: usize, const DP1: usize, const DP2: usize>(
 /// - [`Rotor4D`](RotationKind::Rotor4D): the same scan over both stacked
 ///   factors, then the two-sided `Q* ⊗ · ⊗ T`.
 ///
-/// `B` turns at every position of the folded sequence, because it writes at
+/// `B` turns at every position of the write axis, because it writes at
 /// all of them. `C` turns only where it is **read**: one position per
 /// `read_stride` (`micro_steps`, where `1` keeps the two axes equal). The
-/// cumulative rotation covers the whole folded axis either way. `C` takes a
+/// cumulative rotation covers the whole write axis either way. `C` takes a
 /// stride slice of it. See [the read axis](crate::mamba3::product).
 ///
 /// The `mimo_rank` axis is **broadcast**, never indexed: no rotation count has
@@ -1054,7 +1054,7 @@ pub fn rotate_bc_forward(
                 rotation_dim,
                 rotate_pairwise,
             );
-            // `C` reads at one folded position per token, so it turns by the
+            // `C` reads at one write position per token, so it turns by the
             // cumulative angle of that position only. That is `u`× less work
             // than a turn of a broadcast copy at every micro-step.
             let cum_angles_btmha =
@@ -1130,7 +1130,7 @@ pub fn rotate_bc_forward(
                     .unsqueeze_dim::<6>(2)
                     .expand([batch, sequence, mimo_rank, nheads, blocks, 4])
             };
-            // `C`'s copy, at the one folded position per token it reads at.
+            // `C`'s copy, at the one write position per token it reads at.
             let over_mimo_read = |q_bshj4: Tensor<5>| {
                 helpers::read_rows::<5, 6>(q_bshj4, 1, read_stride)
                     .unsqueeze_dim::<6>(2)

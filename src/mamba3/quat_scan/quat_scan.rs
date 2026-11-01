@@ -155,7 +155,7 @@ impl<B: Backend> Quat<B> {
         }
     }
 
-    /// Prepend `ident` along the sequence axis and narrow again to `sequence`:
+    /// Prepend `ident` along the write axis and narrow again to `sequence`:
     /// the Hillis–Steele shift `shifted[t] = self[t-offset]` (identity before
     /// the start), where `offset` is the sequence length of `ident`.
     pub fn shift_prepend(self, ident: Quat<B>, sequence: usize) -> Quat<B> {
@@ -169,7 +169,7 @@ impl<B: Backend> Quat<B> {
         }
     }
 
-    /// Inclusive **suffix**-sum along the sequence axis (`out[t] = Σ_{s≥t} in[s]`),
+    /// Inclusive **suffix**-sum along the write axis (`out[t] = Σ_{s≥t} in[s]`),
     /// per component — `flip → cumsum → flip`. Used by the backward's `S[t]`.
     pub fn reverse_cumsum_seq(self) -> Quat<B> {
         let rc = |t: F<B, 4>| t.flip(&[1]).cumsum(1).flip(&[1]);
@@ -183,7 +183,7 @@ impl<B: Backend> Quat<B> {
 }
 
 /// Pure prefix product `P[t] = qₜ ⊗ qₜ₋₁ ⊗ ⋯ ⊗ q₀` (no carry) along the
-/// sequence axis, by Hillis–Steele doubling: `O(log seq)` dependency depth, all
+/// write axis, by Hillis–Steele doubling: `O(log seq)` dependency depth, all
 /// on SoA [`Quat`] components (no per-micro-step narrow/cat).
 ///
 /// The caller folds in the carry (one extra [`Quat::mul`]). The recompute
@@ -232,7 +232,7 @@ pub(crate) fn quat_prefix_product_soa<B: Backend>(q: Quat<B>) -> Quat<B> {
 )]
 pub trait Mamba3QuatScanBackendExt: Backend {
     /// Cumulative quaternion product `cum[t] = qₜ ⊗ ⋯ ⊗ q₀ ⊗ init` along the
-    /// sequence axis (newest on the left), returning only `cum`.
+    /// write axis (newest on the left), returning only `cum`.
     ///
     /// The caller takes `final_carry = cum[:, −1]` (a thin autodiff slice) on
     /// the high-level `Tensor` (see [`quat_cumprod_recalculated`]).

@@ -82,7 +82,7 @@ impl Mamba3DoubleSsdInput {
             // [batch, nchunks, nheads, chunk_tokens*mimo_rank, chunk_len*mimo_rank]
             let cb_bnhTMLM = c_bnhTMr.matmul(b_bnhrLM);
 
-            // The causal decay over (read row, folded source): `segsum`'s
+            // The causal decay over (read row, write source): `segsum`'s
             // rectangular counterpart, which is what it *is* at `read_stride = 1`.
             // l_base_bhntl[i,j] = exp(cumA[row(i)] - cumA[j]) if row(i) >= j, else 0
             let l_base_bhntl = {

@@ -157,7 +157,7 @@
 //!
 //! and its write is a sum of `u` outer products staggered along it. The read
 //! `C`, the gate `z` and the `D` skip stay per token. The block folds the
-//! micro-steps into the sequence axis, so nothing below this line changes. See
+//! micro-steps into the write axis, so nothing below this line changes. See
 //! [`crate::mamba3::product`] for what `u` buys per [`RotationKind`]. The
 //! answer is very different for the abelian and non-abelian kinds.
 //!
@@ -187,7 +187,7 @@
 //! | Letter | Dimension | Paper | Python | Typical value |
 //! |--------|-----------|-------|--------|---------------|
 //! | `b`    | `batch` | — | `batch` | varies |
-//! | `s`    | `sequence` length, **folded** = `tokens · u` | `T` | `seqlen` | varies |
+//! | `s`    | `sequence`, the **write-axis** length = `tokens · u` | `T` | `seqlen` | varies |
 //! | `t`    | `tokens` = `s`/`u` — the [read axis](crate::mamba3::product) | `T` | `seqlen` | varies |
 //! | `u`    | `micro_steps` (MambaProduct) | — | — | 1 (stock) |
 //! | `d`    | `d_model` | `D` | `d_model` | 768, 1024 |
@@ -602,7 +602,7 @@ impl Mamba3 {
     }
 
     /// The tail of the positive systems. The `forward` of both pathways and
-    /// `step` (whose folded run is the `u` micro-steps of one token) share it.
+    /// `step` (whose write axis is the `u` micro-steps of one token) share it.
     /// It computes:
     ///
     /// - the scan of the register,
@@ -612,7 +612,7 @@ impl Mamba3 {
     ///
     /// Returns `(y, ln Λ carry, c carry)`.
     ///
-    /// `end` is `(real folded positions per slot, the incoming ln Λ carry)`
+    /// `end` is `(real write positions per slot, the incoming ln Λ carry)`
     /// for a right-padded call. Each carry then comes from the last real
     /// position of its slot, or is the incoming one for a slot with none.
     ///
@@ -1630,7 +1630,7 @@ impl Mamba3Config {
 /// A packed call of either pathway ([`crate::packing`]): its resets, and the
 /// cache that each segment starts from.
 pub(crate) struct Packed {
-    /// The resets on the folded axis.
+    /// The resets on the write axis.
     pub segments: crate::packing::Segments,
     /// The origin cache. The two pathways have the same fields, and at a
     /// call boundary the same values (see [`crate::mamba3::cache`]).
@@ -1777,7 +1777,7 @@ impl Mamba3 {
         .into()
     }
 
-    /// How far back the `β` tap of this block reaches, in folded positions:
+    /// How far back the `β` tap of this block reaches, in write positions:
     /// [`TapPattern::tap_lag`] at the `micro_steps` of this block. `0` when the
     /// pattern has no tap.
     pub fn tap_lag(&self) -> usize {
@@ -1813,7 +1813,7 @@ impl Mamba3 {
         )
     }
 
-    /// The tap FIFO for the next call: the `(B, x)` of the last `lag` folded
+    /// The tap FIFO for the next call: the `(B, x)` of the last `lag` write
     /// positions, oldest first. `(None, None)` when the pattern has no `β` tap.
     ///
     /// `x` is pre-scaled by the decay accumulated since its own position
@@ -1822,7 +1822,7 @@ impl Mamba3 {
     /// empty, and the slot is the plain last `x`. Both pathways use this
     /// function, so their caches stay field-identical.
     ///
-    /// `end` is `(real folded positions per slot, the incoming FIFO)` for a
+    /// `end` is `(real write positions per slot, the incoming FIFO)` for a
     /// right-padded call. The slots then hold the last `lag` real positions of
     /// each slot, read from the incoming FIFO followed by this call. For a slot
     /// with no real position, that is the incoming FIFO itself.

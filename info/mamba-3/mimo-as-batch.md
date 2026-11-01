@@ -380,7 +380,7 @@ multiplication of target ranks in §3.
 ## 9. MIMO and MambaProduct: what each dial unties
 
 `micro_steps` (`u`) runs `u` full Mamba-3 micro-steps per token, folded into the
-sequence axis. Both dials widen the write. They differ in what stays tied:
+write axis. Both dials widen the write. They differ in what stays tied:
 
 | dial | keys per token | values per token | step sizes | combination |
 |---|---|---|---|---|

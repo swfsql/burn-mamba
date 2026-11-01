@@ -278,7 +278,7 @@ Two consequences:
 ## 7. MambaProduct: the unroll
 
 The `micro_steps` (`u`) of the companion note runs `u` full Mamba-3 micro-steps per
-token, folded into the sequence axis. Run the derivation of DeltaProduct on
+token, folded into the write axis. Run the derivation of DeltaProduct on
 it, with `v_{i,0} := v_{i−1,u}` and `M_{a:b} := M_{i,b}⋯M_{i,a}`:
 
 $$\boxed{\;\begin{aligned}
@@ -288,7 +288,7 @@ B(x_{i-1},x_i)&=\underbrace{(1-\lambda_{i,1})\Delta_{i,1}\;A(x_i)\,v_{i-1,u}}_{\
 +\underbrace{\lambda_{i,u}\Delta_{i,u}\,v_{i,u}}_{\text{freshest, part-paid}}
 \end{aligned}\;}$$
 
-Verified against the folded recurrence. Compared with the
+Verified against the recurrence on the write axis. Compared with the
 `A(x_i) = ∏(I − β_jk_jk_j^⊤)`, `B(x_i) = Σ_j(∏_{k>j}…)β_jk_jv_j^⊤` of
 DeltaProduct, there are three structural differences:
 
@@ -430,7 +430,7 @@ Every degeneracy is verified:
 - The γ-correction generalises from a **diagonal** to a
   **`u`-wide band** (subtract the mass that is still unpaid where `t−s < u`).
   At `u = 1` the band *is* the diagonal, so `diag.rs` does not change. The
-  band does not have to enter the kernel. A folded pass keeps only the reads
+  band does not have to enter the kernel. A write-axis pass keeps only the reads
   at the last micro-step of each token, and at those reads the band *is* that
   token. So it is one intra-token contraction afterwards, with no mask change,
   no chunk-length constraint and no cross-chunk term.

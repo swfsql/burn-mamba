@@ -209,8 +209,8 @@ fn the_padding_takes_the_dtype_of_the_input() {
 /// The lengths straddle the two regimes: `≤ 16` takes the direct scan, above it
 /// the blocked one, and `17`/`100`/`999` are the cases whose last block is
 /// **partial** — the zero padding and the final `narrow` are where an off-by-one
-/// would live. `1` is the degenerate no-op; `2048` is the order the folded
-/// sequence reaches at `micro_steps = 8`, the length this function exists for.
+/// would live. `1` is the degenerate no-op; `2048` is the order the write axis
+/// reaches at `micro_steps = 8`, the length this function exists for.
 #[test]
 fn prefix_sum_matches_the_definition() {
     for len in [17, 100, 999] {

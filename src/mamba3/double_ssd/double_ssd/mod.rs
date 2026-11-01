@@ -12,7 +12,7 @@
 //! ```
 //!
 //! The shift is [`TapPattern::tap_lag`](crate::mamba3::tap_pattern::TapPattern::tap_lag)
-//! folded positions (`1` by default, `u` for
+//! write positions (`1` by default, `u` for
 //! [`TapPattern::Vertical`](crate::mamba3::tap_pattern::TapPattern::Vertical)), and
 //! `β = ν·α` carries the transport across that whole gap.
 //!
@@ -96,13 +96,13 @@ impl Mamba3 {
         san(&input_bsm);
 
         // A padded token pads all of its micro-steps. `end_b` is one past the
-        // last real position of each slot on the folded axis, where its cache
+        // last real position of each slot on the write axis, where its cache
         // fields are read.
         let pad_bs = pad_bt.map(|pad_bt| crate::padding::repeat_rows(pad_bt, micro_steps));
         let end_b = pad_bs.as_ref().map(crate::padding::real_end_b);
 
         // A reset is at the first token of a chunk, which is its first
-        // micro-step on the folded axis. See [`crate::packing`].
+        // micro-step on the write axis. See [`crate::packing`].
         let chunk_len = ssd_path.chunk_len_or_optimal(self);
         let segments = reset_bt.map(|reset_bt| {
             let chunk_tokens = Mamba3SsdPath::chunk_tokens(chunk_len, micro_steps);
@@ -206,7 +206,7 @@ impl Mamba3 {
             self.gain_input(noise_bsh, cache.log_precision_bh.clone(), packed.as_ref()),
         )
         .padded(pad_bs.as_ref());
-        // The inputs of the tropical register, on the same folded axis.
+        // The inputs of the tropical register, on the same write axis.
         let tropical_ab_bsh = tropical_btH.map(|(a_btH, b_btH)| {
             (unfold_micro_bs(a_btH, u), unfold_micro_bs(b_btH, u))
         });
@@ -274,7 +274,7 @@ impl Mamba3 {
         // prior token of a continued cache. For a fresh (zero) cache this is
         // the same as zero-padding.
         //
-        // The shift is [`TapPattern::tap_lag`] *folded* positions: 1 for the
+        // The shift is [`TapPattern::tap_lag`] *write* positions: 1 for the
         // default [`TapPattern::HorizontalCarryOver`], `u` for
         // [`TapPattern::Vertical`]. That is exactly the FIFO depth of `step`.
         //
@@ -488,7 +488,7 @@ impl Mamba3 {
         // ── Step 10: Unpad ────────────────────────────────────────────────────
         // The SSD returns token resolution: the readout is after all `u`
         // writes, and the kernel computed only that row. From here, `t`
-        // (`tokens`) is the sequence axis again.
+        // (`tokens`) is the time axis again: the read axis.
         let y_bTmhp = y_bntmhp.reshape([batch, tokens_padded, mimo_rank, nheads, per_head_dim]);
         let y_btmhp = if pad == 0 {
             y_bTmhp
@@ -600,7 +600,7 @@ mod step {
     /// trapezoid coefficients.
     ///
     /// Every per-micro-step stream has a `u` axis (MambaProduct, `u = 1` for
-    /// stock Mamba-3): the whole folded block of the token.
+    /// stock Mamba-3): the whole block of the token on the write axis.
     /// [`Mamba3::step_double_ssd`] uses it at once, not one position at a
     /// time.
     pub(crate) struct StepProjection {
@@ -944,7 +944,7 @@ mod step {
 
             // ── The `u` micro-steps of the token at once, then one readout ──────
             // MambaProduct evaluates a token as `u` consecutive positions of the
-            // ordinary recurrence. So a `step` call is a **folded block** of
+            // ordinary recurrence. So a `step` call is a **write-axis block** of
             // length `u`, and one call is `forward` on a one-token sequence
             // (the parity tests assert this). The block is not walked one
             // position at a time, because that is not necessary. After the RoPE
@@ -967,7 +967,7 @@ mod step {
             // unchanged op graph of stock Mamba-3.
             //
             // The trapezoid is unchanged by all of this. A tap at
-            // [`TapPattern::tap_lag`] reads folded position `p − lag`: the
+            // [`TapPattern::tap_lag`] reads write position `p − lag`: the
             // [`helpers::shift_stream`] of `forward` over this block, with the
             // FIFO of the cache as the prefix. `β = ν·α` times
             // [`helpers::interior_gap_decay`] is the same gap transport (§9). At

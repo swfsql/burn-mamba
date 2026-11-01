@@ -233,7 +233,7 @@ pub(crate) fn last_start_b(reset_bn: &Tensor<2, Bool>, chunk_len: usize) -> Tens
         .reshape([batch])
 }
 
-/// The resets of a packed call on its folded axis (Mamba-3: `micro_steps`
+/// The resets of a packed call on its write axis (Mamba-3: `micro_steps`
 /// positions per token), with what the sites that read the past need.
 pub(crate) struct Segments {
     /// `[batch, nchunks]`: the chunks that start a segment.

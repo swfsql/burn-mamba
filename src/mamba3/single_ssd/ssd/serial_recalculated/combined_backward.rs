@@ -77,7 +77,7 @@ pub struct CombinedSingleSsdGrads<B: Backend> {
 /// - `d_final_bhpr` — upstream gradient of the final state
 /// - `v_bnlmhp`, `da_bnlh`, `b_bnlmhr`, `c_bntmhr`, `gamma_bnth`, `scale_bnlh`,
 ///   `initial_state_bhpr` — the seven saved forward inputs
-/// - `read_stride` — folded positions per read row (see
+/// - `read_stride` — write positions per read row (see
 ///   [`Mamba3SingleSsdInput::read_stride`](crate::mamba3::single_ssd::ssd::Mamba3SingleSsdInput))
 /// - `siso_specialization` — the forward's γ-correction branch choice, replayed
 ///   here so the backward matches it (performance-only; both agree)
@@ -185,7 +185,7 @@ pub fn combined_backward<B: Backend>(
     //   y_diag[m_out, p]    = γ · Σ_{m_in} qk_dot[m_out, m_in] · V[m_in, p]
     // ═══════════════════════════════════════════════════════════════════════
     // The same position is the *read* row, so V and B enter at those positions and
-    // their gradients are scattered back onto the folded axis.
+    // their gradients are scattered back onto the write axis.
     let DiagGrads {
         d_v_bnlmhp: d_v_diag_bntmhp,
         d_c_bnlmhr: d_c_diag_bntmhr,
@@ -204,7 +204,7 @@ pub fn combined_backward<B: Backend>(
     san(&d_gamma_bnth);
 
     // Reusable [chunk_tokens, chunk_len] -inf strict-upper mask (triu(0) on the
-    // folded grid: on+above diagonal → -inf) for the LOWER (strict
+    // write grid: on+above diagonal → -inf) for the LOWER (strict
     // lower-triangular) path.
     let neg_inf_strict_tl: F<B, 2> =
         read_causal_mask::<B>(chunk_len, read_stride, 0, &device, dtype);
@@ -292,7 +292,7 @@ pub fn combined_backward<B: Backend>(
         let d_da_blue_bnhTM: F<B, 4> = (d_y_bnhTMp.clone() * ch_bnhTMp * exp_da_cumsum_bnhTMp)
             .sum_dim(4)
             .squeeze_dim::<4>(4);
-        // The row's own `da` is one of the folded positions, so its gradient
+        // The row's own `da` is one of the write positions, so its gradient
         // goes back to that one and nowhere else.
         let d_da_blue_bnhl: F<B, 4> = scatter_read_rows::<B, 4, 5>(
             d_da_blue_bnhTM
@@ -358,7 +358,7 @@ pub fn combined_backward<B: Backend>(
         let d_diff_bnhTMLM = d_decay_strict_bnhTMLM * decay_strict_bnhTMLM;
 
         // The target term lands on the read rows (scattered back onto the
-        // folded axis), the source term on every folded position.
+        // write axis), the source term on every write position.
         let d_da_target_bnhTM: F<B, 4> = d_diff_bnhTMLM.clone().sum_dim(4).squeeze_dim::<4>(4);
         let d_da_source_bnhLM: F<B, 4> = d_diff_bnhTMLM.sum_dim(3).squeeze_dim::<4>(3);
         let d_da_target_bnhl: F<B, 4> = scatter_read_rows::<B, 4, 5>(

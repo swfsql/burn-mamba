@@ -4,7 +4,7 @@
 //! appearing in it are treated as the *different* widenings they are:
 //! `mimo_rank` fuses onto both of a chunk's axes and so divides it out, while
 //! `micro_steps` widens only the write axis and so subdivides a chunk of
-//! unchanged folded width. See [`Mamba3SsdPath::optimal_chunk_len`] and
+//! unchanged write length. See [`Mamba3SsdPath::optimal_chunk_len`] and
 //! `info/mamba-3/architecture-deltas.md` §8.
 
 use super::*;
@@ -38,15 +38,15 @@ fn micro_steps_subdivides_the_chunk() {
     let base = Mamba3SsdPath::optimal_chunk_len(128, 64, 1, 1);
     assert_eq!(base, 96);
     for u in [1, 2, 3, 4, 5, 8, 16] {
-        let folded = Mamba3SsdPath::optimal_chunk_len(128, 64, 1, u);
+        let write_len = Mamba3SsdPath::optimal_chunk_len(128, 64, 1, u);
         assert!(
-            (base..base + u).contains(&folded),
-            "u = {u} moved the folded chunk off {base} to {folded}",
+            (base..base + u).contains(&write_len),
+            "u = {u} moved the chunk on the write axis off {base} to {write_len}",
         );
         assert_eq!(
-            Mamba3SsdPath::chunk_tokens(folded, u),
+            Mamba3SsdPath::chunk_tokens(write_len, u),
             base.div_ceil(u),
-            "u = {u} should divide the *token* count, not the folded width",
+            "u = {u} should divide the *token* count, not the write length",
         );
     }
 }

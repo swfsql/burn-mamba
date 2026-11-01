@@ -109,7 +109,7 @@
 //!
 //! - **The read `C` is on the last micro-step, and only there.** Every
 //!   micro-step *writes* to the state, so `B`, `x`, `Δ`, `A`, `λ` and the
-//!   rotation are on the folded axis. The token is *read* once, so `C` stays at
+//!   rotation are on the write axis. The token is *read* once, so `C` stays at
 //!   token resolution, and so does the `y` that the SSD returns. That is the
 //!   **read axis** of the chunk (`helpers::read_rows`). `u` widens only the
 //!   write axis of a chunk. So the intra-chunk score, the state-to-output
@@ -145,25 +145,25 @@
 //! call. So a chunked prefill splits at token boundaries, as at `u = 1`.
 //!
 //! What `u > 1` does change is the taps of the trapezoid. They are now on the
-//! folded chain, so they become a *choice*
+//! write axis, so they become a *choice*
 //! ([`TapPattern`](crate::mamba3::tap_pattern::TapPattern)). The default
 //! `HorizontalCarryOver` reads the previous **micro-step**: the 2-tap FIR
 //! filter runs at the finer rate, and only `1/u` of the taps still cross a
 //! token. `Vertical` reads the same micro-step of the previous **token**. The
 //! tap cache (`k_state`, `v_state`) is the FIFO that the choice needs: one
-//! slot, or `u`. Either way, `forward` runs the same folded chain as `step`,
+//! slot, or `u`. Either way, `forward` runs the same write axis as `step`,
 //! which keeps them in exact agreement.
 //!
 //! ## Notation
 //!
-//! `u` is `micro_steps`. In the folded region of `forward`, the shape letter
+//! `u` is `micro_steps`. On the write axis of `forward`, the shape letter
 //! `s` counts **micro-steps**, not tokens. A name at token resolution says so
 //! (`tokens`). See the [`mamba3`](crate::mamba3::mamba3) module header for the
 //! other dimension keys.
 
 use burn::prelude::*;
 
-/// Fold a `u`-wide in-projection segment into the sequence axis.
+/// Fold a `u`-wide in-projection segment into the write axis.
 ///
 /// The projection lays the micro-steps of a token out contiguously
 /// (`channel = j·width + c`), which is already the memory order of
@@ -203,7 +203,7 @@ pub fn unfold_micro_b(t_bW: Tensor<2>, micro_steps: usize) -> Tensor<3> {
 
 /// Keep the **last** micro-step of each token of the value stream (the
 /// position that is contemporaneous with the readout). This collapses the
-/// folded sequence back to token resolution for the `D` skip.
+/// write axis back to the read axis for the `D` skip.
 ///
 /// The output `y` needs no such collapse. The SSD computes only the readout
 /// row (the read axis of the chunk, see `helpers::read_rows`), so it already

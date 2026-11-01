@@ -71,7 +71,7 @@ pub fn split_trailing<const D: usize>(
 ///
 /// This is the "shift-before-chunking" of the double-SSD pathway, generalised
 /// from lag 1 to [`TapPattern::tap_lag`](crate::mamba3::tap_pattern::TapPattern::tap_lag).
-/// A folded sequence is `tokens · u` long and `lag ∈ {1, u}`, so
+/// The write axis is `tokens · u` long and `lag ∈ {1, u}`, so
 /// `sequence ≥ lag` always. At equality, the whole call is prefix.
 ///
 /// # Shapes
@@ -164,7 +164,7 @@ pub(crate) fn sub_periods<const D: usize>(x: Tensor<D>, k: Tensor<D>, period: f3
 ///
 /// Every other scan in this crate runs over `chunk_len`, `lag` or
 /// `micro_steps`, all bounded. The cumulative rotation angle is the one scan
-/// over the whole **folded** sequence, and `micro_steps` multiplies that axis,
+/// over the whole **write axis**, and `micro_steps` multiplies that axis,
 /// so `u > 1` reaches the quadratic `u`× sooner. Blocked, the same case is
 /// 1.9× / 6.7× / 23× / 46× faster at `len = 256 / 512 / 1024 / 2048`, and the
 /// forward is almost flat in `len` (0.14 → 0.51 ms over that span).
@@ -292,8 +292,8 @@ pub fn prefix_sum<const D: usize, const DP1: usize>(
 //
 // A chunk has two axes, and `micro_steps` widens only one of them. Each of the
 // `u` micro-steps of a token **writes** to the state, so the source axis is
-// the folded `chunk_len`. The block **reads** the token once, at its last
-// micro-step, so the target axis is `chunk_len / u`: the rows whose `y`
+// the `chunk_len` of the write axis. The block **reads** the token once, at
+// its last micro-step, so the target axis is `chunk_len / u`: the rows whose `y`
 // survives (a zero gradient multiplies all the others). `read_stride` is that
 // `u`, or `1` where there is no fold (Mamba-2, `micro_steps = 1`), where both
 // helpers below are the identity. `step` also reads this axis: its token is a
@@ -302,10 +302,10 @@ pub fn prefix_sum<const D: usize, const DP1: usize>(
 // The alignment keeps this a reshape, not a gather. `chunk_len` is a multiple
 // of `read_stride`
 // ([`Mamba3SsdPath::chunk_len_or_optimal`](crate::mamba3::ssd_path::Mamba3SsdPath::chunk_len_or_optimal)),
-// so chunk `c` covers folded positions `[c·L, (c+1)·L)` = tokens
+// so chunk `c` covers write positions `[c·L, (c+1)·L)` = tokens
 // `[c·T, (c+1)·T)`, and its read rows are a **contiguous run** of them.
 
-/// The read rows of a folded axis: index `i·stride + (stride − 1)` for each
+/// The read rows of a write axis: index `i·stride + (stride − 1)` for each
 /// `i`, i.e. the last position of every run of `stride`.
 ///
 /// The identity at `stride = 1`.
@@ -328,7 +328,7 @@ pub fn read_rows<const D: usize, const DP1: usize>(
     assert_eq!(
         len % stride,
         0,
-        "a folded axis of {len} is not a whole number of {stride}-micro-step tokens",
+        "a write axis of {len} is not a whole number of {stride}-micro-step tokens",
     );
     let mut split = [0usize; DP1];
     split[..dim].copy_from_slice(&dims[..dim]);
@@ -342,10 +342,10 @@ pub fn read_rows<const D: usize, const DP1: usize>(
     t.reshape(split).narrow(dim + 1, stride - 1, 1).reshape(out)
 }
 
-/// The additive causal mask over `(read row, folded source)`:
+/// The additive causal mask over `(read row, write source)`:
 /// `0` where the source is early enough to contribute, `−∞` where it is not.
 ///
-/// `diagonal` goes to [`Tensor::triu`] on the **folded** grid, so it has the
+/// `diagonal` goes to [`Tensor::triu`] on the **write** grid, so it has the
 /// usual meaning. `0` excludes the same position (the single-SSD strict mask,
 /// whose diagonal `ssd::diag` adds back with `γ`). `1` keeps it (the
 /// double-SSD inclusive mask).
@@ -362,7 +362,7 @@ pub fn read_causal_mask(
     diagonal: i64,
     device: &Device,
 ) -> Tensor<2> {
-    // The rows of the full folded mask at the readout positions. That is what
+    // The rows of the full write-axis mask at the readout positions. That is what
     // `read_rows` selects, so it is the same op.
     let full = Tensor::<2>::full([chunk_len, chunk_len], f32::NEG_INFINITY, device).triu(diagonal);
     read_rows::<2, 3>(full, 0, stride)
@@ -396,7 +396,7 @@ pub mod prim {
         assert_eq!(
             len % stride,
             0,
-            "a folded axis of {len} is not a whole number of {stride}-micro-step tokens",
+            "a write axis of {len} is not a whole number of {stride}-micro-step tokens",
         );
         let mut split = [0usize; DP1];
         split[..dim].copy_from_slice(&dims[..dim]);
@@ -412,7 +412,7 @@ pub mod prim {
     }
 
     /// The transpose of [`read_rows`]: scatter a read-row tensor back onto the
-    /// folded axis, with zeros at the positions that have no readout.
+    /// write axis, with zeros at the positions that have no readout.
     ///
     /// This is the gradient of `read_rows`. The hand-written backward uses it
     /// where autodiff does the same for the `Minimal` / `Serial` paths. The
@@ -533,12 +533,12 @@ pub fn tail_decay(da_bsh: Tensor<3>, lag: usize) -> Option<Tensor<3>> {
     Some((total_b1h - cumulative_blh).exp())
 }
 
-/// A `[1, len, 1]` mask over a folded axis: `0` at the **first** micro-step of
+/// A `[1, len, 1]` mask over a write axis: `0` at the **first** micro-step of
 /// each token (`p ≡ 0 mod u`), where a tap that does not cross tokens closes,
 /// and `1` elsewhere.
 ///
 /// It broadcasts against any `[batch, len, nheads]` stream, in `forward`
-/// (`len` is the folded sequence, which starts at a token boundary) and in
+/// (`len` is the write axis, which starts at a token boundary) and in
 /// `step` (`len` is `u`, so the closed position is its first entry). At
 /// `u = 1` every position is a token start, and the mask is all zeros. That
 /// alone is why
@@ -623,8 +623,8 @@ impl TrapezoidCoeffs {
 /// (data-dependent) projections. See the header of `mamba3.rs` for the
 /// formulas and the header of `tap_pattern.rs` for how the masses divide.
 ///
-/// All data tensors are `[batch, len, nheads]`, where `len` is the folded
-/// sequence (`forward`) or the `u` micro-steps of one token (`step`).
+/// All data tensors are `[batch, len, nheads]`, where `len` is the write axis
+/// (`forward`) or the `u` micro-steps of one token (`step`).
 /// `dt_bias_h` broadcasts to match. In both cases, a tap that closes at token
 /// boundaries closes periodically along axis 1.
 ///

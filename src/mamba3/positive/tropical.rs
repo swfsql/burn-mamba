@@ -5,7 +5,7 @@ use super::LOG_ZERO;
 use super::scan::{self, Affine};
 use burn::prelude::*;
 
-/// The register at every position of a folded run, continued from `carry_bh`
+/// The register at every position of a write-axis run, continued from `carry_bh`
 /// ([`LOG_ZERO`] for a fresh sequence: the max of nothing).
 ///
 /// # At `u > 1`
@@ -22,7 +22,7 @@ use burn::prelude::*;
 /// `u − 1` values between are computed and never read. A composition of the
 /// maps of each token first (`u − 1` elementwise [`Affine`] composes), then a
 /// scan over tokens, would give the same reads and carry at `1/u` of the
-/// scanned length. This function scans the folded axis instead: the axis that
+/// scanned length. This function scans the write axis instead: the axis that
 /// the Kalman gain needs, because every micro-step reads its decay.
 ///
 /// # In a packed row

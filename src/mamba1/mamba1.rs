@@ -611,7 +611,7 @@ impl Mamba1 {
         // sequential. The official implementation uses a much faster parallel
         // scan that is also hardware-aware (like FlashAttention).
 
-        // unstack the Sequence axis
+        // unstack the time axis
 
         let delta_a = delta_a.split(1, 0);
         assert_eq!(delta_a.len(), sequence);
