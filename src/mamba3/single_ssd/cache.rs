@@ -45,7 +45,7 @@ pub struct Mamba3SingleSsdCaches {
 /// Configuration / factory for [`Mamba3SingleSsdCaches`].
 #[derive(Config, Debug)]
 pub struct Mamba3SingleSsdCachesConfig {
-    /// Number of cache slots (= number of virtual layers).
+    /// Number of layer caches (= number of virtual layers).
     pub n_caches: usize,
 
     /// Shared configuration that determines the shape of each cache.
@@ -151,8 +151,8 @@ impl Mamba3SingleSsdCache {
             san(v_state_buhp);
         }
         self.rotation.sanity();
-        for slot in [&self.log_precision_bh, &self.tropical_bh].into_iter().flatten() {
-            san(slot);
+        for field in [&self.log_precision_bh, &self.tropical_bh].into_iter().flatten() {
+            san(field);
         }
     }
 }
@@ -202,11 +202,11 @@ pub struct Mamba3SingleSsdCacheConfig {
     #[config(default = 1)]
     pub micro_steps: usize,
 
-    /// The gain of the block. A Kalman gain keeps a `ln Λ` slot.
+    /// The gain of the block. A Kalman gain keeps a `ln Λ` field.
     #[config(default = "crate::mamba3::positive::Gain::Projected")]
     pub gain: crate::mamba3::positive::Gain,
 
-    /// The tropical register of the block. `MaxPlus` keeps a `c` slot.
+    /// The tropical register of the block. `MaxPlus` keeps a `c` field.
     #[config(default = "crate::mamba3::positive::Tropical::None")]
     pub tropical: crate::mamba3::positive::Tropical,
 }
@@ -264,7 +264,7 @@ impl Mamba3SingleSsdCacheConfig {
             self.num_quat_blocks,
             device,
         );
-        let (log_precision_bh, tropical_bh) = crate::mamba3::positive::fresh_slots(
+        let (log_precision_bh, tropical_bh) = crate::mamba3::positive::fresh_fields(
             self.gain,
             self.tropical,
             self.batch,

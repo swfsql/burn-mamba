@@ -98,7 +98,7 @@ per character. A story is walked in windows (see
 
 - Stories differ in length. So a batch is padded to a whole number of windows of
   its longest story.
-- The batch carries the number of real positions of each slot. The loss and the
+- The batch carries the number of real positions of each row. The loss and the
   accuracy mask the padding out, at the fixed shape of the window. A shape that
   changes per window slows every later CUDA allocation (tracel-ai/burn#5751).
 - `-- --profile <N>` prints the mean ms of each phase per `N` windows, the
@@ -136,7 +136,7 @@ optimizer step per window, and **carries the final state into the next window**:
   boundary, and the peak memory is the activations of one window, however deep
   the run goes. Back-propagation *within* the window does not change.
 
-Every slot of a mini-batch walks its own story in lockstep. So one training
+Every row of a mini-batch walks its own story in lockstep. So one training
 iteration is still one batch, and the log line stays `Batch b/N`. It adds
 `Windows k/n (mean m)`:
 

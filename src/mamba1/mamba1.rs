@@ -378,7 +378,7 @@ impl Mamba1 {
     /// a sequence in segments (prefill then decode, or chunked prefill).
     ///
     /// `pad_bs` (`true` at padding, `None` ⇒ no padding) is right padding. A
-    /// padded row is absent: it has `Δ = 0`, and each slot reads its conv
+    /// padded row is absent: it has `Δ = 0`, and each row reads its conv
     /// window at its own end (see [`burn_stack::modules::Block::block_forward`]).
     ///
     /// # Shapes
@@ -436,7 +436,7 @@ impl Mamba1 {
             );
 
             // Update the conv window: the last conv_kernel columns of the padded
-            // input — under padding, of each slot's real ones, read off the
+            // input — under padding, of each row's real ones, read off the
             // whole previous window followed by the input.
             cache.conv_bik = match &pad_bs {
                 None => conv_in_padded.clone().narrow(2, sequence - 1, conv_kernel),

@@ -224,7 +224,7 @@ pub struct RotationSpec {
 }
 
 /// The stateless payload of [`RotationState::Real`]: a [`Module`] with no
-/// tensors. So the cache slot of a real transition allocates nothing and
+/// tensors. So the cache field of a real transition allocates nothing and
 /// converts between backends by `Clone`.
 #[derive(Module, Debug, Default)]
 pub struct NoRotation;

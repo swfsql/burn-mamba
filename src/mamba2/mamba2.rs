@@ -680,7 +680,7 @@ impl Mamba2 {
     ///
     /// `pad_bs` (`true` at padding, `None` ⇒ no padding) marks a right-padded
     /// batch. A padded row is absent. It gets `Δ = 0` (the same identity update
-    /// as the chunk padding above), and each slot reads its conv window at its
+    /// as the chunk padding above), and each row reads its conv window at its
     /// own end (see [`burn_stack::modules::Block::block_forward`]).
     ///
     /// ## Shapes
@@ -832,7 +832,7 @@ impl Mamba2 {
 
         // Update the cache: keep the last `conv_kernel` columns of the padded
         // input (from position `sequence - 1`). Under right padding, keep the
-        // last real columns of each slot, read from the full previous window
+        // last real columns of each row, read from the full previous window
         // followed by the input. After a reset, the columns before the start
         // of the last segment come from the window of the origin, where that
         // segment started.

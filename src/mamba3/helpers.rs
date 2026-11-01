@@ -599,7 +599,7 @@ impl TrapezoidCoeffs {
     ///   dropped, exactly as at a call boundary,
     /// - the rotation (which advances by `Δ`) does not move.
     ///
-    /// `log_precision` stays as is. Only causal sites read it, and each slot
+    /// `log_precision` stays as is. Only causal sites read it, and each row
     /// takes its carry at its own end.
     pub fn padded(self, pad_bs: Option<&Tensor<2, Bool>>) -> Self {
         let Some(pad_bs) = pad_bs else {

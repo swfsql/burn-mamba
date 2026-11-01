@@ -68,7 +68,7 @@ impl Mamba3 {
     /// `pad_bt` marks a right-padded batch of tokens, as in [`Self::forward`].
     /// The last tap installment of a real position, which a padded position
     /// would pay, then stays in the tap slots, exactly as at a call boundary.
-    /// So the accumulator `h'` equals the state from the end of each slot on.
+    /// So the accumulator `h'` equals the state from the end of each row on.
     ///
     /// # Shapes
     /// - `input_bsm`: `[batch, sequence, d_model]`
@@ -134,7 +134,7 @@ impl Mamba3 {
         san(&input_bsm);
 
         // A padded token pads all of its micro-steps. `end_b` is one past the
-        // last real position of each slot on the write axis, where its cache
+        // last real position of each row on the write axis, where its cache
         // fields are read.
         let pad_bs = pad_bt.map(|pad_bt| crate::padding::repeat_rows(pad_bt, micro_steps));
         let end_b = pad_bs.as_ref().map(crate::padding::real_end_b);

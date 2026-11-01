@@ -1,26 +1,27 @@
 //! Right padding inside a block: the part of the
 //! [`burn_stack::utils::padding`] contract that a family keeps.
 //!
-//! A padded row is absent: the outputs of the real rows and the returned cache
-//! are those of the real rows of each slot, run alone. Every family meets this
-//! contract in the same two ways:
+//! A padded position is absent: the outputs of the real tokens and the
+//! returned cache are those of the real tokens of each row, run alone. Every
+//! family meets this contract in the same two ways:
 //!
-//! - **The state** goes through a padded row unchanged. The family zeroes the
-//!   decay and the writes of that micro-step where the discretisation forms them
-//!   (`Δ = 0` gives `Ā = 1, B̄ = 0`, the same transparency that the internal
-//!   chunk padding uses). With right padding, no real row reads a padded one,
-//!   so nothing else has to know.
-//! - **Every cache field that holds the last few samples of a slot** (a conv
+//! - **The state** goes through a padded position unchanged. The family zeroes
+//!   the decay and the writes of that micro-step where the discretisation forms
+//!   them (`Δ = 0` gives `Ā = 1, B̄ = 0`, the same transparency that the
+//!   internal chunk padding uses). With right padding, no real token reads a
+//!   padded one, so nothing else has to know.
+//! - **Every cache field that holds the last few samples of a row** (a conv
 //!   window, a tap FIFO, the carry of a scan) is read at the own end of each
-//!   slot: a gather at a per-slot offset ([`window`]), with a fixed shape for
-//!   any lengths.
+//!   row: a gather at a per-row offset ([`window`]), with a fixed shape for any
+//!   lengths.
 
 use burn::prelude::*;
 
-/// One past the last real row of each slot, `[batch]`: where the slot reads
-/// its cache fields. Under right padding, this is the number of real rows. In
-/// a packed row ([`crate::packing`]), pad rows can also end each segment, and
-/// only the last real row counts. A slot with no real row gives `0`.
+/// One past the last real token of each row, `[batch]`: where the row reads
+/// its cache fields. Under right padding, this is the number of real tokens. In
+/// a packed row ([`crate::packing`]), padded positions can also end each
+/// segment, and only the last real token counts. A row with no real token
+/// gives `0`.
 pub(crate) fn real_end_b(pad_bs: &Tensor<2, Bool>) -> Tensor<1, Int> {
     let [batch, sequence] = pad_bs.dims();
     let device = pad_bs.device();
@@ -33,7 +34,7 @@ pub(crate) fn real_end_b(pad_bs: &Tensor<2, Bool>) -> Tensor<1, Int> {
 }
 
 /// `width` consecutive positions of `x` along `axis`, from `start_b` in each
-/// slot (axis 0 is the batch): the per-slot `narrow(axis, start, width)`, as a
+/// row (axis 0 is the batch): the per-row `narrow(axis, start, width)`, as a
 /// fixed-shape gather.
 pub(crate) fn window<const D: usize>(
     x: Tensor<D>,

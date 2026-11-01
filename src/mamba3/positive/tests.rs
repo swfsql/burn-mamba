@@ -13,9 +13,9 @@
 //! 4. **The block**: stock at `κ = 0` / `e = 0`, with live gradients into the
 //!    join (the out-norm on or off), and finite ones when a head's `Δ`
 //!    vanishes; `forward` ≡ `step` ≡ the other pathway ≡ a split prefill ≡ the other
-//!    SSD algorithm, on outputs, every cache slot and gradients, across the
+//!    SSD algorithm, on outputs, every cache field and gradients, across the
 //!    lattice the two systems have to commute with (tap patterns, micro-steps,
-//!    rotation kinds, MIMO, the out-norm); the slots survive a no-grad region;
+//!    rotation kinds, MIMO, the out-norm); the fields survive a no-grad region;
 //!    the in-projection's widths agree with the Muon plan.
 
 use super::kalman::{self, GainInput, LogMasses};
@@ -550,7 +550,7 @@ fn exercised(mut model: Mamba3, device: &Device) -> Mamba3 {
     model
 }
 
-fn assert_slot(label: &str, name: &str, a: &Option<Tensor<2>>, b: &Option<Tensor<2>>, tol: f32) {
+fn assert_field(label: &str, name: &str, a: &Option<Tensor<2>>, b: &Option<Tensor<2>>, tol: f32) {
     assert_eq!(a.is_some(), b.is_some(), "{label}: {name} present in one cache only");
     if let (Some(a), Some(b)) = (a, b) {
         let d = max_abs_diff(a.clone(), b.clone());
@@ -564,8 +564,8 @@ fn assert_caches_match(label: &str, a: &Mamba3DoubleSsdCache, b: &Mamba3DoubleSs
     if let (Some(a), Some(b)) = (&a.v_state_buhp, &b.v_state_buhp) {
         assert!(max_abs_diff(a.clone(), b.clone()) < dtype_tol(1e-4), "{label}: tap slots");
     }
-    assert_slot(label, "ln Λ", &a.log_precision_bh, &b.log_precision_bh, 1e-4);
-    assert_slot(label, "tropical c", &a.tropical_bh, &b.tropical_bh, 1e-3);
+    assert_field(label, "ln Λ", &a.log_precision_bh, &b.log_precision_bh, 1e-4);
+    assert_field(label, "tropical c", &a.tropical_bh, &b.tropical_bh, 1e-3);
 }
 
 /// `forward` ≡ unrolled `step` ≡ the single-SSD pathway ≡ a split prefill ≡
@@ -832,10 +832,10 @@ fn a_vanished_step_keeps_the_block_gradient_finite() {
 }
 
 /// A no-grad region moves every cache tensor to the inner backend and back by
-/// hand ([`CacheStack`](burn_stack::modules::CacheStack)); the two new slots
-/// must make the trip.
+/// hand ([`CacheStack`](burn_stack::modules::CacheStack)); the two new cache
+/// fields must make the trip.
 #[test]
-fn the_slots_survive_a_no_grad_round_trip() {
+fn the_fields_survive_a_no_grad_round_trip() {
     use crate::mamba3::cache::Mamba3Caches;
     use burn_stack::modules::CacheStack;
     let device = test_device();
@@ -851,8 +851,8 @@ fn the_slots_survive_a_no_grad_round_trip() {
     let (Mamba3Cache::SingleSsd(before), Mamba3Cache::SingleSsd(after)) = (cache, back) else {
         panic!("a missing cache is a single-SSD one");
     };
-    assert_slot("no-grad trip", "ln Λ", &before.log_precision_bh, &after.log_precision_bh, 0.0);
-    assert_slot("no-grad trip", "tropical c", &before.tropical_bh, &after.tropical_bh, 0.0);
+    assert_field("no-grad trip", "ln Λ", &before.log_precision_bh, &after.log_precision_bh, 0.0);
+    assert_field("no-grad trip", "tropical c", &before.tropical_bh, &after.tropical_bh, 0.0);
     assert!(after.log_precision_bh.is_some() && after.tropical_bh.is_some());
 }
 

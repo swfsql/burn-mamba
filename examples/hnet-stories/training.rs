@@ -176,7 +176,7 @@ impl Wrap {
         let TinyStoriesBatch { inputs, targets, scored, packed, .. } = batch;
         assert!(packed.is_none(), "an H-Net takes no packed rows");
         let [batch_size, seq_len, 2] = inputs.dims() else { unreachable!() };
-        // The rows past the scored count of a slot are padding.
+        // The positions past the scored count of a row are padding.
         let pad = scored.iter().any(|&n| n < seq_len).then(|| {
             let device = inputs.device();
             let scored: Vec<i32> = scored.iter().map(|&n| n as i32).collect();

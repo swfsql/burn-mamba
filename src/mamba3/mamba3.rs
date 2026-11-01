@@ -577,19 +577,19 @@ impl Mamba3 {
         packed: Option<&Packed>,
     ) -> Option<crate::mamba3::positive::kalman::GainInput> {
         let log_kappa_h = self.kalman_log_kappa_h.as_ref()?.val();
-        let slot = "a Kalman gain keeps its ln Λ cache slot";
+        let field = "a Kalman gain keeps its ln Λ cache field";
         Some(crate::mamba3::positive::kalman::GainInput {
             log_kappa_h,
             noise_bsh,
-            carry_bh: carry_bh.expect(slot),
+            carry_bh: carry_bh.expect(field),
             restart: packed.map(|p| crate::mamba3::positive::scan::Restart {
                 start_bs: p.segments.start_bs.clone(),
-                origin_bh: p.origin.log_precision_bh.clone().expect(slot),
+                origin_bh: p.origin.log_precision_bh.clone().expect(field),
             }),
         })
     }
 
-    /// The fresh-sequence positive-system slots: `(ln Λ, c)`, each
+    /// The fresh-sequence positive-system cache fields: `(ln Λ, c)`, each
     /// `[batch, nheads]` at [`LOG_ZERO`](crate::mamba3::positive::LOG_ZERO)
     /// (no evidence; the max of nothing), or `None` when the block has no such
     /// system.
@@ -598,7 +598,7 @@ impl Mamba3 {
         batch: usize,
         device: &Device,
     ) -> (Option<Tensor<2>>, Option<Tensor<2>>) {
-        crate::mamba3::positive::fresh_slots(self.gain, self.tropical, batch, self.nheads(), device)
+        crate::mamba3::positive::fresh_fields(self.gain, self.tropical, batch, self.nheads(), device)
     }
 
     /// The tail of the positive systems. The `forward` of both pathways and
@@ -612,13 +612,13 @@ impl Mamba3 {
     ///
     /// Returns `(y, ln Λ carry, c carry)`.
     ///
-    /// `end` is `(real write positions per slot, the incoming ln Λ carry)`
+    /// `end` is `(real write positions per row, the incoming ln Λ carry)`
     /// for a right-padded call. Each carry then comes from the last real
-    /// position of its slot, or is the incoming one for a slot with none.
+    /// position of its row, or is the incoming one for a row with none.
     ///
     /// `packed` marks the resets of a packed call ([`crate::packing`]). The
     /// register then restarts at each of them from the carry of the origin. A
-    /// carry from before the last reset of a slot is that of the origin.
+    /// carry from before the last reset of a row is that of the origin.
     ///
     /// # Shapes
     /// - `y_btmhp`           : `[batch, tokens, mimo_rank, nheads, per_head_dim]`
@@ -637,12 +637,12 @@ impl Mamba3 {
         packed: Option<&Packed>,
     ) -> (Tensor<5>, Option<Tensor<2>>, Option<Tensor<2>>) {
         let u = self.micro_steps;
-        let slot = "a tropical register keeps its cache slot";
+        let field = "a tropical register keeps its cache field";
         let tropical_bsh = tropical_ab_bsh.map(|(a_bsh, b_bsh)| {
-            let carry_bh = tropical_carry_bh.clone().expect(slot);
+            let carry_bh = tropical_carry_bh.clone().expect(field);
             let restart = packed.map(|p| crate::mamba3::positive::scan::Restart {
                 start_bs: p.segments.start_bs.clone(),
-                origin_bh: p.origin.tropical_bh.clone().expect(slot),
+                origin_bh: p.origin.tropical_bh.clone().expect(field),
             });
             crate::mamba3::positive::tropical::register(a_bsh, b_bsh, carry_bh, restart.as_ref())
         });
@@ -976,7 +976,7 @@ pub struct Mamba3Config {
     ///   chunkwise pass still works.
     ///
     /// See [`crate::mamba3::positive`]. Structural: a Kalman member allocates
-    /// `κ` and `ω` per head and one cache slot. Under
+    /// `κ` and `ω` per head and one cache field. Under
     /// [`Gain::KalmanProjectedNoise`], it also adds one in-projection channel
     /// per (head, micro-step). Defaults to [`Gain::Projected`], the stock
     /// block.
@@ -1657,7 +1657,7 @@ impl Mamba3 {
     ///
     /// - all `u` of its micro-steps are identity micro-steps (no decay, no mass:
     ///   `TrapezoidCoeffs::padded`),
-    /// - each slot reads every "last samples" cache field at its own end (see
+    /// - each row reads every "last samples" cache field at its own end (see
     ///   [`burn_stack::modules::Block::block_forward`]).
     ///
     /// # Shapes
@@ -1822,9 +1822,9 @@ impl Mamba3 {
     /// empty, and the slot is the plain last `x`. Both pathways use this
     /// function, so their caches stay field-identical.
     ///
-    /// `end` is `(real write positions per slot, the incoming FIFO)` for a
+    /// `end` is `(real write positions per row, the incoming FIFO)` for a
     /// right-padded call. The slots then hold the last `lag` real positions of
-    /// each slot, read from the incoming FIFO followed by this call. For a slot
+    /// each row, read from the incoming FIFO followed by this call. For a row
     /// with no real position, that is the incoming FIFO itself.
     ///
     /// `packed` marks the resets of a packed call ([`crate::packing`]). The
@@ -1875,7 +1875,7 @@ impl Mamba3 {
             Some((end_b, prev_bumhr, prev_buhp)) => {
                 use crate::padding::window;
                 // The incoming slots already carry their decay to the old
-                // boundary, and a slot's padding adds none.
+                // boundary, and the padding of a row adds none.
                 let [batch, _, nheads] = da_bsh.dims();
                 let prev_buh = Tensor::zeros([batch, lag, nheads], &da_bsh.device());
                 let b_all = Tensor::cat(vec![prev_bumhr, b_bsmhr.clone()], 1);

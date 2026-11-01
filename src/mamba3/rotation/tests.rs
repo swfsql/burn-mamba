@@ -1809,7 +1809,7 @@ fn real1d_matches_zeroed_rotor_rotation() {
 }
 
 /// `Real1D` spends nothing on a rotation it does not have: no in-projection
-/// columns, and a cache slot with no accumulator tensor.
+/// columns, and a rotation cache field with no accumulator tensor.
 #[test]
 fn real1d_projects_no_rotation_channels() {
     use crate::mamba3::mamba3::Mamba3Config;

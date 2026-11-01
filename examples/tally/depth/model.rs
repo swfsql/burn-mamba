@@ -20,7 +20,7 @@
 //! These config choices are load-bearing:
 //!
 //! - `Tropical::MaxPlus`: the register. It is structural: two in-projection
-//!   channels per (head, micro-step), one cache slot, and the readout `eₕ`.
+//!   channels per (head, micro-step), one cache field, and the readout `eₕ`.
 //! - `Gain::Projected`, `RotationKind::Real1D`, `TapPattern::None`,
 //!   `state_rank = 1`: the plant at the floor of the `reset` ladder, so the
 //!   rung measures only the register.

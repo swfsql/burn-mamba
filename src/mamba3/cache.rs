@@ -116,7 +116,7 @@ impl Mamba3Caches {
         }
     }
 
-    /// Inverse of [`Self::into_options`]: unwrap each slot and re-bundle.
+    /// Inverse of [`Self::into_options`]: unwrap each layer cache and re-bundle.
     pub fn from_options(options: Vec<Option<Mamba3Cache>>) -> Self {
         let caches = options.into_iter().map(Option::unwrap).collect();
         Self::from_vec(caches)

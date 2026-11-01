@@ -49,7 +49,7 @@ pub struct Mamba2Caches {
 /// Configuration / factory for [`Mamba2Caches`].
 #[derive(Config, Debug)]
 pub struct Mamba2CachesConfig {
-    /// Number of cache slots: the number of virtual layers in the network (one
+    /// Number of layer caches: the number of virtual layers in the network (one
     /// cache per layer, also when layers share weights).
     pub n_caches: usize,
 
@@ -202,7 +202,7 @@ impl Mamba2Caches {
         self.caches.into_iter().map(Some).collect()
     }
 
-    /// Inverse of [`Self::into_options`]: unwrap each slot and re-bundle.
+    /// Inverse of [`Self::into_options`]: unwrap each layer cache and re-bundle.
     pub fn from_options(options: Vec<Option<Mamba2Cache>>) -> Self {
         let caches = options.into_iter().map(Option::unwrap).collect();
         Self::from_vec(caches)

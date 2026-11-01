@@ -83,7 +83,7 @@ each kind buys.
 - **Pluggable SSD algorithms** (Mamba-2/3), including a custom recompute
   backward that costs a little compute and saves roughly a third of the
   training memory.
-- **Right padding**: `forward()` takes a padding mask. Each slot then gives the
+- **Right padding**: `forward()` takes a padding mask. Each row then gives the
   outputs and cache that it would give alone.
 - **Virtual layers**: many logical layers over a smaller set of shared weights,
   with a configurable schedule.

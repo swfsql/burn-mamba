@@ -132,7 +132,7 @@ pub const LOG_ZERO: f32 = -3.0e4;
 /// a per-head Kalman filter on top of that projection. See the module header.
 ///
 /// Structural, like [`TapPattern`](crate::mamba3::tap_pattern::TapPattern). A
-/// Kalman member allocates the per-head `κ` and `ω` and a cache slot for
+/// Kalman member allocates the per-head `κ` and `ω` and a cache field for
 /// `ln Λ`. Under [`KalmanProjectedNoise`](Self::KalmanProjectedNoise) it also
 /// adds one in-projection channel per (head, micro-step).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -151,7 +151,7 @@ pub enum Gain {
 }
 
 impl Gain {
-    /// Whether the decay is computed (a `ln Λ` slot, a `κ` per head).
+    /// Whether the decay is computed (a `ln Λ` cache field, a `κ` per head).
     pub fn is_kalman(self) -> bool {
         !matches!(self, Gain::Projected)
     }
@@ -170,7 +170,7 @@ pub enum Tropical {
     #[default]
     None,
     /// One soft max-plus register per head: two in-projection channels
-    /// `(a, b)` per (head, micro-step), a cache slot, and the readout `eₕ`.
+    /// `(a, b)` per (head, micro-step), a cache field, and the readout `eₕ`.
     MaxPlus,
 }
 
@@ -181,18 +181,18 @@ impl Tropical {
     }
 }
 
-/// The fresh-sequence slots `(ln Λ, c)`, each `[batch, nheads]` at
+/// The fresh-sequence cache fields `(ln Λ, c)`, each `[batch, nheads]` at
 /// [`LOG_ZERO`] (no evidence yet, the max of nothing). `None` for a system that
 /// the block does not have. Every cache constructor uses this.
-pub fn fresh_slots(
+pub fn fresh_fields(
     gain: Gain,
     tropical: Tropical,
     batch: usize,
     nheads: usize,
     device: &Device,
 ) -> (Option<Tensor<2>>, Option<Tensor<2>>) {
-    let slot = || Tensor::full([batch, nheads], LOG_ZERO, device);
-    (gain.is_kalman().then(slot), tropical.is_on().then(slot))
+    let field = || Tensor::full([batch, nheads], LOG_ZERO, device);
+    (gain.is_kalman().then(field), tropical.is_on().then(field))
 }
 
 #[cfg(all(test, feature = "_dev-test"))]

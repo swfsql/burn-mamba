@@ -317,11 +317,11 @@ more heads do not buy more digits.
 
 `Gain` and `Tropical` are structural, like `TapPattern` and `RotationKind`:
 
-- A Kalman member allocates `κ` and `ω` per head, one cache slot, and (on the
+- A Kalman member allocates `κ` and `ω` per head, one cache field, and (on the
   projected-noise arm) one in-projection channel per (head, micro-step). The
   output norm keeps `ω`, which scales the readout of the SSD against the `D`
   skip.
-- A register allocates two channels, a slot and `eₕ`.
+- A register allocates two channels, a cache field and `eₕ`.
 
 Stock is the default. At `κ = 0` / `e = 0` the block gives stock *exactly*,
 not approximately.

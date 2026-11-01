@@ -32,16 +32,16 @@ pub enum MambaCaches {
 }
 
 impl MambaCaches {
-    /// Round-trip every slot of the tagged family through the inner backend:
-    /// same values, no graph.
+    /// Round-trip every layer cache of the tagged family through the inner
+    /// backend: same values, no graph.
     ///
     /// This is [`CacheStack::detach`], dispatched over the runtime tag. The enum
-    /// cannot implement [`CacheStack`] itself (its slot type would have to be a
-    /// fourth enum). And a caller that carries a cache across a gradient
+    /// cannot implement [`CacheStack`] itself (its `Cache` type would have to be
+    /// a fourth enum). And a caller that carries a cache across a gradient
     /// boundary (truncated BPTT: the `tiny-stories` window loop) holds the enum,
     /// not the family type.
     ///
-    /// Each slot keeps its device and checkpointing strategy. On a device
+    /// Each layer cache keeps its device and checkpointing strategy. On a device
     /// without autodiff, this does nothing (see [`CacheStack::detach`]).
     pub fn detach(self) -> Self {
         match self {

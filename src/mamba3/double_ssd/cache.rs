@@ -18,7 +18,7 @@
 //! 4. **Cumulative rotation**
 //!    ([`RotationState`](crate::mamba3::rotation::RotationState)): the rotation accumulated up
 //!    to position `t`, to continue the data-dependent rotation.
-//! 5. **Positive-system slots**: `ln Λ` of a Kalman gain and `c` of a tropical
+//! 5. **Positive-system fields**: `ln Λ` of a Kalman gain and `c` of a tropical
 //!    register, when the block has them.
 //!
 //! Mamba-3 has **no conv cache**. It removes the short 1-D convolution of
@@ -44,7 +44,7 @@ pub struct Mamba3DoubleSsdCaches {
 /// Configuration / factory for [`Mamba3DoubleSsdCaches`].
 #[derive(Config, Debug)]
 pub struct Mamba3DoubleSsdCachesConfig {
-    /// Number of cache slots (= number of virtual layers).
+    /// Number of layer caches (= number of virtual layers).
     pub n_caches: usize,
 
     /// Shared configuration that determines the shape of each cache.
@@ -164,8 +164,8 @@ impl Mamba3DoubleSsdCache {
             san(v_state_buhp);
         }
         self.rotation.sanity();
-        for slot in [&self.log_precision_bh, &self.tropical_bh].into_iter().flatten() {
-            san(slot);
+        for field in [&self.log_precision_bh, &self.tropical_bh].into_iter().flatten() {
+            san(field);
         }
     }
 }
@@ -217,11 +217,11 @@ pub struct Mamba3DoubleSsdCacheConfig {
     #[config(default = 1)]
     pub micro_steps: usize,
 
-    /// The gain of the block. A Kalman gain keeps a `ln Λ` slot.
+    /// The gain of the block. A Kalman gain keeps a `ln Λ` field.
     #[config(default = "crate::mamba3::positive::Gain::Projected")]
     pub gain: crate::mamba3::positive::Gain,
 
-    /// The tropical register of the block. `MaxPlus` keeps a `c` slot.
+    /// The tropical register of the block. `MaxPlus` keeps a `c` field.
     #[config(default = "crate::mamba3::positive::Tropical::None")]
     pub tropical: crate::mamba3::positive::Tropical,
 }
@@ -279,7 +279,7 @@ impl Mamba3DoubleSsdCacheConfig {
             self.num_quat_blocks,
             device,
         );
-        let (log_precision_bh, tropical_bh) = crate::mamba3::positive::fresh_slots(
+        let (log_precision_bh, tropical_bh) = crate::mamba3::positive::fresh_fields(
             self.gain,
             self.tropical,
             self.batch,

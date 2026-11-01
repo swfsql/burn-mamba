@@ -60,13 +60,12 @@ fn input(device: &Device) -> Tensor<3> {
     )
 }
 
-/// Sum of every tensor in a single-SSD cache slot, as one scalar to build a loss
-/// from.
+/// Every tensor of the single-SSD cache of virtual layer `i`, flattened.
 ///
 /// Reaches into the concrete cache rather than going through `CacheStack` so that
-/// *all* of the slot's tensors take part — a leak through any single one of them
-/// (the rotation accumulator is the easiest to forget) must show up.
-fn slot_flat(caches: &Mamba3Caches, i: usize) -> Vec<Tensor<1>> {
+/// *all* of the tensors of the layer cache take part — a leak through any single
+/// one of them (the rotation accumulator is the easiest to forget) must show up.
+fn layer_cache_flat(caches: &Mamba3Caches, i: usize) -> Vec<Tensor<1>> {
     use crate::mamba3::prelude::RotationState;
     let c = match caches {
         Mamba3Caches::SingleSsd(cs) => &cs.caches[i],
@@ -91,12 +90,14 @@ fn slot_flat(caches: &Mamba3Caches, i: usize) -> Vec<Tensor<1>> {
     ]
 }
 
-/// Every cache tensor of every slot, flattened, in a fixed order.
-fn all_slots_flat(caches: &Mamba3Caches, n: usize) -> Vec<Tensor<1>> {
-    (0..n).flat_map(|i| slot_flat(caches, i)).collect()
+/// Every cache tensor of every virtual layer, flattened, in a fixed order.
+fn all_caches_flat(caches: &Mamba3Caches, n: usize) -> Vec<Tensor<1>> {
+    (0..n).flat_map(|i| layer_cache_flat(caches, i)).collect()
 }
 
-fn slot_sum(caches: &Mamba3Caches, i: usize) -> Tensor<1> {
+/// Sum of every tensor in the single-SSD cache of virtual layer `i`, as one
+/// scalar to build a loss from.
+fn layer_cache_sum(caches: &Mamba3Caches, i: usize) -> Tensor<1> {
     use crate::mamba3::prelude::RotationState;
     let c = match caches {
         Mamba3Caches::SingleSsd(cs) => &cs.caches[i],
@@ -159,7 +160,7 @@ fn full_horizon_matches_no_horizon() {
 ///
 /// The probe is built from the **prefix's own caches only** — deliberately not
 /// from the stack output, because the tracked suffix consumes the carried caches
-/// of the slots above the cut, and gradient reaching those is correct
+/// of the layers above the cut, and gradient reaching those is correct
 /// cross-segment BPTT rather than a leak. An independent `anchor` leaf keeps the
 /// graph non-empty, so `backward` has something to walk even when the prefix
 /// contributes nothing at all.
@@ -182,7 +183,7 @@ fn nothing_tracked_reaches_the_prefix() {
     let x0 = input(&device).require_grad();
     let (_, caches0) = layers.forward(x0.clone(), None, path(), None, None);
     let a0 = anchor();
-    let probe0 = (0..cut).fold(a0.clone().sum(), |acc, i| acc + slot_sum(&caches0, i));
+    let probe0 = (0..cut).fold(a0.clone().sum(), |acc, i| acc + layer_cache_sum(&caches0, i));
     let g0 = probe0.backward();
     assert!(a0.grad(&g0).is_some(), "the anchor should always be reachable");
     assert!(
@@ -202,7 +203,7 @@ fn nothing_tracked_reaches_the_prefix() {
     let x1 = input(&device).require_grad();
     let (_, caches1) = layers.forward(x1.clone(), None, path(), None, None);
     let a1 = anchor();
-    let probe1 = (0..cut).fold(a1.clone().sum(), |acc, i| acc + slot_sum(&caches1, i));
+    let probe1 = (0..cut).fold(a1.clone().sum(), |acc, i| acc + layer_cache_sum(&caches1, i));
     let g1 = probe1.backward();
     assert!(a1.grad(&g1).is_some(), "the anchor should always be reachable");
     assert!(
@@ -214,7 +215,7 @@ fn nothing_tracked_reaches_the_prefix() {
     let x2 = input(&device).require_grad();
     let (_, caches2) = layers.forward(x2.clone(), Some(caches_carry), path(), None, None);
     let a2 = anchor();
-    let probe2 = (0..cut).fold(a2.clone().sum(), |acc, i| acc + slot_sum(&caches2, i));
+    let probe2 = (0..cut).fold(a2.clone().sum(), |acc, i| acc + layer_cache_sum(&caches2, i));
     let g2 = probe2.backward();
     assert!(a2.grad(&g2).is_some(), "the anchor should always be reachable");
     assert!(
@@ -392,10 +393,10 @@ fn horizon_is_inert_without_autodiff() {
 /// output, on every final cache tensor, **and** on the parameter gradients.
 ///
 /// The gradient half is the load-bearing one for `grad_horizon`. The caches
-/// handed between calls straddle the cut: the slots below it come back lifted out
-/// of the inner backend and must carry **no** gradient, while the slots above it
-/// stay tracked and must carry gradient *across the boundary* — otherwise the
-/// split version silently trains on a truncated history. An implementation that
+/// handed between calls straddle the cut: the layer caches below it come back
+/// lifted out of the inner backend and must carry **no** gradient, while those
+/// above it stay tracked and must carry gradient *across the boundary* —
+/// otherwise the split version silently trains on a truncated history. An implementation that
 /// detached the whole cache set (rather than only the prefix's share) still gets
 /// identical outputs and caches here, and is caught only by the gradients.
 ///
@@ -427,7 +428,7 @@ fn run_chunked_parity(horizon: Option<GradHorizon>) {
     // two losses are the same functional of the same quantities.
     let normal = Distribution::Normal(0.0, 1.0);
     let y_head = Tensor::<3>::random(y_full.dims(), normal, &device);
-    let flat_full = all_slots_flat(&caches_full, n_virtual);
+    let flat_full = all_caches_flat(&caches_full, n_virtual);
     let cache_heads: Vec<Tensor<1>> = flat_full
         .iter()
         .map(|t| Tensor::<1>::random(t.dims(), normal, &device))
@@ -447,7 +448,7 @@ fn run_chunked_parity(horizon: Option<GradHorizon>) {
     let (y1, mid) = layers.forward(head, None, path(), None, None);
     let (y2, caches_split) = layers.forward(tail, Some(mid), path(), None, None);
     let y_split = Tensor::cat(vec![y1, y2], 1);
-    let flat_split = all_slots_flat(&caches_split, n_virtual);
+    let flat_split = all_caches_flat(&caches_split, n_virtual);
 
     assert!(
         max_rel_diff(y_split.clone(), y_full) < dtype_tol(1e-5),
@@ -541,7 +542,7 @@ fn run_step_parity(horizon: Option<GradHorizon>) {
 
     let normal = Distribution::Normal(0.0, 1.0);
     let y_head = Tensor::<3>::random(y_fwd.dims(), normal, &device);
-    let flat_fwd = all_slots_flat(&caches_fwd, n_virtual);
+    let flat_fwd = all_caches_flat(&caches_fwd, n_virtual);
     let cache_heads: Vec<Tensor<1>> = flat_fwd
         .iter()
         .map(|t| Tensor::<1>::random(t.dims(), normal, &device))
@@ -565,7 +566,7 @@ fn run_step_parity(horizon: Option<GradHorizon>) {
     }
     let y_step = Tensor::cat(outs, 1);
     let caches_step = caches.expect("at least one step ran");
-    let flat_step = all_slots_flat(&caches_step, n_virtual);
+    let flat_step = all_caches_flat(&caches_step, n_virtual);
 
     assert!(
         max_rel_diff(y_step.clone(), y_fwd) < dtype_tol(1e-5),
@@ -836,7 +837,7 @@ fn a_cut_changes_gradients_only() {
     let plain = LayersBuilder::new(n, block_config(D_MODEL)).init(&device);
     let x = input(&device);
     let (want, want_caches) = plain.forward(x.clone(), None, path(), None, None);
-    let want_flat = all_slots_flat(&want_caches, n);
+    let want_flat = all_caches_flat(&want_caches, n);
 
     for k in [4, 3, 1, 0] {
         let horizon = Some(GradHorizon::last(k, n));
@@ -847,7 +848,7 @@ fn a_cut_changes_gradients_only() {
             max_abs_diff(want.clone(), got) < 1e-6,
             "horizon {horizon:?} changed the output",
         );
-        for (i, (a, b)) in want_flat.iter().zip(&all_slots_flat(&got_caches, n)).enumerate() {
+        for (i, (a, b)) in want_flat.iter().zip(&all_caches_flat(&got_caches, n)).enumerate() {
             assert!(
                 max_abs_diff(a.clone(), b.clone()) < 1e-6,
                 "horizon {horizon:?} changed final cache tensor {i}",

@@ -66,7 +66,7 @@
 //!   adds to the readout.
 //!
 //! Both are nonnegative 2×2 matrix recurrences, scanned in log coordinates.
-//! Each has one cache slot, and neither changes a kernel.
+//! Each has one cache field, and neither changes a kernel.
 
 pub mod double_ssd;
 pub mod single_ssd;
