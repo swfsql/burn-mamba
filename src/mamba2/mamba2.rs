@@ -662,7 +662,7 @@ impl Mamba2 {
     /// 4. **Discretise**: `Δ = softplus(dt_raw + dt_bias)`,
     ///    `Ā = exp(Δ · A)`, `B̄ = Δ · B`.
     /// 5. **Padding**: pad the sequence to a multiple of `chunk_len`.
-    /// 6. **SSD Algorithm**: the chunkwise scan that `ssd_path` selects (see
+    /// 6. **SSD path**: the chunkwise scan that `ssd_path` selects (see
     ///    [`Mamba2SsdPath`]).
     /// 7. **Gated RMSNorm**: `y = RMSNorm(y · SiLU(z))`, or
     ///    `RMSNorm(y) · SiLU(z)` under `is_norm_before_gate`.
@@ -963,7 +963,7 @@ impl Mamba2 {
         let b_bnlgr = b_bSgr.reshape([batch, nchunks, chunk_len, ngroups, state_rank]);
         let c_bnlgr = c_bSgr.reshape([batch, nchunks, chunk_len, ngroups, state_rank]);
 
-        // GQA expansion: B and C are produced per-group, but the SSD algorithms expect
+        // GQA expansion: B and C are produced per-group, but the SSD paths expect
         // them per-head. Group dim is at axis 3 (`[b, n, l, g, r]`).
         let b_bnlhr = burn_stack::modules::gqa_expand_to_heads::<5, 6>(b_bnlgr, 3, nheads);
         let c_bnlhr = burn_stack::modules::gqa_expand_to_heads::<5, 6>(c_bnlgr, 3, nheads);

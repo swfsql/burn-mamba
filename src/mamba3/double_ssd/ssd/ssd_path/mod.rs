@@ -1,7 +1,7 @@
 //! # SSD input bundle for the Mamba-3 double-SSD pathway
 //!
 //! [`Mamba3DoubleSsdInput`] bundles the pre-processed tensors that one standard
-//! SSD pass uses. [`Mamba3DoubleSsdInput::run`] calls the algorithm that the
+//! SSD pass uses. [`Mamba3DoubleSsdInput::run`] runs the SSD path that the
 //! shared [`Mamba3SsdPath`] selects.
 //!
 //! [`Mamba3SsdPath`]: crate::mamba3::ssd_path::Mamba3SsdPath
@@ -92,7 +92,7 @@ impl Mamba3DoubleSsdInput {
 }
 
 impl Mamba3DoubleSsdInput {
-    /// Run the selected double-ssd algorithm on this MIMO-first input:
+    /// Run the selected double-ssd SSD path on this MIMO-first input:
     /// `double_ssd_minimal`, `double_ssd_serial`, or
     /// `double_ssd_serial_recalculated`, by [`Mamba3SsdPath`] variant.
     ///

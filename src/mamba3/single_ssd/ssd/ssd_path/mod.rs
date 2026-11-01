@@ -14,7 +14,7 @@
 //! The interface is MIMO-first (as the other burn-mamba SSD inputs), and
 //! `mimo_rank = 1` is the SISO case.
 //! [`Mamba3SsdPath`](crate::mamba3::ssd_path::Mamba3SsdPath), shared with the
-//! double-ssd pathway, selects the algorithm.
+//! double-ssd pathway, selects the SSD path.
 
 use crate::mamba3::prelude::*;
 use burn::prelude::*;
@@ -161,7 +161,7 @@ impl Mamba3SingleSsdInput {
 }
 
 impl Mamba3SingleSsdInput {
-    /// Run the selected merged-form (single-ssd) algorithm on this MIMO-first input.
+    /// Run the selected single-ssd SSD path on this MIMO-first input.
     ///
     /// Dispatches by [`Mamba3SsdPath`] variant to `single_ssd_minimal`,
     /// `single_ssd_serial`, or `single_ssd_serial_recalculated`.

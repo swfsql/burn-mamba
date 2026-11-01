@@ -28,7 +28,7 @@ use burn_mamba::prelude::*;
 use burn_stack::examples::trainer::Trainer;
 
 /// The SSD path of every call on this ladder. The models are tiny and the
-/// sequences are short, so the simplest variant (autodiff backward) is right.
+/// sequences are short, so the simplest SSD path (autodiff backward) is right.
 pub fn ssd_path() -> MambaSsdPath {
     MambaSsdPath::Mamba3(Mamba3SsdPath::Minimal(None))
 }

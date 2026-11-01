@@ -1,15 +1,15 @@
-//! # SSD algorithm selection and input bundle (Mamba-2)
+//! # SSD path selection and input bundle (Mamba-2)
 //!
 //! [`Mamba2SsdPath`] selects which of the three exact SSD reformulations
 //! ([`minimal`] / [`serial`] / [`serial_recalculated`]) runs, and at what
 //! chunk length. [`Mamba2SsdInput`] bundles the pre-processed tensors
 //! that the scan uses (B/C already GQA-expanded to per-head).
-//! [`Mamba2SsdInput::run`] calls the algorithm that the path selects.
+//! [`Mamba2SsdInput::run`] runs the SSD path that the selector names.
 
 use crate::mamba2::prelude::*;
 use burn::prelude::*;
 
-/// Algorithm selection for the Mamba-2 chunkwise SSD.
+/// The SSD path of the Mamba-2 chunkwise SSD.
 ///
 /// Each variant carries an optional chunk length. A larger value gives more
 /// intra-chunk GEMM work and a shorter inter-chunk scan. The optimal value is
@@ -152,7 +152,7 @@ impl Mamba2SsdPath {
 }
 
 impl Mamba2SsdInput {
-    /// Run the selected SSD algorithm on this input: `ssd_minimal`,
+    /// Run the selected SSD path on this input: `ssd_minimal`,
     /// `ssd_serial`, or `ssd_serial_recalculated`, by [`Mamba2SsdPath`]
     /// variant. The chunk length is already in the tensor shapes.
     ///
@@ -176,7 +176,7 @@ impl Mamba2SsdInput {
 
 impl Default for Mamba2SsdPath {
     fn default() -> Mamba2SsdPath {
-        // Defaults to the SerialRecalculated algorithm with the optimal chunk length.
+        // Defaults to the SerialRecalculated SSD path with the optimal chunk length.
         Mamba2SsdPath::SerialRecalculated(None)
     }
 }

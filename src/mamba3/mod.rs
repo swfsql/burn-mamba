@@ -35,7 +35,7 @@
 //!
 //! [`cache`](crate::mamba3::cache) holds the enum that selects the pathway.
 //! [`ssd_path`](crate::mamba3::ssd_path) selects the pathway-agnostic
-//! *algorithm* (Minimal / Serial / SerialRecalculated).
+//! *SSD path* (Minimal / Serial / SerialRecalculated).
 //!
 //! ## The tap pattern of the trapezoid
 //!

@@ -38,7 +38,7 @@ pub const EVAL_FAMILIES: [(&str, Family); 3] = [
 ];
 
 /// The SSD path of every call in this example. The model is tiny and the
-/// sequences are short, so the simplest variant (autodiff backward) is right.
+/// sequences are short, so the simplest SSD path (autodiff backward) is right.
 pub fn ssd_path() -> MambaSsdPath {
     MambaSsdPath::Mamba3(Mamba3SsdPath::Minimal(None))
 }

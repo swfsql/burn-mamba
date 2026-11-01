@@ -80,7 +80,7 @@ mod tests;
 /// An explicit, family-tagged SSD-path selector for the unified API.
 ///
 /// Each variant carries the concrete per-family path, so callers can choose
-/// the algorithm and the chunk length explicitly. The `*_default`
+/// the SSD path and the chunk length explicitly. The `*_default`
 /// constructors give the default path of the family, without making it the
 /// *only* option.
 #[derive(Debug, Clone)]

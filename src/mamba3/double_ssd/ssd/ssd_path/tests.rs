@@ -355,7 +355,7 @@ fn paths_agree_single_chunk_zero_init() {
 }
 
 /// The chunk's **read axis**: `micro_steps > 1` narrows `C` and `y` to one
-/// position per token while the writes stay on the write axis. All three algorithms —
+/// position per token while the writes stay on the write axis. All three SSD paths —
 /// and, for `SerialRecalculated`, its hand-written backward's scatter back onto
 /// the write axis — have to agree there too.
 #[test]

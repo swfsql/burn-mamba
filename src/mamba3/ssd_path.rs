@@ -1,6 +1,6 @@
-//! # Pathway-agnostic SSD algorithm selection (Mamba-3)
+//! # Pathway-agnostic SSD path selection (Mamba-3)
 //!
-//! [`Mamba3SsdPath`] selects the chunkwise SSD *algorithm* (Minimal / Serial /
+//! [`Mamba3SsdPath`] selects the chunkwise *SSD path* (Minimal / Serial /
 //! SerialRecalculated) and the chunk length. It is independent of the
 //! double-vs-single *pathway*, which the cache variant selects. It converts
 //! into the per-pathway path types with `From`, and
@@ -9,9 +9,9 @@
 
 use crate::mamba3::prelude::*;
 
-/// Algorithm selection for the Mamba-3 chunkwise SSD.
+/// The SSD path of the Mamba-3 chunkwise SSD.
 ///
-/// This selects the chunkwise SSD *algorithm*. The cache variant selects the
+/// This selects the chunkwise *SSD path*. The cache variant selects the
 /// *pathway* (double- vs single-ssd, see
 /// [`crate::mamba3::cache::Mamba3Caches`]). [`Mamba3::forward`] converts this
 /// selection into the input bundle of that pathway
@@ -190,7 +190,7 @@ impl Mamba3SsdPath {
 
 impl Default for Mamba3SsdPath {
     fn default() -> Self {
-        // Defaults to the SerialRecalculated algorithm with the optimal chunk length.
+        // Defaults to the SerialRecalculated SSD path with the optimal chunk length.
         Self::SerialRecalculated(None)
     }
 }

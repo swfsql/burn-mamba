@@ -13,7 +13,7 @@
 //! 4. **The block**: stock at `κ = 0` / `e = 0`, with live gradients into the
 //!    join (the out-norm on or off), and finite ones when a head's `Δ`
 //!    vanishes; `forward` ≡ `step` ≡ the other pathway ≡ a split prefill ≡ the other
-//!    SSD algorithm, on outputs, every cache field and gradients, across the
+//!    SSD path, on outputs, every cache field and gradients, across the
 //!    lattice the two systems have to commute with (tap patterns, micro-steps,
 //!    rotation kinds, MIMO, the out-norm); the fields survive a no-grad region;
 //!    the in-projection's widths agree with the Muon plan.
@@ -569,7 +569,7 @@ fn assert_caches_match(label: &str, a: &Mamba3DoubleSsdCache, b: &Mamba3DoubleSs
 }
 
 /// `forward` ≡ unrolled `step` ≡ the single-SSD pathway ≡ a split prefill ≡
-/// the minimal SSD algorithm — outputs and every cache field, across the lattice.
+/// the `Minimal` SSD path — outputs and every cache field, across the lattice.
 #[test]
 fn forward_step_pathways_and_prefill_agree_across_the_lattice() {
     let device = test_device();

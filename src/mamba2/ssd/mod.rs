@@ -1,4 +1,4 @@
-//! # Mamba-2 chunkwise SSD algorithms
+//! # Mamba-2 chunkwise SSD paths
 //!
 //! Three exact reformulations of the same Structured State Space Duality scan.
 //! They agree on values **and** gradients (the `ssd_path` tests assert it):

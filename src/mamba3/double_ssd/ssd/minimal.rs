@@ -1,4 +1,4 @@
-//! ## The Chunkwise MIMO-SSD Algorithm (Minimal/Segsum variant)
+//! ## The Chunkwise MIMO-SSD Algorithm (the `Minimal` SSD path, by segsum)
 //!
 //! In training (and prefill), a naive sequential recurrence cannot use GPU
 //! tensor cores. The **chunkwise SSD algorithm** can. It splits the sequence

@@ -80,7 +80,7 @@ each kind buys.
 - **Two execution modes**: a parallel `forward()` and a recurrent `step()`
   that are mathematically equivalent. The test suite asserts this on outputs,
   final state, *and* gradients.
-- **Pluggable SSD algorithms** (Mamba-2/3), including a custom recompute
+- **Pluggable SSD paths** (Mamba-2/3), including a custom recompute
   backward that costs a little compute and saves roughly a third of the
   training memory.
 - **Right padding**: `forward()` takes a padding mask. Each row then gives the
@@ -199,20 +199,20 @@ API references:
 | MIMO state | — | — | optional (`mimo_rank > 1`) |
 | Micro-steps per token (MambaProduct) | — | — | optional (`micro_steps > 1`) |
 | Short convolution | yes | yes | removed |
-| Pluggable SSD algorithms | — | yes | yes |
+| Pluggable SSD paths | — | yes | yes |
 | Bidirectional stacks | yes | yes | yes |
 | Virtual-layer scheduling | yes | yes | yes |
 
 Mamba-2 and Mamba-3 are the modern baselines. Mamba-1 stays as the original,
 simplest reference.
 
-## Choosing an SSD algorithm (Mamba-2 / Mamba-3)
+## Choosing an SSD path (Mamba-2 / Mamba-3)
 
-An `…SsdPath` selector makes the chunkwise scan pluggable. All three variants
+An `…SsdPath` selector makes the chunkwise scan pluggable. All three SSD paths
 are exact reformulations of the same math, and they agree on values **and**
 gradients. They differ only in their memory/compute trade-off:
 
-| Variant | Approach | Backward |
+| SSD path | Approach | Backward |
 |---------|----------|----------|
 | `Minimal` | mostly batched matmuls + a segment-sum mask | autodiff |
 | `Serial` | a serial loop over chunks (mirrors the reference Triton kernels) | autodiff |
@@ -222,7 +222,7 @@ See
 [`Mamba2SsdPath`](https://swfsql.github.io/burn-mamba/doc/burn_mamba/mamba2/ssd/ssd_path/enum.Mamba2SsdPath.html)
 and
 [`Mamba3SsdPath`](https://swfsql.github.io/burn-mamba/doc/burn_mamba/mamba3/ssd_path/enum.Mamba3SsdPath.html).
-In Mamba-3 the algorithm is independent of the *pathway* (double- or
+In Mamba-3 the SSD path is independent of the *pathway* (double- or
 single-SSD). The cache variant selects the pathway.
 
 ## Examples
