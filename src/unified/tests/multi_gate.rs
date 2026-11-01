@@ -193,7 +193,7 @@ fn layers_multi_gate_forward_step_parity() {
 }
 
 /// Same parity check over Mamba-3 with **virtual layers** (the `mnist-class`
-/// shape): 2 real weight sets stretched to several virtual layers, so the
+/// shape): 2 real layers stretched to several virtual layers, so the
 /// per-layer MGR modules are reused by real index across the virtual passes.
 #[cfg(feature = "mamba3")]
 #[test]

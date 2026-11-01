@@ -809,14 +809,14 @@ fn prime_emits_the_class_markers_a_step_would_drop() {
 
     // The reference sequence, spliced by hand: S u0 u1 C u2 E.
     let emb = layers.class_latents_emb.as_ref().unwrap().val();
-    let cls = |i: usize| {
+    let latent = |i: usize| {
         emb.clone()
             .narrow(0, i, 1)
             .unsqueeze_dim::<3>(0)
             .expand([batch, 1, d_model])
     };
     let tok = |t: usize| x.clone().narrow(1, t, 1);
-    let reference = Tensor::cat(vec![cls(0), tok(0), tok(1), cls(1), tok(2), cls(2)], 1);
+    let reference = Tensor::cat(vec![latent(0), tok(0), tok(1), latent(1), tok(2), latent(2)], 1);
     assert_eq!(layers.class_latent_output_indices(seq), vec![0, 3, 5]);
 
     // Prime before every user token, and once more at the end.
@@ -1679,7 +1679,7 @@ fn end_closes_the_sequence_custom_never_does() {
 
     // The reference, spliced by hand: u0 u1 u2 E1 E2 C u3.
     let emb = layers.class_latents_emb.as_ref().unwrap().val();
-    let cls = |i: usize| {
+    let latent = |i: usize| {
         emb.clone()
             .narrow(0, i, 1)
             .unsqueeze_dim::<3>(0)
@@ -1687,7 +1687,7 @@ fn end_closes_the_sequence_custom_never_does() {
     };
     let tok = |t: usize| x.clone().narrow(1, t, 1);
     let reference = Tensor::cat(
-        vec![tok(0), tok(1), tok(2), cls(0), cls(1), cls(2), tok(3)],
+        vec![tok(0), tok(1), tok(2), latent(0), latent(1), latent(2), tok(3)],
         1,
     );
 
@@ -1800,7 +1800,7 @@ fn step_output_and_state_follow_the_last_emitted_token() {
 
     // The reference sequence, spliced by hand: S u0 C u1 M u2 u3 E.
     let emb = layers.class_latents_emb.as_ref().unwrap().val();
-    let cls = |i: usize| {
+    let latent = |i: usize| {
         emb.clone()
             .narrow(0, i, 1)
             .unsqueeze_dim::<3>(0)
@@ -1809,14 +1809,14 @@ fn step_output_and_state_follow_the_last_emitted_token() {
     let tok = |t: usize| x.clone().narrow(1, t, 1);
     let reference = Tensor::cat(
         vec![
-            cls(0), // Start
+            latent(0), // Start
             tok(0),
-            cls(3), // Custom(1)
+            latent(3), // Custom(1)
             tok(1),
-            cls(1), // Middle
+            latent(1), // Middle
             tok(2),
             tok(3),
-            cls(2), // End
+            latent(2), // End
         ],
         1,
     );

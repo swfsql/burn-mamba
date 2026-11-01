@@ -14,12 +14,12 @@ use burn_stack::utils::{GradHorizon, Schedule};
 const N_VIRTUAL_LAYERS: usize = 4;
 
 /// Back-propagate only the last `K` applications of **each real layer**
-/// ([`GradHorizon::Depth`], counted per weight set). Everything below runs on
+/// ([`GradHorizon::Depth`], counted per real layer). Everything below runs on
 /// the inner backend. `None` tracks the whole stack. Truncation trades
 /// gradient for vram, and a stack this shallow does not need that.
 const GRAD_HORIZON: Option<GradHorizon> = None;
 
-/// Stack-level class latents: learnable `[CLS]`-style registers (width
+/// Stack-level class latents: learnable class markers (width
 /// `d_model`) prepended to the pixel sequence of every image. This example uses
 /// none.
 pub const N_CLASS_LATENTS: usize = 0;

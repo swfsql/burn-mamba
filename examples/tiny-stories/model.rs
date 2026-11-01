@@ -10,7 +10,7 @@ use burn_mamba::prelude::{Mamba3Config, MambaVocabNetConfig, ResidualsConfig, Ro
 use burn_stack::utils::{ClassLatent, GradHorizon, Schedule};
 
 /// Depth of the (virtual) layer stack: the number of applications of the real
-/// weight sets. Virtual depth costs no parameters.
+/// layers. Virtual depth costs no parameters.
 const N_VIRTUAL_LAYERS: usize = 8;
 
 /// Back-propagate only the top `Depth(K)` applications of each real layer. The
@@ -21,7 +21,7 @@ const N_VIRTUAL_LAYERS: usize = 8;
 /// that reads out once, at the end of the sequence, does not have this problem.
 const GRAD_HORIZON: Option<GradHorizon> = None;
 
-/// Learnable `[CLS]`-style registers (width `d_model`) spliced in front of every
+/// Learnable class latents (width `d_model`) spliced in front of every
 /// story. They are the "a story starts here" of the model, in place of a
 /// separator character.
 ///

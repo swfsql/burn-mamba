@@ -233,7 +233,7 @@ fn nothing_tracked_reaches_the_prefix() {
 // 3. Prefix parameters receive no gradient
 // ===========================================================================
 
-/// With one weight set per virtual layer, a layer below the cut must receive
+/// With one real layer per virtual layer, a layer below the cut must receive
 /// **no** gradient at all and a layer above it must receive one.
 ///
 /// This is what discriminates a correct prefix from one that silently left a
@@ -302,8 +302,8 @@ fn prefix_parameters_get_no_gradient() {
 /// semantics that makes TRM-style recursion over a shared net work at all.
 ///
 /// The reference is built independently: an inner-backend 4-virtual stack over
-/// the same two weight sets produces the prefix activation, and a plain
-/// 2-virtual stack over those same weight sets consumes it. Cyclic scheduling
+/// the same two real layers produces the prefix activation, and a plain
+/// 2-virtual stack over those same real layers consumes it. Cyclic scheduling
 /// makes the virtual→real maps line up (`0,1,0,1` then `0,1`, against the
 /// 6-virtual stack's `0,1,0,1,0,1`), and cloning preserves `ParamId` and tensor
 /// identity, so gradients on the clones are the gradients on the original.
@@ -322,7 +322,7 @@ fn shared_weight_grad_counts_tracked_applications_only() {
     let grads = y.clone().sum().backward();
 
     // Reference: inner-backend 4-virtual prefix, then a tracked 2-virtual
-    // suffix, both over the very same weight sets.
+    // suffix, both over the very same real layers.
     let mut prefix = <Layers<_> as Clone>::clone(&layers);
     prefix.n_virtual_layers = Some((n_virtual - k, Schedule::Cyclic));
     prefix.grad_horizon = None;
