@@ -4,6 +4,9 @@ This file compares the vocabulary of the primary sources with
 `burn-mamba/GLOSSARY.md` and `burn-stack/GLOSSARY.md`. It reports facts. It does
 not recommend a rename.
 
+This file is a best-effort draft. Check a claim against its citation before you
+rely on it.
+
 ## 1. Sources
 
 ### Path aliases

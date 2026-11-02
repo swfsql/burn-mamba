@@ -8,9 +8,15 @@ Blocked by: None (can start immediately)
 reference implementation looks up a source word there. It finds our term, the
 difference, and the wrong port that the word can cause.
 
-The input is `research.md`. Load the `asd-ste100` and
-`mattpocock-skills:writing-for-agents` skills before you write. The user approved
-reads of `../papers/` and `../py/` for this ticket.
+The input is `research.md`. It is a best-effort draft, so each of its rows is a
+lead and not a fact. Ticket 04 checks each row against its citations. Load the
+`asd-ste100` and `mattpocock-skills:writing-for-agents` skills before you write.
+The user approved reads of `../papers/` and `../py/` for this ticket.
+
+**Expected length.** One session, under 150k tokens. `research.md` is about 30k
+tokens. Do not check rows against the sources here, because that work is large
+and has its own ticket. Read a cited line only if you cannot understand a row
+without it.
 
 ## Decisions from the grill
 
@@ -80,10 +86,9 @@ you find as you write.
 
 ## Links
 
-- `docs/agents/domain.md`: tell an agent to read this doc before it reads or
-  ports from a source.
-- "Where to look" in `CLAUDE.md`: add the doc.
 - The File Map line of `docs/` in `CLAUDE.md`: add `source-terms.md`.
+- Do not add other links. Ticket 04 adds them after its check, so no agent reads
+  an unchecked doc.
 
 ## Acceptance criteria
 
@@ -93,7 +98,7 @@ you find as you write.
 - [ ] Each cell of "Our code follows" holds `?`.
 - [ ] Each source citation has the form `file:line`, and no citation of our own
       code has a line number.
-- [ ] `docs/agents/domain.md` and `CLAUDE.md` have the links, and the File Map has
-      the file.
+- [ ] The File Map has the file. `docs/agents/domain.md` and "Where to look" do
+      not name it yet.
 - [ ] `scripts/ste-lint.py` of the `asd-ste100` skill gives no hard violation on
       the doc.
