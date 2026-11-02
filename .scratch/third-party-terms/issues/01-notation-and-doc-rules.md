@@ -61,8 +61,9 @@ spelling in each source goes to the Letters section of `docs/source-terms.md`
   02 finds it.
 - The symbols `R` and `C` come from the citations of `research.md`. This ticket
   did not read the TeX again.
-- Open question from the review: the rule for letters in formulas has the
-  wording of this ticket. Some formulas use a shape letter as an index, for
-  example `B̄ₜ[m]` and `Rₜ,ᵤ` in `src/mamba3/mamba3.rs`.
+- The rule for letters in formulas says "can be a paper symbol", not the "is a
+  paper symbol" of the decision above. The review found formulas that use a
+  shape letter as an index, for example `B̄ₜ[m]` and `Rₜ,ᵤ` in
+  `src/mamba3/mamba3.rs`. The user approved this wording.
 - The paper `C` of the chunk length is also the readout matrix `C`. Ticket 03
   records this clash (research 5.3).

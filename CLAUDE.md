@@ -153,8 +153,8 @@ or as `[...]`. Paper style (upper-case `A,B,C,H,Y,L,…`) can be in comments,
 never in code identifiers. A lower-case letter is a base dimension (below). An
 upper-case letter is a relation of base dimensions (offset, multiple, concat):
 `X` can be `x±1` or `x*2`, and `XY` can be `x+y` or `x*y`. A letter in a
-formula is a paper symbol, not a shape letter. So `hₜ` is the state, and the
-suffix `_bhl` still has `h` = `nheads`.
+formula can be a paper symbol instead of a shape letter. For example, `hₜ` is
+the state, and the suffix `_bhl` still has `h` = `nheads`.
 
 | Letter | Dimension | Paper | Python | Typical |
 |--------|-----------|-------|--------|---------|
