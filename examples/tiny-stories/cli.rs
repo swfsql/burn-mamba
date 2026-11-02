@@ -2,7 +2,7 @@
 //! (`Overrides`, shared with `burn-deltanet`), the SSD path, the training-step
 //! profiler and the VRAM cap.
 
-use crate::common::cli::{AppArgs, StepFlags, finish_extra};
+use crate::common::cli::{AppArgs, TrainingStepFlags, finish_extra};
 use crate::common::parse_ssd_path;
 use crate::common::tiny_stories::lm::Overrides;
 use crate::context::BATCH;
@@ -35,7 +35,7 @@ pub struct Cli {
     /// `--pack-align`: see `training::Run::pack_align`.
     pub pack_align: Option<usize>,
     /// `--profile`, `--max-vram`, `--grad-checkpointing`.
-    pub step: StepFlags,
+    pub training_step_flags: TrainingStepFlags,
     /// `--prompt` (repeatable), `--continuations` and `--temperature`: the
     /// prompted continuations of inference.
     pub prompting: Prompting,
@@ -65,7 +65,7 @@ impl Cli {
         let help = format!(
             "tiny-stories' own flags (after --):\n{}\n{HELP}\n{}\n{}",
             Overrides::HELP,
-            StepFlags::HELP,
+            TrainingStepFlags::HELP,
             ContrastOverrides::HELP
         );
         let mut pargs = app_args.extra(&help);
@@ -76,7 +76,7 @@ impl Cli {
             .unwrap_or(Mamba3SsdPath::SerialRecalculated(None));
         let pack_align: Option<usize> = pargs.opt_value_from_str("--pack-align").unwrap();
         assert!(pack_align != Some(0), "--pack-align must be at least 1");
-        let step = StepFlags::parse(&mut pargs);
+        let training_step_flags = TrainingStepFlags::parse(&mut pargs);
         let prompting = Prompting {
             prompts: pargs.values_from_str("--prompt").unwrap(),
             continuations: pargs.opt_value_from_str("--continuations").unwrap().unwrap_or(1),
@@ -102,7 +102,7 @@ impl Cli {
             overrides,
             ssd_path: MambaSsdPath::Mamba3(ssd_path),
             pack_align,
-            step,
+            training_step_flags,
             prompting,
             context_use,
             context_batch,

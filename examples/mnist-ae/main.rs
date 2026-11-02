@@ -19,7 +19,7 @@
 //!
 //! The optimizer is AdamW, unless the shared flags select a different one.
 //! `--sgd` trains with plain SGD, the one optimizer whose training step can be
-//! a captured step (`--no-graph` runs it eagerly).
+//! a captured step (`--eager` runs it eagerly).
 //!
 //! ## Run
 //!

@@ -146,7 +146,7 @@ pub fn generate(
             (logits.narrow(1, last, 1).squeeze_dim::<2>(1), caches)
         }
     };
-    let capture = run.graphs && run.step_mode == StepMode::Masked;
+    let capture = run.capture && run.step_mode == StepMode::Masked;
     // SAFETY: `step` reads only `model` (borrowed for the whole call) and its
     // arguments, so every buffer that a captured step reads stays the same.
     let text = unsafe {

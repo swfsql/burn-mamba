@@ -90,7 +90,7 @@ On CUDA, the decode `step`s replay from one recording (burn-stack's
 `CapturedStep`), and are not launched again. A model this small is bound by the
 host that enqueues its launches, not by the GPU. The prefill windows of a prompt
 also replay, from one recording that every prompt shares. The text is the same in
-both modes. `--no-graph` runs both eagerly.
+both modes. `--eager` runs both eagerly.
 
 Every position is scored against its next character, so the reported accuracy is
 per character. A story is walked in windows (see
@@ -113,7 +113,7 @@ story. Then the model trains only on story openings, and it never sees the state
 of a story past its first `seq_len` characters.
 
 So the loop walks the windows of a story in order (the *run*). It takes one
-optimizer step per window, and **carries the final state into the next window**:
+training step per window, and **carries the final state into the next window**:
 
 - The length of the run is the length of the **story**. `--run-len` is only a
   cap. Its default (`usize::MAX`) sets no cap, and leaves the depth to the gate.
@@ -167,7 +167,7 @@ The corpus knobs persist in the `training_config.json` of the artifacts. The
 shared CLI, before the `--`, sets:
 
 - the number of epochs,
-- the batch size (`--batch-size`, the number of windows per optimizer step),
+- the batch size (`--batch-size`, the number of windows per training step),
 - the optimizer. The default is Muon + AdamW. `--adamw` keeps the hidden weight
   matrices on AdamW instead of [Muon](https://kellerjordan.github.io/posts/muon/)
   (see the README of `mnist-class`).
@@ -205,7 +205,7 @@ other:
 1. One `prime()` replays the class latents. It has no input token, and it already
    returns the distribution of the first character.
 2. Chunkwise `forward()`s read a prompt, if there is one. This is the prefill:
-   right-padded 256-character chunks after the latents. The latents run once, and
+   right-padded 256-character windows after the latents. The latents run once, and
    their state is kept.
 3. Every generated character then costs one `step()` against that same cache:
    O(state) per token, with no growing KV cache.
@@ -221,7 +221,7 @@ letter then draws its case from the temperature-scaled case logit
 
 Training samples a short story at every small validation check, into
 `<artifacts>/sample-epoch-{e}-batch-{b}.txt`. So you can see the text change from
-noise to words to sentences. The checks are spaced in optimizer steps (every
+noise to words to sentences. The checks are spaced in training steps (every
 300), so their rate does not change with the run lengths that the corpus gives.
 
 ## Notes

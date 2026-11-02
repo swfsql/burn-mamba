@@ -57,7 +57,7 @@ fn eager_run(chunk_len: Option<usize>) -> Run {
     Run {
         ssd_path: MambaSsdPath::Mamba3(Mamba3SsdPath::SerialRecalculated(chunk_len)),
         pack_align: None,
-        graphs: false,
+        capture: false,
         max_vram_mib: None,
         vram_cleanup_every: None,
     }

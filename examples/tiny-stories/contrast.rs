@@ -56,7 +56,7 @@
 //! shape changes from one training step to the next (burn#5751).
 //!
 //! The training runs the contrast after the backward of the LM loss, with a
-//! backward of its own. The two gradients add up into one optimizer step. So
+//! backward of its own. The two gradients add up into one optimizer update. So
 //! the peak memory is that of the larger pass, not of their sum.
 
 use crate::AppArgs;
@@ -301,7 +301,7 @@ pub struct ContrastConfig {
     /// (see the module header).
     #[config(default = 0.1)]
     pub weight: f64,
-    /// The schedule step where the ramp of `λ` starts (`--contrast-start`).
+    /// The training step where the ramp of `λ` starts (`--contrast-start`).
     /// Before it, the weight is 0.
     #[config(default = 1000)]
     pub start: usize,
@@ -327,10 +327,10 @@ impl ContrastConfig {
         self.stories > 0
     }
 
-    /// The weight of the contrast loss at the schedule step `step`: 0 before
-    /// `start`, then a linear ramp to `weight` over `ramp` training steps.
-    pub fn weight_at(&self, step: usize) -> f64 {
-        match (step.checked_sub(self.start), self.ramp) {
+    /// The weight of the contrast loss at `training_step`: 0 before `start`,
+    /// then a linear ramp to `weight` over `ramp` training steps.
+    pub fn weight_at(&self, training_step: usize) -> f64 {
+        match (training_step.checked_sub(self.start), self.ramp) {
             (None, _) => 0.0,
             (Some(_), 0) => self.weight,
             (Some(done), ramp) => self.weight * (done as f64 / ramp as f64).min(1.0),
@@ -738,8 +738,8 @@ pub struct Feed {
     rng: ChaCha8Rng,
     /// The word index of [`Negative::Nearest`], built at its first use.
     index: Option<WordIndex>,
-    /// The schedule step of the next batch.
-    step: usize,
+    /// The training step of the next batch.
+    training_step: usize,
     /// `contrast.jsonl` in the artifacts directory: one line per training step.
     log: Option<std::fs::File>,
     /// The sums of the readouts since the last printed line, and their count.
@@ -752,10 +752,16 @@ const PRINT_EVERY: usize = 100;
 
 impl Feed {
     /// The stories of the first `train_stories` of the train split (those of
-    /// the LM batches), in the order of a shuffle with `seed`. `step` is the
-    /// schedule step of the first batch (that of a resumed run). With a
+    /// the LM batches), in the order of a shuffle with `seed`. `training_step`
+    /// is the training step of the first batch (that of a resumed run). With a
     /// `dir`, appends the readouts to `contrast.jsonl` in it.
-    pub fn new(config: ContrastConfig, train_stories: usize, seed: u64, step: usize, dir: Option<&Path>) -> Self {
+    pub fn new(
+        config: ContrastConfig,
+        train_stories: usize,
+        seed: u64,
+        training_step: usize,
+        dir: Option<&Path>,
+    ) -> Self {
         assert!(config.enabled(), "the contrast is disabled");
         let keep = config.prompt_max + config.continuation;
         let need = config.prompt_min + config.continuation;
@@ -805,7 +811,7 @@ impl Feed {
             next: 0,
             rng: ChaCha8Rng::seed_from_u64(seed),
             index: None,
-            step,
+            training_step,
             log,
             sums: [0.0; 3],
             count: 0,
@@ -829,7 +835,7 @@ impl Feed {
 
     /// The weight of the contrast loss at the current training step.
     pub fn weight(&self) -> f64 {
-        self.config.weight_at(self.step)
+        self.config.weight_at(self.training_step)
     }
 
     /// Whether the pass of the contrast runs at the current training step: a weight
@@ -921,10 +927,10 @@ impl Feed {
     /// End the current training step: log the readouts of [`loss`] if the pass
     /// ran (this reads them from the device), and move to the next training
     /// step.
-    pub fn end_step(&mut self, readouts: Option<Tensor<1>>) {
+    pub fn end_training_step(&mut self, readouts: Option<Tensor<1>>) {
         let weight = self.weight();
-        let step = self.step;
-        self.step += 1;
+        let training_step = self.training_step;
+        self.training_step += 1;
         let Some(readouts) = readouts else {
             return;
         };
@@ -934,8 +940,8 @@ impl Feed {
         if let Some(log) = &mut self.log {
             writeln!(
                 log,
-                "{{\"step\":{step},\"weight\":{weight},\"contrast\":{contrast},\"delta_bits\":{bits},\
-                 \"push\":{push}}}"
+                "{{\"training_step\":{training_step},\"weight\":{weight},\"contrast\":{contrast},\
+                 \"delta_bits\":{bits},\"push\":{push}}}"
             )
             .expect("failed to write contrast.jsonl");
         }
@@ -946,8 +952,8 @@ impl Feed {
         if self.count == PRINT_EVERY {
             let n = self.count as f64;
             println!(
-                "contrast step={step} weight {weight:.4} loss {:.4} delta {:+.4} bits/char push {:.2e} \
-                 (mean of {} training steps)",
+                "contrast training_step={training_step} weight {weight:.4} loss {:.4} delta {:+.4} \
+                 bits/char push {:.2e} (mean of {} training steps)",
                 self.sums[0] / n,
                 self.sums[1] / n,
                 self.sums[2] / n,

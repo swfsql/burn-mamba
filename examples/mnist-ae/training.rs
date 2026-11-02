@@ -2,7 +2,7 @@
 //! train and validation epochs, and saves the model and the optimizer. The
 //! objective is pixel reconstruction (binary cross-entropy on the normalized
 //! image, computed from raw logits). A `Trainer` trains it. Under plain SGD (and
-//! without `--no-graph`), the whole training step is a captured step, recorded
+//! without `--eager`), the whole training step is a captured step, recorded
 //! at the first batch. Under any other optimizer, it runs eagerly. The
 //! validation side is [`Valid`], which replays the forward as a captured
 //! step.
@@ -51,7 +51,7 @@ pub fn train(
     let (mut optim, progress) =
         app_args.load_or_save_optim(training_config.optimizer.init(&muon_plan));
 
-    let mut trainer = Trainer::new(model, train_loss, &training_config.optimizer, app_args.graphs());
+    let mut trainer = Trainer::new(model, train_loss, &training_config.optimizer, app_args.capture());
 
     // Create the batcher
     let batcher = MnistBatcher::default();
@@ -88,7 +88,7 @@ pub fn train(
         0,
         session.cadence().valid_batches,
         &mut session,
-        app_args.graphs(),
+        app_args.capture(),
     );
 
     println!("Starting training...");
@@ -117,7 +117,7 @@ pub fn train(
             epoch,
             None,
             &mut session,
-            app_args.graphs(),
+            app_args.capture(),
         );
 
         if session.is_exhausted() {
@@ -189,12 +189,12 @@ pub fn epoch_train(
     {
         let b = session.begin_batch();
         let [batch_size, _, _, _] = batch.images.dims();
-        let (_step, lr) = session.begin_step(batch_size);
+        let (_training_step, lr) = session.begin_training_step(batch_size);
 
         // A worker built it on the host. It moves to the device here (see
         // `loader_device`).
         let input = batch.to_device(trainer.device()).images_norm(); // [b, H, W, 1], pixels in [0, 1]
-        let (loss, logits_flat) = trainer.step(input.clone(), optim, lr);
+        let (loss, logits_flat) = trainer.train_step(input.clone(), optim, lr);
         let pre_metrics = RegressionOutput::new(loss, logits_flat, input.reshape([batch_size, HEIGHT * WIDTH]));
 
         loss_metric.update(&pre_metrics.adapt(), session.meta()).expect("metric update");
@@ -225,7 +225,7 @@ pub fn epoch_train(
                 epoch,
                 valid_batches,
                 session,
-                app_args.graphs(),
+                app_args.capture(),
             );
 
             // Save original-vs-reconstruction PNGs into a new dir for this
@@ -258,7 +258,7 @@ pub fn epoch_train(
 
 /// Run validation over (up to `valid_loop_limit`) batches, report the average
 /// reconstruction loss, and write it into the metrics log of the `session`.
-/// The forward replays as a captured step if `graphs` is true ([`Valid`]).
+/// The forward replays as a captured step if `capture` is true ([`Valid`]).
 pub fn epoch_valid(
     dataloader_valid: Dataloader,
     valid_model: AeModel,
@@ -266,7 +266,7 @@ pub fn epoch_valid(
     epoch: usize,
     valid_loop_limit: Option<usize>,
     session: &mut Session,
-    graphs: bool,
+    capture: bool,
 ) {
     let valid_loop_limit = valid_loop_limit.unwrap_or(usize::MAX);
     let valid_num_items = dataloader_valid.num_items();
@@ -279,7 +279,7 @@ pub fn epoch_valid(
     let mut loss_metric = burn::train::metric::LossMetric::new();
 
     let device = valid_model.devices().remove(0);
-    let valid_model = Valid::new(valid_model, graphs);
+    let valid_model = Valid::new(valid_model, capture);
 
     for batch in dataloader_valid
         .iter()
@@ -314,7 +314,7 @@ fn train_loss(model: &AeModel, input_bhw1: Tensor<4>) -> (Tensor<1>, Tensor<2>) 
 /// The validation-side autoencoder: the trained model on the inner backend. Its
 /// forward is captured at the shape of the first batch, and it replays the
 /// recording for every later batch of that shape. Any other shape (a short last
-/// batch) runs eagerly. `--no-graph` disables the capture.
+/// batch) runs eagerly. `--eager` disables the capture.
 ///
 /// There is one capture per validation pass, because the weights change
 /// between passes. Each capture costs the 3 forwards that

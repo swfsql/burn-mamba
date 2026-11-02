@@ -1,6 +1,6 @@
 # 09: Follow the examples renames of burn-stack
 
-Status: ready-for-agent
+Status: resolved
 
 Blocked by: None (can start immediately)
 
@@ -92,14 +92,54 @@ and 08. The user decides if the scripts change.
 
 ## Acceptance criteria
 
-- [ ] `rg -e no-graph -e '\.graphs\(\)' -e '\bStepFlags' -e optim_step
+- [x] `rg -e no-graph -e '\.graphs\(\)' -e '\bStepFlags' -e optim_step
       -e begin_step -e skip_steps -e bucket-chars -e 'CUDA graph'
       -e 'schedule step'` over
       `src`, `examples` (without `tmp/`) and the markdown files finds
       nothing. (`\bStepFlags` has a word boundary, because the new name
       `TrainingStepFlags` holds the old one.)
-- [ ] `cargo check`, `cargo test --lib -- --test-threads=1`,
+- [x] `cargo check`, `cargo test --lib -- --test-threads=1`,
       `cargo test --examples -j 1 -- --test-threads=1` pass (flex).
-- [ ] `cargo doc --all --no-deps` has no warnings.
+- [x] `cargo doc --all --no-deps` has no warnings.
 
 ## Comments
+
+- The commit holds the bump of `Cargo.toml` (rev `1915e69`, crate version
+  0.74.0, made by the user), `Cargo.lock` (burn-stack 0.36.0) and the renames.
+- `cargo check --all-targets` has no warnings. `cargo test --lib`: 356 tests
+  pass, 4 are ignored. The example tests pass.
+- The help copy in `examples/README.md` is equal to the output of `-h`.
+- No test parses `--eager` or reads the new key. So one run checks them:
+  `reset-majority --training --eager --max-batches 2` writes `training_step`
+  in `metrics.jsonl` and in `progress.json`. The flag `--no-graph` fails with
+  `unused arguments`.
+- These names of burn-mamba are not in the rename map. They have the same
+  sense, so they change too:
+  - `graphs` is `capture`: the field `Run::graphs` of `tiny-stories` and
+    `hnet-stories`, the parameter of `hnet-stories` `Run::new`, the field and
+    the parameter of `mnist-class` `Wrap`, and the parameter of `mnist-ae`
+    `epoch_valid`.
+  - The field `Cli::step` of `tiny-stories` and `hnet-stories` is
+    `training_step_flags`. The name `training_step` is the count.
+  - `Feed::end_step` is `Feed::end_training_step`, and the locals `_step` are
+    `_training_step`.
+  - The key `"step"` of `contrast.jsonl` is `"training_step"`, and the printed
+    `contrast step=` is `contrast training_step=`. No script reads them. The
+    `notes.md` of `examples/tiny-stories/tmp/1m-b/` names the old forms, and
+    it stays as a record.
+- "Optimizer step" follows `LmModel::optimizer_update`. It is "optimizer
+  update" in `examples/hnet-stories/training.rs` and
+  `examples/tiny-stories/contrast.rs`. It is "training step" in the three
+  sites of `examples/tiny-stories/README.md`, which count the steps.
+- The local `step` of `weight_is_zero_then_ramps` names a step function (a
+  ramp of 0). It stays.
+- The review adds three doc fixes: "windows" for the prefill in
+  `examples/tiny-stories/README.md`, "calls" in the doc of `mnist-class`
+  `Wrap::new`, and "LR schedule" in the header of
+  `examples/hnet-stories/training.rs`.
+- The experiment directories `examples/*/tmp/` do not change.
+- The review found these items, and this ticket does not change them:
+  - Prose in `examples/` says "schedule" alone for the LR schedule.
+  - "Chunkwise" can mean the window sense (`examples/tiny-stories/README.md`,
+    `inference.rs`, `main.rs`), or the SSD chunks.
+  - "Optimizer update" is in neither glossary.

@@ -1,10 +1,10 @@
 //! The example's own flags, forwarded after the trailing `--`: the corpus knobs
 //! (`Overrides`, shared with `tiny-stories`), the flags of a training step
-//! (`StepFlags`: the profiler, the VRAM cap, the gradient checkpointing), the
-//! SSD paths, the shape of a new model, the sampling, and the context-use
-//! measure.
+//! (`TrainingStepFlags`: the profiler, the VRAM cap, the gradient
+//! checkpointing), the SSD paths, the shape of a new model, the sampling, and
+//! the context-use measure.
 
-use crate::common::cli::{AppArgs, StepFlags, finish_extra};
+use crate::common::cli::{AppArgs, TrainingStepFlags, finish_extra};
 use crate::common::context::BATCH;
 use crate::common::parse_ssd_path;
 use crate::common::tiny_stories::lm::Overrides;
@@ -41,7 +41,7 @@ pub struct Cli {
     /// The corpus knobs, applied onto the training config.
     pub overrides: Overrides,
     /// `--profile`, `--max-vram`, `--grad-checkpointing`.
-    pub step: StepFlags,
+    pub training_step_flags: TrainingStepFlags,
     /// `--ssd-path` and `--main-ssd-path`: the SSD paths of the stages and of
     /// the main stack.
     pub paths: (MambaSsdPath, MambaSsdPath),
@@ -75,11 +75,11 @@ impl Cli {
         let help = format!(
             "hnet-stories' own flags (after --):\n{}\n{}\n{HELP}",
             Overrides::HELP,
-            StepFlags::HELP
+            TrainingStepFlags::HELP
         );
         let mut pargs = app_args.extra(&help);
         let overrides = Overrides::parse(&mut pargs);
-        let step = StepFlags::parse(&mut pargs);
+        let training_step_flags = TrainingStepFlags::parse(&mut pargs);
         let stage_path = pargs
             .opt_value_from_fn("--ssd-path", parse_ssd_path)
             .unwrap()
@@ -117,7 +117,7 @@ impl Cli {
         finish_extra(pargs);
         Self {
             overrides,
-            step,
+            training_step_flags,
             paths,
             model,
             step_mode,

@@ -2,7 +2,7 @@
 //! runs the train and validation epochs, and saves the model and the optimizer.
 //! The objective is a cross-entropy head over **every** token (the group element
 //! after each pair of symbols, [`forward_classification`]). A `Trainer` trains
-//! it. Under plain SGD (and without `--no-graph`), the whole training step
+//! it. Under plain SGD (and without `--eager`), the whole training step
 //! is a captured step, recorded at the first batch. Under any other optimizer,
 //! it runs eagerly.
 
@@ -62,7 +62,7 @@ pub fn train(
     let (mut optim, progress) =
         app_args.load_or_save_optim(training_config.optimizer.init(&muon_plan));
 
-    let mut trainer = Trainer::new(model, train_loss, &training_config.optimizer, app_args.graphs());
+    let mut trainer = Trainer::new(model, train_loss, &training_config.optimizer, app_args.capture());
     let batcher = ProductBatcher::default();
 
     // The workers build batches on the host, and the loops move them to the
@@ -180,11 +180,11 @@ pub fn epoch_train(
     {
         let b = session.begin_batch();
         let [batch_size, _, _] = batch.inputs.dims();
-        let (_step, lr) = session.begin_step(batch_size);
+        let (_training_step, lr) = session.begin_training_step(batch_size);
 
         let batch = batch.to_device(trainer.device());
         let batch = (batch.inputs, batch.targets);
-        let (loss, (logits, targets)) = trainer.step(batch, optim, lr);
+        let (loss, (logits, targets)) = trainer.train_step(batch, optim, lr);
         let pre_metrics = ClassificationOutput::new(loss, logits, targets);
 
         loss_metric.update(&pre_metrics.adapt(), session.meta()).expect("metric update");

@@ -53,7 +53,7 @@ On CUDA, each validation pass captures its forward as one captured step at its
 first batch (burn-stack's `CapturedStep`). The other batches replay that
 recording and do not launch the forward again. A model this small is bound by
 the host that enqueues its launches. The metrics are the same in both modes.
-The recording holds its own memory. `--no-graph` runs the forward eagerly. Under SGD (below), the
+The recording holds its own memory. `--eager` runs the forward eagerly. Under SGD (below), the
 training step replays in the same way.
 
 ## Optimizer: AdamW vs. AdamW + Muon vs. SGD
@@ -103,7 +103,7 @@ continues to move. The other optimizers of Burn put their host-side state into a
 recording ([tracel-ai/burn#5779](https://github.com/tracel-ai/burn/issues/5779)), so
 they train eagerly. Muon + SGD (`--muon --sgd`, at the SGD rate) also trains
 eagerly, because Muon keeps momentum. A replayed run trains exactly as the eager
-one (`--no-graph`). The recording holds the memory of one training step for as
+one (`--eager`). The recording holds the memory of one training step for as
 long as it exists.
 
 ```bash

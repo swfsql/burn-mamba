@@ -19,7 +19,7 @@
 //! recording of the step and its draw, instead of a new launch. The
 //! prefill ([`prefill`]) also replays a recording. The prompt follows the
 //! latents in right-padded fixed-shape windows, and one recording serves every
-//! window of every prompt across which the prefill is held. `--no-graph`
+//! window of every prompt across which the prefill is held. `--eager`
 //! disables both captures, and the text is the same either way. [`infer`]
 //! loads the checkpoint and prints a few stories at different temperatures,
 //! and a few continuations of fixed prompts (or of the `--prompt` texts).
@@ -113,7 +113,7 @@ pub fn infer(
         _ => prompts.iter().map(String::as_str).collect(),
     };
     // One prefill for every prompt: they share the opening of the latents and
-    // (without `--no-graph`) one captured window.
+    // (without `--eager`) one captured window.
     let mut prefill = prefill(&model, run, &infer_device);
     // Each continuation has its own seed, after the seeds of the unprompted
     // stories.
@@ -187,9 +187,9 @@ pub fn generate(
     let (logits, caches, class) = open(model, run, device, tokens.as_deref(), prefill);
 
     // Decode: one `step` per character, against that same cache. After the
-    // first few steps, it replays one recording, unless `--no-graph` is
+    // first few steps, it replays one recording, unless `--eager` is
     // set (or a class latent is still to come).
-    let capture = model.only_start_latents() && run.graphs;
+    let capture = model.only_start_latents() && run.capture;
     // Safety: the step reads only its arguments and `model`, which it borrows
     // for the whole call.
     unsafe {
@@ -278,14 +278,14 @@ fn open(
 const PREFILL_WINDOW: usize = 256;
 
 /// A [`Prefill`] of `model` in windows of [`PREFILL_WINDOW`], captured unless
-/// `--no-graph`. Hold it across prompts: they share its opening and its
+/// `--eager`. Hold it across prompts: they share its opening and its
 /// recording.
 pub fn prefill<'a>(model: &'a MambaVocabNet, run: &Run, device: &Device) -> Prefill<'a, MambaCaches> {
     let ssd_path = run.ssd_path.clone();
     // Safety: the window reads only its arguments, `model` (borrowed for as long
     // as the prefill lives), and `ssd_path`, which it owns.
     unsafe {
-        Prefill::new(device, PREFILL_WINDOW, run.graphs, move |x, caches, pad, class| {
+        Prefill::new(device, PREFILL_WINDOW, run.capture, move |x, caches, pad, class| {
             model.forward(x, Some(caches), ssd_path.clone(), Some(class), Some(pad))
         })
     }

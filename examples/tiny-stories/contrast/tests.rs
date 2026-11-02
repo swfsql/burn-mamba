@@ -327,7 +327,7 @@ fn profile_lines_hold_the_scores_of_each_character() {
 #[test]
 fn weight_is_zero_then_ramps() {
     let config = ContrastConfig::new().with_weight(0.8).with_start(100).with_ramp(40);
-    let at = |step| config.weight_at(step);
+    let at = |training_step| config.weight_at(training_step);
     assert_eq!([at(0), at(99), at(100)], [0.0, 0.0, 0.0]);
     assert!((at(110) - 0.2).abs() < 1e-12 && (at(130) - 0.6).abs() < 1e-12);
     assert_eq!([at(140), at(10_000)], [0.8, 0.8]);

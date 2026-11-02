@@ -9,8 +9,8 @@
 //! - The loss that back-propagates is the next-character loss plus `α` times
 //!   the ratio loss of each stage. The metrics (nats and bits per character)
 //!   report the next-character loss alone.
-//! - The optimizer step gives each stage its own learning rate: the rate of
-//!   the schedule times `λˢ` (see [`crate::model::lr_multipliers`]).
+//! - The optimizer update gives each stage its own learning rate: the rate of
+//!   the LR schedule times `λˢ` (see [`crate::model::lr_multipliers`]).
 
 pub use crate::common::{cli::AppArgs, tiny_stories::lm::TinyStoriesConfig};
 use crate::cli::Cli;
@@ -116,9 +116,9 @@ pub struct Run {
     pub vram_cleanup_every: Option<u64>,
     /// `--step-mode`: how a decode step runs the inner H-Net of a stage.
     pub step_mode: StepMode,
-    /// Whether decode steps replay a recording (`--no-graph` runs them
+    /// Whether decode steps replay a recording (`--eager` runs them
     /// eagerly). Only a masked step can.
-    pub graphs: bool,
+    pub capture: bool,
     /// `--show-chunks`: mark the chunk starts in each sample.
     pub show_chunks: bool,
     /// `--chunk-log`: print the chunk ratios once per this many windows (`0`
@@ -134,7 +134,7 @@ pub struct Run {
 
 impl Run {
     /// The settings of a run of `config`, with the flags of this invocation.
-    pub fn new(config: &HNetStoriesConfig, cli: &Cli, graphs: bool) -> Self {
+    pub fn new(config: &HNetStoriesConfig, cli: &Cli, capture: bool) -> Self {
         let n_stages = config.model.stage_blocks.len();
         assert_eq!(config.ratio_targets.len(), n_stages, "one ratio target per stage");
         assert_eq!(config.lr_multipliers.len(), n_stages + 1, "one LR multiplier per stage, then the main stack");
@@ -145,10 +145,10 @@ impl Run {
         );
         Self {
             paths: cli.paths.clone(),
-            max_vram_mib: cli.step.max_vram_mib,
-            vram_cleanup_every: cli.step.vram_cleanup_every,
+            max_vram_mib: cli.training_step_flags.max_vram_mib,
+            vram_cleanup_every: cli.training_step_flags.vram_cleanup_every,
             step_mode: cli.step_mode,
-            graphs,
+            capture,
             show_chunks: cli.show_chunks,
             chunk_log: cli.chunk_log,
             ratio_targets: config.ratio_targets.clone(),
@@ -281,10 +281,10 @@ impl LmModel for Wrap {
         (output, caches)
     }
 
-    /// One training step at the rate `lr · λˢ` for the parameters of each stage, and
-    /// `lr · λᴹ` for those of the main stack. The embedding and the heads
-    /// take the rate of stage 0.
-    fn optim_step(self, optim: &mut ModuleOptimizer, lr: f64, grads: GradientsParams) -> Self {
+    /// One optimizer update at the rate `lr · λˢ` for the parameters of each
+    /// stage, and `lr · λᴹ` for those of the main stack. The embedding and the
+    /// heads take the rate of stage 0.
+    fn optimizer_update(self, optim: &mut ModuleOptimizer, lr: f64, grads: GradientsParams) -> Self {
         let multipliers = &self.1.lr_multipliers;
         let n_stages = multipliers.len() - 1;
         let mut rates = ModuleLrScheduler::new(lr * multipliers[0]);

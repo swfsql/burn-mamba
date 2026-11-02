@@ -23,7 +23,7 @@ fn score_reads_the_rows_of_the_continuation() {
     let run = Run {
         ssd_path: MambaSsdPath::Mamba3(Mamba3SsdPath::SerialRecalculated(None)),
         pack_align: None,
-        graphs: false,
+        capture: false,
         max_vram_mib: None,
         vram_cleanup_every: None,
     };

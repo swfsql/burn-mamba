@@ -12,7 +12,7 @@
 //!   [Muon](burn_stack::optim). It first splits the fused `in_proj` per
 //!   sub-projection.
 //! - `--sgd` trains every weight with plain SGD instead. It is the one
-//!   optimizer whose training step can be a captured step (`--no-graph` runs
+//!   optimizer whose training step can be a captured step (`--eager` runs
 //!   it eagerly).
 //!
 //! The choice goes into the `training_config.json` of the artifacts, so a

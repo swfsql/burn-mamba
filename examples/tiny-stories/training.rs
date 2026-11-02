@@ -85,7 +85,7 @@ pub fn train(
             contrast,
             config.train_stories,
             seed,
-            progress.step + 1,
+            progress.training_step + 1,
             Some(&app_args.artifacts_path),
         );
         contrast::init(feed);
@@ -165,8 +165,8 @@ pub struct Run {
     /// shorter chunk (less memory) trains on the same rows.
     pub pack_align: Option<usize>,
     /// Whether decode steps and prefill windows replay as captured steps
-    /// (`--no-graph` runs them eagerly).
-    pub graphs: bool,
+    /// (`--eager` runs them eagerly).
+    pub capture: bool,
     /// `--max-vram`, in MiB: the cap of
     /// [`vram`](burn_stack::examples::vram), with its cleanups.
     pub max_vram_mib: Option<u64>,
@@ -244,7 +244,7 @@ impl LmModel for Wrap {
         // After the end of the window: the read of the readouts waits for the
         // device, as the metric reads of the loop do.
         if let Some(feed) = contrast::FEED.get() {
-            feed.lock().unwrap().end_step(readouts);
+            feed.lock().unwrap().end_training_step(readouts);
         }
         (output, caches)
     }
@@ -262,7 +262,7 @@ impl LmModel for Wrap {
         valid.forward_lm(batch, caches, class)
     }
 
-    fn optim_step(self, optim: &mut ModuleOptimizer, lr: f64, grads: GradientsParams) -> Self {
+    fn optimizer_update(self, optim: &mut ModuleOptimizer, lr: f64, grads: GradientsParams) -> Self {
         let t3 = prof::opt_start();
         let model = Wrap(optim.step(lr, self.0, grads), self.1);
         prof::opt_end(t3);

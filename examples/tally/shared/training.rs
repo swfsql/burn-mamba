@@ -1,7 +1,7 @@
 //! The training loop of every rung: dataloaders over the [`Task`] of the rung,
 //! train and validation epochs, checkpoints, and a cross-entropy head over the
 //! scored positions ([`forward_classification`]). A `Trainer` trains it. Under
-//! plain SGD (and without `--no-graph`), the whole training step is a captured
+//! plain SGD (and without `--eager`), the whole training step is a captured
 //! step, recorded at the first batch. Under any other optimizer, it runs
 //! eagerly.
 
@@ -101,7 +101,7 @@ pub fn train(
     );
 
     println!("running initial validation (chance ≈ {:.1}%)...", 100.0 / NUM_CLASSES as f32);
-    let mut trainer = Trainer::new(model, train_loss, &training_config.optimizer, app_args.graphs());
+    let mut trainer = Trainer::new(model, train_loss, &training_config.optimizer, app_args.capture());
     validate_all(&valid_loaders, trainer.module().valid(), 0, &mut session);
 
     println!("Starting training...");
@@ -156,11 +156,11 @@ fn epoch_train(
     {
         let b = session.begin_batch();
         let [batch_size, _, _] = batch.inputs.dims();
-        let (_step, lr) = session.begin_step(batch_size);
+        let (_training_step, lr) = session.begin_training_step(batch_size);
 
         let batch = batch.to_device(trainer.device());
         let batch = (batch.inputs, batch.targets);
-        let (loss, (logits, targets)) = trainer.step(batch, optim, lr);
+        let (loss, (logits, targets)) = trainer.train_step(batch, optim, lr);
         let output = ClassificationOutput::new(loss, logits, targets);
         loss_metric.update(&output.adapt(), session.meta()).expect("metric update");
         acc_metric.update(&output.adapt(), session.meta()).expect("metric update");
