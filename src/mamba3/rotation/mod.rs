@@ -18,7 +18,7 @@
 //! `SU(2) ⊂ SO(4)` instead of `SO(2)`. Unit quaternions under multiplication
 //! are `SU(2)`, which is **non-abelian** and has non-solvable finite subgroups
 //! (the binary icosahedral group `2I = SL(2,5)`, a double cover of `A₅`). By
-//! Barrington's theorem, this lifts the state-tracking that the layer can
+//! Barrington's theorem, this lifts the state-tracking that the block can
 //! reach from the solvable/`TC⁰` regime (parity, mod-k) toward `NC¹`, which
 //! abelian rotations provably cannot reach.
 //!

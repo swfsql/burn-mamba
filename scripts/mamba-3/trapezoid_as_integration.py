@@ -16,8 +16,8 @@ reads more easily there; `info/mamba-3/rotation-as-optimization.md` uses the tra
 fast-weight ``S``. Nothing below depends on which. One head throughout.
 
     alpha[t] = exp(dt[t] * A[t])            decay, A[t] < 0
-    beta[t]  = (1 - lam[t]) * dt[t] * alpha[t]      left-endpoint weight
-    gamma[t] = lam[t] * dt[t]                       right-endpoint weight
+    beta[t]  = (1 - lam[t]) * dt[t] * alpha[t]      the coefficient of the tap sample
+    gamma[t] = lam[t] * dt[t]                       the mass of the current sample
     v[t]     = outer(B[t], x[t])                    the sample
     h[t]     = alpha[t] * h[t-1] + beta[t] * v[t-1] + gamma[t] * v[t]
 

@@ -63,9 +63,8 @@ const TURN_RAW: f64 = 0.5493061443340549; // atanh(1/2)
 const A_HOLD_RAW: f64 = -20.0;
 /// `−A` on a [`RESET`]: `ᾱ = e⁻²⁰` erases what the state held.
 const A_WIPE: f64 = 20.0;
-/// `λ̂`, large enough that `λ = σ(λ̂) ≈ 1`. The left-endpoint weight of the
-/// trapezoid, `β = (1−λ)Δᾱ`, vanishes, and the block writes only the current
-/// micro-step.
+/// `λ̂`, large enough that `λ = σ(λ̂) ≈ 1`. The coefficient of the tap sample,
+/// `β = (1−λ)Δᾱ`, vanishes, and the block writes only the current micro-step.
 const LAMBDA_RAW: f64 = 20.0;
 /// `x(R) = 1`: the write. Every other symbol writes nothing (`x = 0`, and `x`
 /// takes no activation).

@@ -88,17 +88,21 @@ Run each `rg` from the repo root with
 - `src/mamba2/mamba2.rs:44` said "the layer" for the SSD layer. It says "plant".
 - The banners "cache for a single layer" of the four cache files say "block", to
   match the doc line below them.
-- These lines did not change. The ticket does not list them, so the user decides:
+- The ticket does not list these lines. After the review, the user approved a
+  change for each one:
+  - "layer" that means our block now says "block": `src/mamba2/cache.rs:13`,
+    `src/mamba3/mamba3.rs:108`, `src/mamba3/rotation/mod.rs:21`.
+  - "residual layers" now says "layers": `src/mamba1/mod.rs:10`,
+    `src/mamba2/mod.rs:15`.
+  - "endpoint weight" out of `src/mamba3/` now uses the two phrases of the table:
+    `examples/reset/spinor-product/tests.rs:66`,
+    `scripts/mamba-3/mimo_as_batch.py:22`, `:23`,
+    `scripts/mamba-3/trapezoid_as_integration.py:19`, `:20`.
+- The ticket does not list these lines either. The user approved to keep them:
   - `examples/reset/README.md:13`: `**complex** transition`. Its column compares
     the rotation kinds.
   - "complex-valued state transition": `README.md:40`, `src/lib.rs:22`, `:60`,
     `src/mamba2/mamba2.rs:55`, `src/mamba3/mamba3.rs:9`, `src/mamba3/mod.rs:7`.
-  - "layer" that means our block: `src/mamba2/cache.rs:13`,
-    `src/mamba3/mamba3.rs:108`, `src/mamba3/rotation/mod.rs:21`.
-  - "residual layers": `src/mamba1/mod.rs:10`, `src/mamba2/mod.rs:15`.
-  - "endpoint weight" out of `src/mamba3/`:
-    `examples/reset/spinor-product/tests.rs:66`,
-    `scripts/mamba-3/mimo_as_batch.py:22`, `:23`,
-    `scripts/mamba-3/trapezoid_as_integration.py:19`, `:20`.
+    It describes the feature, and it does not name the rotation.
   - `src/mamba2/mamba2.rs:892`: "state input proj". It names `B`, so "sample" does
     not fit.

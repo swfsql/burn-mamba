@@ -12,7 +12,7 @@
 //! - [`ssd`](crate::mamba2::ssd) — the pluggable chunkwise SSD paths
 //!   (Minimal / Serial / SerialRecalculated) and the backend extension trait.
 //!
-//! The residual layers, the networks and the bidirectional stacks are the
+//! The layers, the networks and the bidirectional stacks are the
 //! family-generic types in [`burn_stack::modules`]. [`crate::unified`] wraps
 //! them in runtime-selectable enums.
 

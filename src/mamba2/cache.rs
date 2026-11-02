@@ -10,7 +10,7 @@
 //!   yₜ = Cₜᵀ hₜ + D xₜ            (output)
 //! ```
 //!
-//! Each layer keeps two pieces of state:
+//! Each block keeps two pieces of state:
 //!
 //! 1. **Convolution cache** — the last `conv_kernel` inputs to the depthwise
 //!    Conv1d. With it, each decoding step applies the causal filter without

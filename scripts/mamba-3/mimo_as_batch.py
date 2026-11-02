@@ -19,8 +19,8 @@ plain scalar ``alpha``, cumulative rotation absorbed into ``B``/``C`` — so eve
 quantity here is real.
 
     alpha[t] = exp(dt[t] * A[t])                        decay, A[t] < 0
-    beta[t]  = (1 - lam[t]) * dt[t] * alpha[t]          left-endpoint weight
-    gamma[t] = lam[t] * dt[t]                           right-endpoint weight
+    beta[t]  = (1 - lam[t]) * dt[t] * alpha[t]          the coefficient of the tap sample
+    gamma[t] = lam[t] * dt[t]                           the mass of the current sample
     v[t, m]  = mimo_x[m] * x[t]                         the M tied values
     B[t, m]                                             the M free keys
     W[t]     = sum_m outer(v[t, m], B[t, m])            the rank-M write

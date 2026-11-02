@@ -105,7 +105,7 @@
 //! relative position (as in a rotary position embedding) only in the
 //! degenerate case of an input-independent, constant per-micro-step angle
 //! (`θⱼ − θᵢ = (j−i)·θ`). The data dependence is the point: it gives the
-//! layer rotational state dynamics, and
+//! block rotational state dynamics, and
 //! thus state-tracking (parity, mod-k), which a real SSM with non-negative
 //! eigenvalues provably cannot express. See [`crate::mamba3::rotation`]. Its
 //! `Quaternion4D` applies the same argument to a non-abelian rotation group.
