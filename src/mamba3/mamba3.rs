@@ -756,8 +756,8 @@ impl Mamba3 {
         }
     }
 
-    /// Everything the rotation needs, in one place: the algebra, the rotated
-    /// width, and the per-micro-step bound. Every site that computes a
+    /// Everything the rotation needs, in one place: the algebra,
+    /// `rotation_dim`, and the per-micro-step bound. Every site that computes a
     /// per-micro-step rotation ([`forward`](Self::forward),
     /// [`step`](Self::step)) uses this.
     pub fn rotation_spec(&self) -> crate::mamba3::rotation::RotationSpec {
@@ -1431,7 +1431,7 @@ impl Mamba3Config {
                 "{:?} requires state_rank to be a multiple of 4",
                 self.rotation
             );
-            // The rotated width is a whole number of quaternion blocks, so a
+            // `rotation_dim` covers a whole number of quaternion blocks, so a
             // partial rotation must cover a multiple of 4. Without this check,
             // the block would silently round `num_quat_blocks` up to its floor
             // of 1 and rotate *everything* when asked for half.

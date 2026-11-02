@@ -1,6 +1,6 @@
 # 07: One name for the rotated width: rotation_dim
 
-Status: ready-for-agent
+Status: resolved
 
 Blocked by: None (can start immediately)
 
@@ -27,12 +27,20 @@ that the rotation turns. Today the crate has two names for this value:
 
 ## Acceptance criteria
 
-- [ ] `rg -i 'rotation.width'` over `src`, `examples` (without `tmp/`),
+- [x] `rg -i 'rotation.width'` over `src`, `examples` (without `tmp/`),
       `benches`, `info` and the markdown files finds nothing.
-- [ ] `cargo check`, `cargo test --lib -- --test-threads=1`,
+- [x] `cargo check`, `cargo test --lib -- --test-threads=1`,
       `cargo test --examples -j 1 -- --test-threads=1` pass (flex).
-- [ ] `cargo doc --all --no-deps` has no warnings.
+- [x] `cargo doc --all --no-deps` has no warnings.
 
 ## Comments
 
 - The Standards review of ticket 02 found this ("one word, one meaning").
+- The search of the first criterion does not include `.scratch/`, because
+  this ticket and ticket 02 name the old identifier.
+- No test matched the panic text, and no config holds the old name.
+- The same change replaces the prose "rotated width" with `rotation_dim`: the
+  comment in `rotate_bc_forward`, the rustdoc of `Mamba3::rotation_spec` and
+  the comment in the validation of `Mamba3Config` (`src/mamba3/mamba3.rs`).
+  The criterion search does not find this prose, and the rename rule of
+  CLAUDE.md includes it.

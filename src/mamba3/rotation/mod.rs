@@ -817,48 +817,48 @@ pub fn quat_cumprod(q_bshj4: Tensor<5>, init: Option<Tensor<4>>) -> (Tensor<5>, 
 // Partial block rotation (rotation_fraction support)
 // ---------------------------------------------------------------------------
 
-/// Apply a per-block quaternion rotation to the first `rotation_width` entries
+/// Apply a per-block quaternion rotation to the first `rotation_dim` entries
 /// of the `state_rank` axis (a multiple of 4). The rest is unchanged. The
 /// quaternion analogue of [`apply_rope_partial`].
 ///
-/// `q` has one quaternion per rotated block (`rotation_width / 4` of them).
+/// `q` has one quaternion per rotated block (`rotation_dim / 4` of them).
 /// `DB` must equal `D + 1`.
 pub fn rotate_blocks_partial<const D: usize, const DB: usize>(
     v: Tensor<D>,
     q: Tensor<DB>,
-    rotation_width: usize,
+    rotation_dim: usize,
 ) -> Tensor<D> {
     let r = v.dims()[D - 1];
     debug_assert!(
-        rotation_width > 0,
+        rotation_dim > 0,
         "a quaternion kind always turns at least one block; a real transition is RotationKind::Real1D"
     );
-    if rotation_width == r {
+    if rotation_dim == r {
         rotate_state_rank_blocks::<D, DB>(v, q)
     } else {
-        let head = v.clone().narrow(D - 1, 0, rotation_width);
-        let tail = v.narrow(D - 1, rotation_width, r - rotation_width);
+        let head = v.clone().narrow(D - 1, 0, rotation_dim);
+        let tail = v.narrow(D - 1, rotation_dim, r - rotation_dim);
         let head_rot = rotate_state_rank_blocks::<D, DB>(head, q);
         Tensor::cat(vec![head_rot, tail], D - 1)
     }
 }
 
 /// Two-sided counterpart of [`rotate_blocks_partial`]: rotates the first
-/// `rotation_width` entries of the `state_rank` axis by `v ↦ ql ⊗ v ⊗ qr`. The
+/// `rotation_dim` entries of the `state_rank` axis by `v ↦ ql ⊗ v ⊗ qr`. The
 /// rest is unchanged.
 pub fn rotate_blocks_two_sided_partial<const D: usize, const DB: usize>(
     v: Tensor<D>,
     ql: Tensor<DB>,
     qr: Tensor<DB>,
-    rotation_width: usize,
+    rotation_dim: usize,
 ) -> Tensor<D> {
     let r = v.dims()[D - 1];
-    debug_assert!(rotation_width > 0, "see rotate_blocks_partial");
-    if rotation_width == r {
+    debug_assert!(rotation_dim > 0, "see rotate_blocks_partial");
+    if rotation_dim == r {
         rotate_state_rank_blocks_two_sided::<D, DB>(v, ql, qr)
     } else {
-        let head = v.clone().narrow(D - 1, 0, rotation_width);
-        let tail = v.narrow(D - 1, rotation_width, r - rotation_width);
+        let head = v.clone().narrow(D - 1, 0, rotation_dim);
+        let tail = v.narrow(D - 1, rotation_dim, r - rotation_dim);
         let head_rot = rotate_state_rank_blocks_two_sided::<D, DB>(head, ql, qr);
         Tensor::cat(vec![head_rot, tail], D - 1)
     }
@@ -1074,10 +1074,9 @@ pub fn rotate_bc_forward(
             // once over the whole stack.
             let (prev_q_bhk4, blocks) = prev.quat_stack(kind);
             let stack = prev_q_bhk4.dims()[2];
-            // The rotated width is a whole number of quaternion blocks, and
+            // `rotation_dim` covers a whole number of quaternion blocks, and
             // the cache was sized for exactly that many.
-            assert_eq!(rotation_dim, blocks * 4, "cache/block rotation width mismatch");
-            let rotation_width = rotation_dim;
+            assert_eq!(rotation_dim, blocks * 4, "cache/block rotation_dim mismatch");
             // Generators [b,s,h,stack,3]: the raw channels, bounded to an
             // angle of at most `range·π` (see `generator_increment`) and scaled
             // per head by Δ. The bound is necessary: an unbounded `g = rot·Δ`
@@ -1148,9 +1147,9 @@ pub fn rotate_bc_forward(
                         (over_mimo_read(left.clone()), over_mimo_read(right.clone()));
                     let (ql, qr) = (over_mimo(left), over_mimo(right));
                     (
-                        rotate_blocks_two_sided_partial::<5, 6>(b_bsmhr, ql, qr, rotation_width),
+                        rotate_blocks_two_sided_partial::<5, 6>(b_bsmhr, ql, qr, rotation_dim),
                         rotate_blocks_two_sided_partial::<5, 6>(
-                            c_btmhr, ql_read, qr_read, rotation_width,
+                            c_btmhr, ql_read, qr_read, rotation_dim,
                         ),
                     )
                 }
@@ -1159,8 +1158,8 @@ pub fn rotate_bc_forward(
                     let conj_btmhj4 = over_mimo_read(conj_bshk4.clone());
                     let conj_bsmhj4 = over_mimo(conj_bshk4);
                     (
-                        rotate_blocks_partial::<5, 6>(b_bsmhr, conj_bsmhj4, rotation_width),
-                        rotate_blocks_partial::<5, 6>(c_btmhr, conj_btmhj4, rotation_width),
+                        rotate_blocks_partial::<5, 6>(b_bsmhr, conj_bsmhj4, rotation_dim),
+                        rotate_blocks_partial::<5, 6>(c_btmhr, conj_btmhj4, rotation_dim),
                     )
                 }
             };
