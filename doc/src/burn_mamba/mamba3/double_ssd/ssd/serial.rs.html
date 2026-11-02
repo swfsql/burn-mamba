@@ -318,7 +318,7 @@
 <a href=#318 id=318 data-nosnippet>318</a>            </span>.exp()
 <a href=#319 id=319 data-nosnippet>319</a>            .expand([batch, nheads, per_head_dim, state_rank]); <span class="comment">// decay_bhpr
 <a href=#320 id=320 data-nosnippet>320</a>
-<a href=#321 id=321 data-nosnippet>321</a>        // SSM recurrence: h[n] = decay * h[n-1] + s[n]
+<a href=#321 id=321 data-nosnippet>321</a>        // Recurrence of the plant: h[n] = decay * h[n-1] + s[n]
 <a href=#322 id=322 data-nosnippet>322</a>        </span>running_state_bhpr = decay_bhpr * running_state_bhpr + intra_state_bhpr;
 <a href=#323 id=323 data-nosnippet>323</a>        chunk_input_state_vec_bhpr.push(running_state_bhpr.clone());
 <a href=#324 id=324 data-nosnippet>324</a>    }

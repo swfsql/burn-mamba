@@ -13,7 +13,7 @@
     pub ngroups: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
     pub untied: <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="enum" href="enum.Mamba2Untied.html" title="enum burn_mamba::mamba2::mamba2::Mamba2Untied">Mamba2Untied</a>&gt;,
 </details>}</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>The Mamba-2 SSM block.</p>
-<p>The full SSD layer of §5 of the paper, in two execution modes:</p>
+<p>The full block of §5 of the paper, in two execution modes:</p>
 <ul>
 <li><a href="struct.Mamba2.html#method.forward" title="method burn_mamba::mamba2::mamba2::Mamba2::forward"><code>Self::forward</code></a> — chunkwise SSD for training / prefill (it uses tensor
 cores, and its cost is linear in sequence length)</li>

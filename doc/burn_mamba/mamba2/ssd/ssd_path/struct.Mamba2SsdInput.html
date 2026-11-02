@@ -61,7 +61,7 @@ in §4 of the paper. The caller already padded the sequence into
 <code>nchunks = sequence/chunk_len</code> chunks of length <code>chunk_len</code>.</p>
 <h6 id="the-four-steps"><a class="doc-anchor" href="#the-four-steps">§</a>The four steps</h6><h6 id="step-1--intra-chunk-outputs-y_diag"><a class="doc-anchor" href="#step-1--intra-chunk-outputs-y_diag">§</a>Step 1 — Intra-chunk outputs (Y_diag)</h6>
 <p>In each chunk, compute the output as if the initial state were
-zero. This is the <em>quadratic attention form</em> of the SSD layer, on a
+zero. This is the <em>quadratic attention form</em> of the plant, on a
 window of <code>chunk_len</code> tokens (§4.1):</p>
 <div class="example-wrap"><pre class="language-text"><code>  Y_diag[n] = (L[n] ∘ C[n] B[n]ᵀ) · X[n]</code></pre></div>
 <p>where <code>L[n]</code> is the chunk_len×chunk_len 1-semiseparable mask of chunk n.

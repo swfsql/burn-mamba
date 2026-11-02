@@ -32,7 +32,7 @@
 <a href=#32 id=32 data-nosnippet>32</a>//!   Cₜᵀ (Rₜ⋯Rᵢ₊₁) Bᵢ  =  (Pₜᵀ Cₜ)ᵀ (Pᵢᵀ Bᵢ)  =  C̄ₜᵀ B̄ᵢ ,
 <a href=#33 id=33 data-nosnippet>33</a>//! ```
 <a href=#34 id=34 data-nosnippet>34</a>//!
-<a href=#35 id=35 data-nosnippet>35</a>//! so the scalar-decay SSD core (`L ⊙ C̄B̄ᵀ`) is **unchanged**. Only the
+<a href=#35 id=35 data-nosnippet>35</a>//! so the scalar-decay SSD scan (`L ⊙ C̄B̄ᵀ`) is **unchanged**. Only the
 <a href=#36 id=36 data-nosnippet>36</a>//! projections `B̄ᵢ = Pᵢᵀ Bᵢ`, `C̄ₜ = Pₜᵀ Cₜ` turn. What is lost is the
 <a href=#37 id=37 data-nosnippet>37</a>//! closed-form sum of angles. The cumulative rotation comes from an
 <a href=#38 id=38 data-nosnippet>38</a>//! **associative scan over the per-micro-step quaternions** ([`quat_cumprod`]). A
@@ -83,7 +83,7 @@
 <a href=#83 id=83 data-nosnippet>83</a>//! axis, not a second, reversed scan. The cost over
 <a href=#84 id=84 data-nosnippet>84</a>//! [`Quaternion4D`](RotationKind::Quaternion4D) is twice the generator
 <a href=#85 id=85 data-nosnippet>85</a>//! channels, twice the block axis of the scan, and one extra [`quat_mul`] per
-<a href=#86 id=86 data-nosnippet>86</a>//! `B`/`C` application. The SSD core is still unchanged.
+<a href=#86 id=86 data-nosnippet>86</a>//! `B`/`C` application. The SSD scan is still unchanged.
 <a href=#87 id=87 data-nosnippet>87</a>//!
 <a href=#88 id=88 data-nosnippet>88</a>//! Why do this, when the left and right factors *commute* with each other and
 <a href=#89 id=89 data-nosnippet>89</a>//! so add no "more non-abelianness"? Left multiplication is **isoclinic**:
@@ -108,7 +108,7 @@
 <a href=#108 id=108 data-nosnippet>108</a>//! `k = 1`, the trivial group: no rotation, a purely real transition. It is the
 <a href=#109 id=109 data-nosnippet>109</a>//! ablation that the ladder is measured against. It is *structural*, not a
 <a href=#110 id=110 data-nosnippet>110</a>//! zeroed knob: the in-projection has no rotation channels, the cache holds no
-<a href=#111 id=111 data-nosnippet>111</a>//! accumulator ([`RotationState::Real`]), and `B`/`C` reach the SSD core
+<a href=#111 id=111 data-nosnippet>111</a>//! accumulator ([`RotationState::Real`]), and `B`/`C` reach the SSD scan
 <a href=#112 id=112 data-nosnippet>112</a>//! unchanged. So to switch the rotation off, select the *kind*.
 <a href=#113 id=113 data-nosnippet>113</a>//! `rotation_fraction` only narrows a rotation that exists. `Real1D` is also
 <a href=#114 id=114 data-nosnippet>114</a>//! the one kind that makes no pairs, so it is the only one that accepts an

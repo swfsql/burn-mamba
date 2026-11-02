@@ -346,7 +346,7 @@
 <a href=#346 id=346 data-nosnippet>346</a>            //   - 3.6: expand: (exp_da_chunk_end_bh11) -&gt; (decay_bhpr)
 <a href=#347 id=347 data-nosnippet>347</a>            </span>.expand([batch, nheads, per_head_dim, state_rank]);
 <a href=#348 id=348 data-nosnippet>348</a>
-<a href=#349 id=349 data-nosnippet>349</a>        <span class="comment">// SSM recurrence: running_state = decay * running_state + intra_state
+<a href=#349 id=349 data-nosnippet>349</a>        <span class="comment">// Recurrence of the plant: running_state = decay * running_state + intra_state
 <a href=#350 id=350 data-nosnippet>350</a>        </span>running_state_bhpr =
 <a href=#351 id=351 data-nosnippet>351</a>        <span class="comment">//   - 3.7: mul: (decay_bhpr, running_state_bhpr) -&gt; (running_state_bhpr)
 <a href=#352 id=352 data-nosnippet>352</a>            </span>(decay_bhpr * running_state_bhpr) <span class="comment">// running_state_bhpr

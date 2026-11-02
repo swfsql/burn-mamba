@@ -83,7 +83,7 @@ reflections.</li>
 in-projection widens exactly the per-micro-step channel groups,</p>
 <div class="example-wrap"><pre class="language-text"><code>  [ z | x·u | B·u | C | Δ·u | A·u | λ·u | μ·u | rotation·u | r·u | a·u | b·u ]</code></pre></div>
 <p>and <a href="fn.unfold_micro_bs.html" title="fn burn_mamba::mamba3::product::unfold_micro_bs"><code>unfold_micro_bs</code></a> reads each <code>u</code>-wide channel group as <code>u</code>
-consecutive write positions. So the SSD core, the trapezoid, the rotation scan, the
+consecutive write positions. So the SSD scan, the trapezoid, the rotation scan, the
 chunking and the caches all run unchanged on a sequence of length
 <code>sequence · u</code>. Two placements make that exactly the recurrence above:</p>
 <ul>

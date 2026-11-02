@@ -1,12 +1,12 @@
 <!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba2/mamba2.rs`."><title>mamba2.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-5c590327.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.101.0-nightly (3e92e1a2d 2026-11-01)" data-channel="nightly" data-search-js="search-835b9732.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-9b351432.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-b2682d9c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-101b5a15.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba2/</div>mamba2.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! # Mamba-2 SSM Block — Structured State Space Duality (SSD)
 <a href=#2 id=2 data-nosnippet>2</a>//!
-<a href=#3 id=3 data-nosnippet>3</a>//! This module implements the **Mamba-2 block** (the SSD layer) from the paper
+<a href=#3 id=3 data-nosnippet>3</a>//! This module implements the **Mamba-2 block** from the paper
 <a href=#4 id=4 data-nosnippet>4</a>//! *"Transformers are SSMs: Generalized Models and Efficient Algorithms
 <a href=#5 id=5 data-nosnippet>5</a>//! through Structured State Space Duality"* (Dao &amp; Gu, 2024).
 <a href=#6 id=6 data-nosnippet>6</a>//!
 <a href=#7 id=7 data-nosnippet>7</a>//! ## The SSD Model
 <a href=#8 id=8 data-nosnippet>8</a>//!
-<a href=#9 id=9 data-nosnippet>9</a>//! The SSD layer is a multi-head selective SSM. Each head sends a sequence of
+<a href=#9 id=9 data-nosnippet>9</a>//! The plant has multiple heads. Each head sends a sequence of
 <a href=#10 id=10 data-nosnippet>10</a>//! `per_head_dim`-dimensional inputs `X ∈ ℝ^{sequence×per_head_dim}` through
 <a href=#11 id=11 data-nosnippet>11</a>//! the recurrence (Eq. 1–2 of the paper):
 <a href=#12 id=12 data-nosnippet>12</a>//!
@@ -41,7 +41,7 @@
 <a href=#41 id=41 data-nosnippet>41</a>//!   Lᵢⱼ = 0                     (i &lt; j)
 <a href=#42 id=42 data-nosnippet>42</a>//! ```
 <a href=#43 id=43 data-nosnippet>43</a>//!
-<a href=#44 id=44 data-nosnippet>44</a>//! So the layer is causal linear attention `Y = (L ∘ QKᵀ) V` with the
+<a href=#44 id=44 data-nosnippet>44</a>//! So the plant is causal linear attention `Y = (L ∘ QKᵀ) V` with the
 <a href=#45 id=45 data-nosnippet>45</a>//! renaming `(C, B, X) ↦ (Q, K, V)`.
 <a href=#46 id=46 data-nosnippet>46</a>//!
 <a href=#47 id=47 data-nosnippet>47</a>//! ## The Chunkwise SSD Algorithm
@@ -52,7 +52,7 @@
 <a href=#52 id=52 data-nosnippet>52</a>//!
 <a href=#53 id=53 data-nosnippet>53</a>//! [`Mamba-1`](crate::mamba1) is the predecessor: a sequential selective scan
 <a href=#54 id=54 data-nosnippet>54</a>//! with a diagonal (not scalar) state transition. [`Mamba-3`](crate::mamba3)
-<a href=#55 id=55 data-nosnippet>55</a>//! extends this SSD layer with trapezoidal discretisation, a complex-valued
+<a href=#55 id=55 data-nosnippet>55</a>//! extends this block with trapezoidal discretisation, a complex-valued
 <a href=#56 id=56 data-nosnippet>56</a>//! state transition (a data-dependent rotation of B/C), MIMO rank expansion and
 <a href=#57 id=57 data-nosnippet>57</a>//! MambaProduct.
 <a href=#58 id=58 data-nosnippet>58</a>//!
@@ -100,7 +100,7 @@
 <a href=#100 id=100 data-nosnippet>100</a>
 <a href=#101 id=101 data-nosnippet>101</a></span><span class="doccomment">/// The Mamba-2 SSM block.
 <a href=#102 id=102 data-nosnippet>102</a>///
-<a href=#103 id=103 data-nosnippet>103</a>/// The full SSD layer of §5 of the paper, in two execution modes:
+<a href=#103 id=103 data-nosnippet>103</a>/// The full block of §5 of the paper, in two execution modes:
 <a href=#104 id=104 data-nosnippet>104</a>///
 <a href=#105 id=105 data-nosnippet>105</a>/// - [`Self::forward`] — chunkwise SSD for training / prefill (it uses tensor
 <a href=#106 id=106 data-nosnippet>106</a>///   cores, and its cost is linear in sequence length)

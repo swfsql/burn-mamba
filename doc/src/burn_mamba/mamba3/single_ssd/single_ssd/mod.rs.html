@@ -50,7 +50,7 @@
 <a href=#50 id=50 data-nosnippet>50</a>    ///
 <a href=#51 id=51 data-nosnippet>51</a>    /// "Equivalent" covers **everything that a caller can observe**: the
 <a href=#52 id=52 data-nosnippet>52</a>    /// returned output and every field of the returned cache. It does not cover
-<a href=#53 id=53 data-nosnippet>53</a>    /// the intermediate `y` of the SSD core at each *write* position. Under a
+<a href=#53 id=53 data-nosnippet>53</a>    /// the intermediate `y` of the SSD scan at each *write* position. Under a
 <a href=#54 id=54 data-nosnippet>54</a>    /// lag-`u` pattern such as [`TapPattern::Vertical`], the correction band
 <a href=#55 id=55 data-nosnippet>55</a>    /// applies only at the last micro-step of each token (the readout). So the
 <a href=#56 id=56 data-nosnippet>56</a>    /// `u−1` per-token partial sums that this pathway discards do not match the
@@ -326,7 +326,7 @@
 <a href=#326 id=326 data-nosnippet>326</a>
 <a href=#327 id=327 data-nosnippet>327</a>        <span class="comment">// ── Step 5: Data-dependent transition rotation of B and C ─────────────
 <a href=#328 id=328 data-nosnippet>328</a>        // Shared with the double-ssd pathway through [`rotate_bc_forward`]. The
-<a href=#329 id=329 data-nosnippet>329</a>        // single-pass SSD core below does not depend on the rotation: it only
+<a href=#329 id=329 data-nosnippet>329</a>        // single-pass SSD scan below does not depend on the rotation: it only
 <a href=#330 id=330 data-nosnippet>330</a>        // uses the rotated B̄/C̄. The factoring of the RoPE trick,
 <a href=#331 id=331 data-nosnippet>331</a>        // `C̄ₜᵀB̄ᵢ = Cₜᵀ·Rel(t,i)·Bᵢ`, holds for every kind. `C` turns at token
 <a href=#332 id=332 data-nosnippet>332</a>        // resolution: it needs the cumulative rotation of the micro-step where
