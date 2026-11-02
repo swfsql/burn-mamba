@@ -1,6 +1,6 @@
 # 01: Notation and doc rules
 
-Status: ready-for-agent
+Status: resolved
 
 Blocked by: None (can start immediately)
 
@@ -46,8 +46,23 @@ spelling in each source goes to the Letters section of `docs/source-terms.md`
 
 ## Acceptance criteria
 
-- [ ] `CLAUDE.md` and `src/mamba3/mamba3.rs` show the new cells and the note.
-- [ ] `src/mamba2/mamba2.rs:80` still shows `Q`.
-- [ ] `CLAUDE.md` has the `_Avoid_` rule and the rule for letters in formulas.
-- [ ] `rg -n 'cached .h.' src/mamba3/mamba3.rs` finds no hit.
-- [ ] `cargo check` and `cargo doc --all --no-deps` give no warnings.
+- [x] `CLAUDE.md` and `src/mamba3/mamba3.rs` show the new cells and the note.
+- [x] `src/mamba2/mamba2.rs:80` still shows `Q`.
+- [x] `CLAUDE.md` has the `_Avoid_` rule and the rule for letters in formulas.
+- [x] `rg -n 'cached .h.' src/mamba3/mamba3.rs` finds no hit.
+- [x] `cargo check` and `cargo doc --all --no-deps` give no warnings.
+
+## Comments
+
+- The two field docs of `mimo_rank` in `src/mamba3/mamba3.rs` also said
+  "Paper: `M`". They are the same error as the table cell, so they now say
+  `R`.
+- The cached-state line keeps "SSD core" on one line, so the search of ticket
+  02 finds it.
+- The symbols `R` and `C` come from the citations of `research.md`. This ticket
+  did not read the TeX again.
+- Open question from the review: the rule for letters in formulas has the
+  wording of this ticket. Some formulas use a shape letter as an index, for
+  example `B̄ₜ[m]` and `Rₜ,ᵤ` in `src/mamba3/mamba3.rs`.
+- The paper `C` of the chunk length is also the readout matrix `C`. Ticket 03
+  records this clash (research 5.3).

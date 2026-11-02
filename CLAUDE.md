@@ -54,6 +54,8 @@ cargo run --example reset-majority -- --training --inference
 - **Always load the `asd-ste100` skill** before you write code comments,
   rustdoc or markdown. Write all of them in its style.
 - Use the terms of the two glossaries (see [Where to look](#where-to-look)).
+- `_Avoid_` applies to our own words. A doc can use a source word in quotes or
+  backticks when it cites that source (ADR-0008).
 - Keep the docs small. They describe the code as it is now. A doc is never a
   changelog: it has no "used to be / now", no "verified by", no dates and no
   PR history. When you find changelog prose, delete it.
@@ -150,7 +152,9 @@ it. Such a name needs no extra comment. A comment can write a shape as `_bhl`
 or as `[...]`. Paper style (upper-case `A,B,C,H,Y,L,…`) can be in comments,
 never in code identifiers. A lower-case letter is a base dimension (below). An
 upper-case letter is a relation of base dimensions (offset, multiple, concat):
-`X` can be `x±1` or `x*2`, and `XY` can be `x+y` or `x*y`.
+`X` can be `x±1` or `x*2`, and `XY` can be `x+y` or `x*y`. A letter in a
+formula is a paper symbol, not a shape letter. So `hₜ` is the state, and the
+suffix `_bhl` still has `h` = `nheads`.
 
 | Letter | Dimension | Paper | Python | Typical |
 |--------|-----------|-------|--------|---------|
@@ -163,13 +167,16 @@ upper-case letter is a relation of base dimensions (offset, multiple, concat):
 | `h` | `nheads` | `H` | `nheads` | `d_inner`/`per_head_dim` |
 | `p` | `per_head_dim` | `P` | `headdim` | 64, 128 |
 | `r` | `state_rank` | `N` | `d_state` | 64, 128, 256 |
-| `m` | `mimo_rank` (Mamba-3) | `M` | `mimo_rank` | 1–8 |
+| `m` | `mimo_rank` (Mamba-3) | `R` | `mimo_rank` | 1–8 |
 | `n` | `nchunks` = `s`/`chunk_len` | — | `nchunks` | varies |
 | `g` | `ngroups` | `G` | `ngroups` | 1 … `nheads` |
-| `l` | `chunk_len` | `Q` | `chunk_size` | 64 … 256 |
+| `l` | `chunk_len` | `Q` (Mamba-2), `C` (Mamba-3) | `chunk_size` | 64 … 256 |
 | `a` | `num_rotation_angles` = `rotation_dim`/2 | — | `num_rope_angles` | varies |
 | `v` | `conv_dim` = `d_inner`+2·`ngroups`·`state_rank` (Mamba-2) | — | `conv_dim` | — |
 | `k` | `conv_kernel` (Mamba-1/2) | — | `d_conv` | 4 |
+
+The `R` of the Mamba-3 paper is the `M` of our comments: both are `mimo_rank`.
+A shape letter `R` is a relation of `r`, the state rank.
 
 ## File Map
 

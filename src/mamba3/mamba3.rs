@@ -77,8 +77,8 @@
 //! So the *cumulative* rotation telescopes out of the recurrence, and B/C can
 //! absorb it: the **"RoPE trick"** (paper Prop. *Complex SSM, Data-Dependent
 //! RoPE Equivalence*). This module implements that form. The rotation never
-//! touches the state (the cached `h` is in the rotated frame), and the SSD core
-//! stays the plain scalar-decay kernel.
+//! touches the state (the cached state is in the rotated frame), and the
+//! SSD core stays the plain scalar-decay kernel.
 //!
 //! ```text
 //!   θₜ = θₜ₋₁ + Δₜ · ϱ · π · tanh(ϑₜ)    — cumulative angles (per-pair)
@@ -195,15 +195,18 @@
 //! | `h`    | `nheads` | `H` | `nheads` | `d_inner` / `per_head_dim` |
 //! | `p`    | `per_head_dim` | `P` | `headdim` | 64, 128 |
 //! | `r`    | `state_rank` | `N` | `d_state` | 64, 256 |
-//! | `m`    | `mimo_rank` | `M` | `mimo_rank` | 1, .., 8 |
+//! | `m`    | `mimo_rank` | `R` | `mimo_rank` | 1, .., 8 |
 //! | `n`    | `nchunks` = `sequence`/`chunk_len` | — | `nchunks` | varies |
 //! | `g`    | `ngroups` | `G` | `num_bc_heads` | 1, .., `nheads` |
-//! | `l`    | `chunk_len` | `Q` | `chunk_size` | 64, .., 256 |
+//! | `l`    | `chunk_len` | `C` | `chunk_size` | 64, .., 256 |
 //! | `a`    | `num_rotation_angles` = `state_rank` / 2 (or `rotation_dim` / 2) | — | `num_rope_angles` | varies |
 //!
 //! An uppercase letter is a relation (offset, multiple, concat, stack) of
 //! lowercase letters. For example, `X` can be `x+1`, `x-1` or `x*2`, and `XY`
 //! can be `x+y` or `x*y`.
+//!
+//! The `R` of the paper is the `M` of these comments: both are `mimo_rank`. A
+//! shape letter `R` is a relation of `r`, the state rank.
 
 use crate::mamba3::positive::{Gain, Tropical};
 use crate::mamba3::prelude::*;
@@ -382,7 +385,7 @@ pub struct Mamba3 {
 
     /// MIMO rank. 1 = SISO (standard Mamba-3).
     ///
-    /// Paper: `M`. Python: `mimo_rank`.
+    /// Paper: `R`. Python: `mimo_rank`.
     pub mimo_rank: usize,
 
     /// Micro-steps per token: the `u` of MambaProduct, the dial that
@@ -924,7 +927,7 @@ pub struct Mamba3Config {
     /// give element-wise up/down projections in head-space across ranks. At
     /// init, a MIMO block is its SISO block (`info/mamba-3/mimo-as-batch.md`).
     ///
-    /// Paper: `M`. Python: `mimo_rank`.
+    /// Paper: `R`. Python: `mimo_rank`.
     #[config(default = 1)]
     pub mimo_rank: usize,
 
