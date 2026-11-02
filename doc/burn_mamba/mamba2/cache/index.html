@@ -5,7 +5,7 @@ chunked SSD algorithm. In <em>decoding</em>, <a href="../mamba2/struct.Mamba2.ht
 per call with the pure recurrent form:</p>
 <div class="example-wrap"><pre class="language-text"><code>  hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜ        (state update)
   yₜ = Cₜᵀ hₜ + D xₜ            (output)</code></pre></div>
-<p>Each layer keeps two pieces of state:</p>
+<p>Each block keeps two pieces of state:</p>
 <ol>
 <li>
 <p><strong>Convolution cache</strong> — the last <code>conv_kernel</code> inputs to the depthwise

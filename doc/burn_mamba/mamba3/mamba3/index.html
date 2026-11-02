@@ -72,7 +72,7 @@ how far the transition itself rotated, driven by the inputs. It is a
 relative position (as in a rotary position embedding) only in the
 degenerate case of an input-independent, constant per-micro-step angle
 (<code>θⱼ − θᵢ = (j−i)·θ</code>). The data dependence is the point: it gives the
-layer rotational state dynamics, and
+block rotational state dynamics, and
 thus state-tracking (parity, mod-k), which a real SSM with non-negative
 eigenvalues provably cannot express. See <a href="../rotation/index.html" title="mod burn_mamba::mamba3::rotation"><code>crate::mamba3::rotation</code></a>. Its
 <code>Quaternion4D</code> applies the same argument to a non-abelian rotation group.</p>
