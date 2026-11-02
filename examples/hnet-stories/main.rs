@@ -99,14 +99,14 @@ pub fn launch(app_args: &AppArgs) {
         // longest story: ~1200 characters for 8 draws (see `tiny-stories`).
         const CHARS_PER_LONGEST_STORY: usize = 1200;
         let batches_per_epoch = config.train_stories / config.training.batch_size;
-        let iterations_per_epoch =
+        let training_steps_per_epoch =
             batches_per_epoch * CHARS_PER_LONGEST_STORY.div_ceil(config.seq_len);
         // The base rate. The stages multiply it (see `model::lr_multipliers`).
         config.training.lr = Lr::CosineAnnealing(
-            CosineAnnealingLr::new(config.training.num_epochs * iterations_per_epoch)
+            CosineAnnealingLr::new(config.training.num_epochs * training_steps_per_epoch)
                 .with_max_lr(4e-3)
                 .with_min_lr(4e-4)
-                .with_warmup_training_steps(iterations_per_epoch / 20), // 5% of an epoch
+                .with_warmup_training_steps(training_steps_per_epoch / 20), // 5% of an epoch
         );
     }
     app_args.override_training_config(&mut config.training, dtype);

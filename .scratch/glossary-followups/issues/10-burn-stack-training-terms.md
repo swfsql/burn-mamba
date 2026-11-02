@@ -101,8 +101,6 @@ The verb "step" for an optimizer update:
   `src/packing/tests.rs:427`,
   `src/mamba3/single_ssd/ssd/ssd_path/tests.rs:347`,
   `info/kalman/gate-as-positive-system.md:36,119`.
-- The locals `schedule` of `src/unified/tests/untied.rs`. They hold the type
-  `Schedule` of burn-stack.
 - The past runs in `examples/*/tmp/`.
 
 The verb "step" stays where it means the recurrent call. Examples are
@@ -159,18 +157,28 @@ ticket 09 fixed that site.
   - "LR schedule", in the `p ≡ 1` line of `README.md`. `spinor/tmp/` has no
     `Rotor4D` run, and the sentence does not say that nothing else changes.
   - "LR schedule", in the two "LR schedule of the ladder" lines (`README.md`,
-    `spinor-product/tests.rs`). The learning rate is the limit of these lines.
-    `l2-s0` (`max_lr` 0.03) gets 43.6 / 29.4 / 35.3%, and `l2-lr1e-2-s0`
-    (`max_lr` 0.01) gets 100 / 99.99 / 100% at the training length.
-- The review found these items, and this ticket does not change them:
-  - The locals `schedule` of `src/unified/tests/untied.rs` hold a layer
-    schedule. [These stay](#these-stay) keeps them, although `CLAUDE.md` asks
-    that an identifier follows a change of its term.
+    `spinor-product/tests.rs`). These lines limit the claim to that learning
+    rate. `l2-s0` and `l2-s1` (`max_lr` 0.03) stay below the counts row. At
+    `max_lr` 0.01, `l2-lr1e-2-s0` gets 100 / 99.99 / 100% at the training
+    length, and seeds 1 to 3 stay below the counts row.
+- The review found these items, and the user approved these changes:
+  - The locals `schedule` of `src/unified/tests/untied.rs` are `layer_schedule`.
+    They hold a layer schedule, and `CLAUDE.md` asks that an identifier follows
+    a change of its term. [These stay](#these-stay) kept them before the review.
   - The local `iterations_per_epoch` of `mnist-class`, `mnist-ae`,
-    `tiny-stories` and `hnet-stories` counts training steps.
+    `tiny-stories` and `hnet-stories` is `training_steps_per_epoch`, because it
+    counts training steps. The trailing comment of the two `mnist` warmups moves
+    to its own line, to keep these lines under 100 characters.
+  - `examples/reset/README.md` gives the four two-layer seeds at
+    `--max-lr 1e-2`.
+- The review found these items, and this ticket does not change them:
   - The doc of `mamba3_untied_tail_trains_one_copy_per_application` has one
     sentence of 32 words and a passive clause. This ticket sets its wording.
   - Seven examples repeat the same `CosineAnnealingLr` setup. Each one is its
     own target and reads alone.
+  - `examples/tiny-stories/README.md:140` says "training iteration" for one
+    batch. A batch there holds many windows, so this is not a training step.
+- The user keeps the scripts of `examples/*/tmp/` as they are.
+- This ticket has two commits.
 - `cargo test --lib -- --test-threads=1`: 356 tests pass.
   `cargo test --examples -j 1 -- --test-threads=1`: 56 tests pass.

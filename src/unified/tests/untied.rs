@@ -60,19 +60,19 @@ fn assert_untied_stack_equals_the_stack_of_its_application_views<C>(
     <C::Block as Block>::Options: Clone,
 {
     let device = test_device();
-    let schedule = Schedule::Cyclic;
+    let layer_schedule = Schedule::Cyclic;
     let layers = LayersBuilder::new(N_REAL, block)
-        .with_n_virtual_layers(Some((N_VIRTUAL, schedule.clone())))
+        .with_n_virtual_layers(Some((N_VIRTUAL, layer_schedule.clone())))
         .with_untied(vec![LayerUntied::Norm])
         .init(&device)
         .map(&mut Jitter);
-    let apps = schedule.applications(N_VIRTUAL, N_REAL);
+    let apps = layer_schedule.applications(N_VIRTUAL, N_REAL);
     let view_stack = Layers {
         n_real_layers: N_VIRTUAL,
         n_virtual_layers: None,
         real_layers: (0..N_VIRTUAL)
             .map(|i| {
-                let real = schedule.real_idx(i, N_VIRTUAL, N_REAL);
+                let real = layer_schedule.real_idx(i, N_VIRTUAL, N_REAL);
                 layers.real_layers[real].application(apps.index[i]).into_owned()
             })
             .collect(),

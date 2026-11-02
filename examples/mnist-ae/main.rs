@@ -73,7 +73,7 @@ pub fn launch(app_args: &AppArgs) {
     let batch_size = 16;
     let num_epochs = 3;
     let training_items = 60_000;
-    let iterations_per_epoch = training_items / batch_size;
+    let training_steps_per_epoch = training_items / batch_size;
     let mut training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
         // Muon uses the LR of its fallback (`MatchRmsAdamW` scales its update to
@@ -92,10 +92,11 @@ pub fn launch(app_args: &AppArgs) {
             .with_lr(Lr::CosineAnnealing(
                 // The cosine decay spans the whole run. A 1-epoch period would
                 // drop the LR to its floor after one epoch.
-                CosineAnnealingLr::new(num_epochs * iterations_per_epoch)
+                CosineAnnealingLr::new(num_epochs * training_steps_per_epoch)
                     .with_max_lr(max_lr)
                     .with_min_lr(min_lr)
-                    .with_warmup_training_steps(iterations_per_epoch * 5 / 100), // 5% of an epoch
+                    // 5% of an epoch
+                    .with_warmup_training_steps(training_steps_per_epoch * 5 / 100),
             ))
     });
     app_args.override_training_config(&mut training_config, dtype);

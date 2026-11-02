@@ -109,13 +109,13 @@ pub fn launch(app_args: &AppArgs) {
         // 4149).
         const CHARS_PER_LONGEST_STORY: usize = 1200;
         let batches_per_epoch = config.train_stories / config.training.batch_size;
-        let iterations_per_epoch =
+        let training_steps_per_epoch =
             batches_per_epoch * CHARS_PER_LONGEST_STORY.div_ceil(config.seq_len);
         config.training.lr = Lr::CosineAnnealing(
-            CosineAnnealingLr::new(config.training.num_epochs * iterations_per_epoch)
+            CosineAnnealingLr::new(config.training.num_epochs * training_steps_per_epoch)
                 .with_max_lr(12e-3)
                 .with_min_lr(12e-4)
-                .with_warmup_training_steps(iterations_per_epoch / 20), // 5% of an epoch
+                .with_warmup_training_steps(training_steps_per_epoch / 20), // 5% of an epoch
         );
     }
     // After the sizing, so `--epochs` rescales the LR schedule and `--max-lr`

@@ -758,7 +758,9 @@ that closes `u = 1` does not apply to it. The second layer only needs the produc
 of the pair as input (the hand-built rows above are exact at both lengths with
 it). The layer below must compute that product, as a learned feature. At the
 LR schedule of the ladder, the trained two-layer model stays below the counts
-row on every family.
+row on every family. With `--max-lr 1e-2`, one seed of four gets
+100 / 99.99 / 100% at the training length and 99.95 / 89.37 / 75.79% at 96
+tokens. The other three seeds stay below the counts row.
 
 The two `u = 1` construction rows in the first table are the twin of the
 hand-built solution. They sweep the generator scale, and report both through the

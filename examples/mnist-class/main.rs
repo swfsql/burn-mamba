@@ -67,7 +67,7 @@ pub fn launch(app_args: &AppArgs) {
     let batch_size = 16;
     let num_epochs = 4;
     let training_items = 60_000;
-    let iterations_per_epoch = training_items / batch_size;
+    let training_steps_per_epoch = training_items / batch_size;
     let mut training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
         // Muon reuses the LR of its fallback (`MatchRmsAdamW` sizes its update
@@ -84,10 +84,11 @@ pub fn launch(app_args: &AppArgs) {
             .with_batch_size(batch_size)
             .with_num_workers(2)
             .with_lr(Lr::CosineAnnealing(
-                CosineAnnealingLr::new(num_epochs * iterations_per_epoch)
+                CosineAnnealingLr::new(num_epochs * training_steps_per_epoch)
                     .with_max_lr(max_lr)
                     .with_min_lr(min_lr)
-                    .with_warmup_training_steps(iterations_per_epoch * 5 / 100), // 5% of an epoch
+                    // 5% of an epoch
+                    .with_warmup_training_steps(training_steps_per_epoch * 5 / 100),
             ))
     });
     app_args.override_training_config(&mut training_config, dtype);
