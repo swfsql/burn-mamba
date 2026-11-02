@@ -5,7 +5,7 @@
 [docs]: https://img.shields.io/badge/-docs-brightgreen
 [docsurl]: https://swfsql.github.io/burn-mamba/doc/burn_mamba/index.html
 
-> A minimal, readable reference implementation of **Mamba-1, Mamba-2, and Mamba-3**
+> An experimental implementation of **Mamba-1, Mamba-2, and Mamba-3**
 > for the [Burn](https://github.com/tracel-ai/burn) deep learning framework.
 
 `burn-mamba` ports the selective state space model (SSM) architectures of
@@ -13,10 +13,9 @@
 [Mamba-2](https://arxiv.org/abs/2405.21060), and
 [Mamba-3](https://arxiv.org/abs/2603.15569) to **standard, portable Burn tensor
 operations**. It has no custom CUDA/Triton kernels, so the same code runs on
-every Burn backend (CPU, WGPU, CUDA, Metal, LibTorch, …). The goal is clarity:
-a faithful, documented translation of the official
-[`state-spaces/mamba`](https://github.com/state-spaces/mamba) kernels that is
-easy to read, verify, and learn from.
+every Burn backend (CPU, WGPU, CUDA, Metal, LibTorch, …). The crate is a place
+for experiments: it has many extra options, and its code and API change often
+and can break.
 
 ---
 
@@ -203,7 +202,7 @@ API references:
 | Virtual-layer scheduling | yes | yes | yes |
 
 Mamba-2 and Mamba-3 are the modern baselines. Mamba-1 stays as the original,
-simplest reference.
+simplest family.
 
 ## Choosing an SSD path (Mamba-2 / Mamba-3)
 
@@ -301,10 +300,11 @@ launches per case and writes [`kernels.md`](kernels.md).
 
 ## Scope
 
-This is a **readable reference implementation**, not a performance-tuned one.
-It uses only portable Burn ops (no hand-written kernels), so it puts clarity and
-backend portability before raw throughput. Extensive forward/step parity and
-gradient-agreement tests guard its correctness.
+This crate is experimental and not tuned for performance. It uses only portable
+Burn ops (no hand-written kernels), so it puts backend portability before raw
+throughput. Forward/step parity and gradient-agreement tests check that the
+forms of each block agree. They do not check that a form matches the papers or
+the official kernels.
 
 <details>
 <summary><b>References &amp; learning resources</b></summary>

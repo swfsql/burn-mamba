@@ -1,6 +1,6 @@
 //! # burn-mamba — Mamba-1/2/3 selective state space models on Burn
 //!
-//! A minimal, readable reference implementation of the
+//! An experimental implementation of the
 //! [Mamba-1](https://arxiv.org/abs/2312.00752),
 //! [Mamba-2](https://arxiv.org/abs/2405.21060), and
 //! [Mamba-3](https://arxiv.org/abs/2603.15569) SSM architectures on top of the

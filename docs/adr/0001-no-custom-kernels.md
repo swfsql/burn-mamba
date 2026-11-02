@@ -2,8 +2,8 @@
 
 burn-mamba ports the official CUDA/Triton/Tilelang kernels to the standard
 tensor ops of Burn. So one code path runs on every Burn backend (CPU, WGPU,
-CUDA, Metal, LibTorch, …), and the code stays a readable reference. We accept
-that it is slower than the fused official kernels.
+CUDA, Metal, LibTorch, …). We accept that it is slower than the fused official
+kernels.
 
 ## Consequences
 

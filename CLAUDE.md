@@ -3,7 +3,7 @@
 ## What This Project Is
 
 burn-mamba gives the Mamba-1, Mamba-2 and Mamba-3 blocks for
-[`burn-stack`](../burn-stack), as a minimal, readable reference. It uses only
+[`burn-stack`](../burn-stack), with many experimental options. It uses only
 portable Burn tensor ops, so one code path runs on every backend (ADR-0001).
 
 ## Build & Test Commands
@@ -43,9 +43,9 @@ cargo run --example reset-majority -- --training --inference
 
 ### Code
 
-- burn-stack code is block-agnostic by default, because burn-deltanet also
-  uses it. Its docs can cite a family. A rare exception in burn-stack takes
-  the name of its mechanism. Mamba-specific code stays here (ADR-0002).
+- burn-stack code is block-agnostic by default. Its docs can cite a family. A
+  rare exception in burn-stack takes the name of its mechanism. Mamba-specific
+  code stays here (ADR-0002).
 - The crate has `#![warn(missing_docs)]`: document each new public item.
   `cargo check` and `cargo doc --all --no-deps` must have no warnings.
 
@@ -92,9 +92,12 @@ cargo run --example reset-majority -- --training --inference
 - **Memory**: ask the user before you write to the auto-memory. Show the
   change that you propose, and write it only after the user approves it.
 - **Commits**: when a skill or the user tells you to commit, commit your work
-  to the current branch. Do not push. When the user asks only for a commit
-  message, write it as text for the user to copy. A commit message has a title
-  line and a short body, and it ends with the `Co-Authored-By:` trailer.
+  to the current branch. When the user asks only for a commit message, write it
+  as text for the user to copy. A commit message has a title line and a short
+  body, and it ends with the `Co-Authored-By:` trailer.
+- **Pushes**: push the current branch to `origin` when a ticket is complete and
+  reviewed, or when the user tells you to. Ask the user before a force-push or
+  a tag.
 
 ## Where to look
 
@@ -123,7 +126,8 @@ cargo run --example reset-majority -- --training --inference
 ### Issue tracker
 
 Local markdown files under `.scratch/<feature-slug>/`. See
-`docs/agents/issue-tracker.md`.
+`docs/agents/issue-tracker.md`. It also covers a change in both repos and the
+burn-stack pin.
 
 ### Triage labels
 
@@ -134,6 +138,10 @@ The five default role strings, as the `Status:` line of an issue file. See
 
 Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See
 `docs/agents/domain.md`.
+
+### Test seams
+
+The seams to propose for `/to-spec` and `/tdd`. See `docs/agents/testing.md`.
 
 ## Notation
 

@@ -1,10 +1,10 @@
 # Mamba-specific code stays in burn-mamba
 
 burn-stack holds the containers around a block (layers, stacks, networks,
-caches, optimizer plans). It serves more than one family: burn-mamba and
-burn-deltanet use it. So burn-stack *code* is block-agnostic by default. It has
-no family name and no family-specific shape assumption. An item that only one
-family needs goes into the crate of that family.
+caches, optimizer plans). It serves more than one family: Mamba-1, Mamba-2 and
+Mamba-3. So burn-stack *code* is block-agnostic by default. It has no family
+name and no family-specific shape assumption. An item that only one family
+needs goes into the crate of that family.
 
 burn-stack *docs* can name a family as a citation: the origin of a mechanism, a
 reference implementation, or a consumer.
