@@ -6,7 +6,7 @@
   on one `+`/`-`/`R`-shaped stream. Each rung is the smallest task that its
   block is *needed* for, and that the rung below cannot solve:
   - `reset-majority`: the selective decay alone (`Real1D`).
-  - `reset-rotor`: the complex transition (`Z₃`).
+  - `reset-rotor`: the rotation (`Z₃`).
   - `reset-spinor`: the non-abelian quaternion transition (`Q₈`).
   - `reset-swap`: the full two-sided `SO(4)` (`S₃`).
   - `spinor-product`: the *other* dial, `Mamba3Config::micro_steps`

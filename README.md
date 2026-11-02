@@ -72,7 +72,7 @@ each kind buys.
 ## Highlights
 
 - **All three families**: Mamba-1, Mamba-2, and Mamba-3, each as a block that
-  plugs into Pre-LN residual layers, layer stacks, and full networks (from
+  plugs into Pre-LN layers, layer stacks, and full networks (from
   [`burn-stack`](https://github.com/swfsql/burn-stack)).
 - **Backend-agnostic**: pure Burn tensor ops, no custom kernels, so it runs
   unchanged on every backend.
@@ -276,8 +276,8 @@ launches per case and writes [`kernels.md`](kernels.md).
   changed and why. Three classify the recurrence, and one classifies the block
   around it:
   - **[Rotation as Optimization](info/mamba-3/rotation-as-optimization.md)**:
-    the *quadratic* term. What a micro-step optimizes, in what sense the complex
-    transition is a learning rate (or a saddle, or momentum), and what
+    the *quadratic* term. What a micro-step optimizes, in what sense the
+    rotating transition is a learning rate (or a saddle, or momentum), and what
     `micro_steps` composes, compared with DeltaProduct.
   - **[Trapezoid as Integration](info/mamba-3/trapezoid-as-integration.md)**:
     the *linear* term along time. `λ` as an operator-splitting parameter, the

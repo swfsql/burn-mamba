@@ -229,7 +229,7 @@ for _ in range(2000):
 ok("4.9  averaged over rotation lag the floor decays to the unrotated part (N - rotation_dim)",
    abs(np.mean(many) - (N - rotation_dim)) < 0.05 * N)
 
-# 4.10 At init the layer's read is, to O(1/sqrt(N)), the bias-only read.
+# 4.10 At init the read of the plant is, to O(1/sqrt(N)), the bias-only read.
 L, P = 24, 64
 dt = np.logaddexp(0.0, RNG.normal(size=L) - 4.0)
 alpha, beta, gamma, A, lam = coefficients(
@@ -259,7 +259,7 @@ L = 32
 dt = np.logaddexp(0.0, RNG.normal(size=L) - 2.0)
 alpha, beta, gamma, A, lam = coefficients(
     dt, RNG.normal(size=L), RNG.normal(size=L))
-v = RNG.normal(size=(L, N))                      # the state-input B_t x_t
+v = RNG.normal(size=(L, N))                      # the sample B_t x_t
 
 h3 = np.zeros(N)
 three_term = []
@@ -273,7 +273,7 @@ for t in range(L):
     vt = gamma[t] * v[t] + (beta[t] * v[t - 1] if t > 0 else 0.0)
     h2 = alpha[t] * h2 + vt
     filtered.append(h2.copy())
-ok("5.1  the 3-term recurrence is a 2-term one on a width-2 filtered state-input",
+ok("5.1  the 3-term recurrence is a 2-term one on a width-2 filter of the samples",
    close(np.array(three_term), np.array(filtered), tol=1e-12))
 
 samples = []

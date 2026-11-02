@@ -1014,7 +1014,7 @@ fn cache_conversion_parity_mimo_ngroups2() {
 
 // ── Quaternion4D on the single-ssd pathway ──────────────────────────────
 //
-// The single-pass SSD core is rotation-agnostic (it consumes the rotated
+// The single-pass SSD scan is rotation-agnostic (it consumes the rotated
 // B̄/C̄), so once `forward_single_ssd` applies the quaternion rotation it must
 // match `forward_double_ssd` (the verified reference pathway) and the recurrent
 // `step`. Both runs start from a fresh (None) cache — each builds its own fresh

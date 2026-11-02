@@ -1051,7 +1051,7 @@ fn quaternion_rotation_field_survives_record_roundtrip() {
 /// A quaternion block's chunked `forward` must equal its recurrent `step`
 /// unrolling — the same parity guarantee the abelian path satisfies, now for the
 /// non-abelian quaternion rotation (chunked `quat_cumprod` vs single-step
-/// `quat_mul`, feeding the unchanged double-ssd SSD core). Both the
+/// `quat_mul`, feeding the unchanged double-ssd SSD scan). Both the
 /// left-isoclinic and the full-`SO(4)` kind run it.
 fn quaternion_forward_step_parity_kind(kind: RotationKind, rotation_fraction: f64, mimo_rank: usize) {
     use crate::mamba3::mamba3::Mamba3Config;

@@ -1,6 +1,6 @@
 //! The model configuration for the reset-rotor example: one Mamba-3 block whose
 //! whole state is a **single rotating pair**. Its size makes sure that only the
-//! complex transition of the block can solve the task (see [`model_config`]).
+//! rotation of the block can solve the task (see [`model_config`]).
 
 use crate::dataset::{NUM_CLASSES, NUM_SYMBOLS};
 use burn_mamba::prelude::{

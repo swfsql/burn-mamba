@@ -24,8 +24,8 @@
 //!
 //! ```text
 //!   αₜ = exp(Δₜ Aₜ)                — decay (Aₜ < 0, data-dependent)
-//!   βₜ = (1 − λₜ) Δₜ αₜ            — left-endpoint weight (Bₜ₋₁ xₜ₋₁ contribution)
-//!   γₜ = λₜ Δₜ                      — right-endpoint weight (Bₜ xₜ contribution)
+//!   βₜ = (1 − λₜ) Δₜ αₜ            — the coefficient of the tap sample Bₜ₋₁ xₜ₋₁
+//!   γₜ = λₜ Δₜ                      — the mass of the current sample Bₜ xₜ
 //! ```
 //!
 //! with `λₜ = σ(λ̂ₜ) ∈ (0, 1)`, the left/right split of the trapezoid.
@@ -46,8 +46,7 @@
 //! the other tap, or to `γ`), so the mass of the micro-step is `Δₜ` under every
 //! member. See the header of [`TapPattern`].
 //!
-//! ## 2. Complex transition, the rotation (no trapezoid, no MIMO — paper section
-//! *Complex-Valued SSMs*)
+//! ## 2. Rotation (no trapezoid, no MIMO — paper section *Complex-Valued SSMs*)
 //!
 //! The paper calls it "data-dependent RoPE". Despite that name, the rotation is
 //! **not a positional encoding**. It is the *imaginary part of the state
@@ -78,7 +77,7 @@
 //! absorb it: the **"RoPE trick"** (paper Prop. *Complex SSM, Data-Dependent
 //! RoPE Equivalence*). This module implements that form. The rotation never
 //! touches the state (the cached state is in the rotated frame), and the
-//! SSD core stays the plain scalar-decay kernel.
+//! SSD scan stays the plain scalar-decay kernel.
 //!
 //! ```text
 //!   θₜ = θₜ₋₁ + Δₜ · ϱ · π · tanh(ϑₜ)    — cumulative angles (per-pair)
@@ -227,7 +226,7 @@ use burn_stack::utils::{UntiedParam, untied};
 
 /// The Mamba-3 SSM block.
 ///
-/// The full Mamba-3 layer with exponential-trapezoidal discretization and
+/// The full Mamba-3 block with exponential-trapezoidal discretization and
 /// data-dependent rotation, for SISO (mimo_rank=1) and MIMO (mimo_rank>1). It
 /// has two execution modes:
 ///

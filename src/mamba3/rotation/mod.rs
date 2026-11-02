@@ -32,7 +32,7 @@
 //!   Cₜᵀ (Rₜ⋯Rᵢ₊₁) Bᵢ  =  (Pₜᵀ Cₜ)ᵀ (Pᵢᵀ Bᵢ)  =  C̄ₜᵀ B̄ᵢ ,
 //! ```
 //!
-//! so the scalar-decay SSD core (`L ⊙ C̄B̄ᵀ`) is **unchanged**. Only the
+//! so the scalar-decay SSD scan (`L ⊙ C̄B̄ᵀ`) is **unchanged**. Only the
 //! projections `B̄ᵢ = Pᵢᵀ Bᵢ`, `C̄ₜ = Pₜᵀ Cₜ` turn. What is lost is the
 //! closed-form sum of angles. The cumulative rotation comes from an
 //! **associative scan over the per-micro-step quaternions** ([`quat_cumprod`]). A
@@ -83,7 +83,7 @@
 //! axis, not a second, reversed scan. The cost over
 //! [`Quaternion4D`](RotationKind::Quaternion4D) is twice the generator
 //! channels, twice the block axis of the scan, and one extra [`quat_mul`] per
-//! `B`/`C` application. The SSD core is still unchanged.
+//! `B`/`C` application. The SSD scan is still unchanged.
 //!
 //! Why do this, when the left and right factors *commute* with each other and
 //! so add no "more non-abelianness"? Left multiplication is **isoclinic**:
@@ -108,7 +108,7 @@
 //! `k = 1`, the trivial group: no rotation, a purely real transition. It is the
 //! ablation that the ladder is measured against. It is *structural*, not a
 //! zeroed knob: the in-projection has no rotation channels, the cache holds no
-//! accumulator ([`RotationState::Real`]), and `B`/`C` reach the SSD core
+//! accumulator ([`RotationState::Real`]), and `B`/`C` reach the SSD scan
 //! unchanged. So to switch the rotation off, select the *kind*.
 //! `rotation_fraction` only narrows a rotation that exists. `Real1D` is also
 //! the one kind that makes no pairs, so it is the only one that accepts an

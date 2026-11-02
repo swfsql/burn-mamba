@@ -5,7 +5,7 @@
 > Reference note for `burn-mamba`. It is the authority for the decisions of
 > this crate around `Mamba3Config::micro_steps` (`src/mamba3/product/`) and its
 > relation to DeltaProduct. It is also the authority for the
-> optimization-theoretic reading of the complex transition
+> optimization-theoretic reading of the rotation
 > (`src/mamba3/rotation/`).
 >
 > [`scripts/mamba-3/rotation_as_optimization.py`](../../scripts/mamba-3/rotation_as_optimization.py)
@@ -73,7 +73,7 @@ The results, in the order of their derivation:
 |---|---|
 | 3 | No first-order method with a real step size, on any real-valued loss, can make a rotation. This is the obstruction, stated exactly. |
 | 4 | A step size relaxed to `ℂ` gives Mamba-3 exactly, on the objective of Mamba-2. Descent is guaranteed, with `\|arg η\| ≤ arcsin α`. |
-| 4.5 | The real constraint of Mamba-2 is a *step-size cap*: `ηρ ∈ (0,1)`, always short of a Newton step. The complex transition lets `ηρ` fill the disc. Parity is on the real axis at `ηρ = 2`. Mod-`k` has the circulation fraction `cos(π/k)`. |
+| 4.5 | The real constraint of Mamba-2 is a *step-size cap*: `ηρ ∈ (0,1)`, always short of a Newton step. The rotation lets `ηρ` fill the disc. Parity is on the real axis at `ηρ = 2`. Mod-`k` has the circulation fraction `cos(π/k)`. |
 | 5 | The same recurrence is gradient descent–ascent on a harmonic (saddle-only) potential. |
 | 6 | The same recurrence is heavy-ball momentum on the unchanged objective, with the velocity folded into the imaginary part of the state. |
 | 7 | The delta-rule escape: composition. Verified sharp: rotation occurs iff both micro-steps overshoot. |
@@ -92,9 +92,9 @@ defaults.
 ### 2.1 The recurrence
 
 The note uses one head, and drops the trapezoid and MIMO until §9 (they are
-orthogonal). Take Mamba-3 with a complex transition, under the
+orthogonal). Take Mamba-3 with a rotation, under the
 **exponential-Euler** discretisation: the exponential on the transition, and
-the held right endpoint on the state-input (`α = e^{ΔA}`, `γ = Δ`). Mamba-1
+the held right endpoint on the sample (`α = e^{ΔA}`, `γ = Δ`). Mamba-1
 and Mamba-2 really implement that scheme, and the discretisation table of the
 Mamba-3 paper names it. The same table notes that the Mamba-1 paper reports
 ZOH (`γ = A⁻¹(e^{ΔA} − I)`), but that its released implementation does not
@@ -335,8 +335,8 @@ the most compressed statement in this note:
 
 > **The restriction of Mamba-2 is not "no rotations". It is a step-size
 > cap.** `α = e^{ΔA} ∈ (0,1)` forces `ηρ ∈ (0,1)`: strictly less than one
-> Newton step, and far from the classical stability limit at `2`. The complex
-> transition lets `ηρ` leave that interval.
+> Newton step, and far from the classical stability limit at `2`. The rotation
+> lets `ηρ` leave that interval.
 
 Two consequences sharpen the usual story about state tracking:
 
@@ -423,7 +423,7 @@ has the companion matrix `[[1+β−ηρ, −β], [1, 0]]` on `(z_t, z_{t−1})`.
 Verified over 500 random `(α, φ, ρ)` draws, exact to `1e-9`, with the closed
 form `ηρ = |1−μ|²` to `1e-15`.
 
-So the complex transition **is** momentum, with the velocity buffer folded
+So the rotating transition **is** momentum, with the velocity buffer folded
 into the imaginary part of the state, not held as a second tensor. The usual
 price of momentum is a second state slot. Mamba-3 pays it: it declares half
 of the state imaginary.
@@ -725,8 +725,8 @@ sample into the current frame**, before the weight:
 $$\text{linear term} \ \propto\ \gamma_t\,x_tk_t^\top \;+\; \beta_t\,x_{t-1}\big(e^{i\varphi_t}\odot k_{t-1}\big)^\top$$
 
 Verified exact over a full trajectory. The usual reading of the trapezoid as
-a two-tap FIR filter on the gradient stream stays true under the complex
-transition. It is a *transported* filter, not a naive one. This is also why
+a two-tap FIR filter on the gradient stream stays true under the rotation. It
+is a *transported* filter, not a naive one. This is also why
 the caches of the crate store the tapped `(B, x)` **without the mass of the
 tap**, and apply `β` at time `t`. They do not store a pre-weighted
 contribution.

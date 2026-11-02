@@ -280,8 +280,7 @@ fn handmade_rotor(device: &Device, turn: Turn, head: Head) -> MambaLatentNet {
 /// The rotation-free counter: the strongest **real** state that this block can
 /// hold. Head 0 accumulates `±V` per turn (it decays by `alpha` per micro-step, and
 /// `R` wipes it). Head 1 is a constant reference. That is a selective SSM of
-/// Mamba-2 strength: the block of [`crate::model`] without its complex
-/// transition.
+/// Mamba-2 strength: the block of [`crate::model`] without its rotation.
 fn handmade_counter(device: &Device, alpha: f64) -> MambaLatentNet {
     let cfg = config_without_rotation();
     // ᾱ = exp(Δ·A) with Δ = 1 ⇒ A = ln(alpha).
@@ -608,7 +607,7 @@ fn no_real_state_solves_the_task() {
     );
     assert!(
         best_worst < 0.6,
-        "a real state reached {best_worst:.4} — the task does not need a complex transition"
+        "a real state reached {best_worst:.4} — the task does not need a rotation"
     );
 }
 

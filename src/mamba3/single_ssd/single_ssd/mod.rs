@@ -50,7 +50,7 @@ impl Mamba3 {
     ///
     /// "Equivalent" covers **everything that a caller can observe**: the
     /// returned output and every field of the returned cache. It does not cover
-    /// the intermediate `y` of the SSD core at each *write* position. Under a
+    /// the intermediate `y` of the SSD scan at each *write* position. Under a
     /// lag-`u` pattern such as [`TapPattern::Vertical`], the correction band
     /// applies only at the last micro-step of each token (the readout). So the
     /// `u−1` per-token partial sums that this pathway discards do not match the
@@ -326,7 +326,7 @@ impl Mamba3 {
 
         // ── Step 5: Data-dependent transition rotation of B and C ─────────────
         // Shared with the double-ssd pathway through [`rotate_bc_forward`]. The
-        // single-pass SSD core below does not depend on the rotation: it only
+        // single-pass SSD scan below does not depend on the rotation: it only
         // uses the rotated B̄/C̄. The factoring of the RoPE trick,
         // `C̄ₜᵀB̄ᵢ = Cₜᵀ·Rel(t,i)·Bᵢ`, holds for every kind. `C` turns at token
         // resolution: it needs the cumulative rotation of the micro-step where

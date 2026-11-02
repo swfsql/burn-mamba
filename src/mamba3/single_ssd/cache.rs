@@ -75,10 +75,10 @@ impl Mamba3SingleSsdCachesConfig {
 }
 
 // ---------------------------------------------------------------------------
-// Mamba3SingleSsdCache  (cache for a single layer)
+// Mamba3SingleSsdCache  (cache for a single block)
 // ---------------------------------------------------------------------------
 
-/// The cache of one Mamba-3 layer that runs the single-ssd pathway.
+/// The cache of one Mamba-3 block that runs the single-ssd pathway.
 ///
 /// The fields and shapes match
 /// [`Mamba3DoubleSsdCache`](crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCache).

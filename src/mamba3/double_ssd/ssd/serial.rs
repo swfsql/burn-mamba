@@ -318,7 +318,7 @@ pub fn k4_ssd_state_passing(
             .exp()
             .expand([batch, nheads, per_head_dim, state_rank]); // decay_bhpr
 
-        // SSM recurrence: h[n] = decay * h[n-1] + s[n]
+        // Recurrence of the plant: h[n] = decay * h[n-1] + s[n]
         running_state_bhpr = decay_bhpr * running_state_bhpr + intra_state_bhpr;
         chunk_input_state_vec_bhpr.push(running_state_bhpr.clone());
     }

@@ -1,7 +1,7 @@
 //! # Mamba-2
 //!
-//! Structured State Space Duality (SSD). Mamba-2 recasts the selective SSM
-//! recurrence as a chunkwise algorithm made of batched matrix multiplications.
+//! Structured State Space Duality (SSD). Mamba-2 recasts the recurrence of the
+//! plant as a chunkwise algorithm made of batched matrix multiplications.
 //! This form uses tensor cores in training, and it stays exactly equal to the
 //! recurrent form that decoding uses. See [`mamba2`](crate::mamba2::mamba2) for
 //! the full SSD math.

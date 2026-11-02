@@ -19,10 +19,10 @@ use burn_stack::modules::sanity as san;
 use burn::prelude::*;
 
 // ---------------------------------------------------------------------------
-// Mamba1Cache  (cache for a single layer)
+// Mamba1Cache  (cache for a single block)
 // ---------------------------------------------------------------------------
 
-/// The cache that a **single** Mamba-1 layer carries between calls.
+/// The cache that a **single** Mamba-1 block carries between calls.
 #[derive(Module, Debug)]
 pub struct Mamba1Cache {
     /// **Convolution rolling window.**

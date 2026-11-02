@@ -6,7 +6,7 @@
 //! the running product in the quaternion group `Q₈` since the last reset (one of
 //! `±1, ±i, ±j, ±k`).
 //!
-//! `reset-rotor` needs a *complex* transition: a rotation, so the state can be
+//! `reset-rotor` needs a rotation, so the state can be
 //! periodic. This rung needs a **non-abelian** transition. `ij = k` but
 //! `ji = −k`, so only the *order* decides. An abelian rotation accumulates a
 //! `cumsum` of angles, and a sum forgets order: it computes exactly the

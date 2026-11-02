@@ -2,9 +2,10 @@
 
 Four examples on the **same shape of stream**. Each is the smallest task that
 its block is *needed* for, and that the rung below cannot solve. Together they
-isolate, one at a time, what each piece of the SSM recurrence buys. A fifth
-example keeps the stream and moves the *other* dial, `micro_steps`. A sixth
-asks the question of `reset-swap` one group size up, where the answer splits:
+isolate, one at a time, what each piece of the recurrence of the plant buys. A
+fifth example keeps the stream and moves the *other* dial, `micro_steps`. A
+sixth asks the question of `reset-swap` one group size up, where the answer
+splits:
 
 | rung | what only that block can do | the state it needs | the group it tracks |
 |---|---|---|---|
@@ -210,11 +211,11 @@ the rotor, and it gives the block its phase reference (see `model.rs`).
 <summary>Why this task</summary>
 
 `reset-majority` isolates the one thing that a selective SSM has and a linear
-one does not: a **data-dependent decay**. This rung isolates the one thing that
-a rotating transition has and a real one does not: a **complex transition**.
-That is the data-dependent rotation that Mamba-3 absorbs into `B`/`C` (the "RoPE
-trick"). At `d_model = 2`, `state_rank = 2`, `per_head_dim = 1`, the block
-unrolls to two heads that share one rotating pair.
+one does not: a **data-dependent decay**. This rung isolates the other factor
+of the Mamba-3 transition: a **rotation**. The rotation depends on the data, and
+Mamba-3 absorbs it into `B`/`C` (the "RoPE trick"). At `d_model = 2`,
+`state_rank = 2`, `per_head_dim = 1`, the block unrolls to two heads that share
+one rotating pair.
 
 | shortcut | why it is closed |
 |---|---|

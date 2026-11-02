@@ -38,7 +38,7 @@ impl Mamba2SsdInput {
     /// ### Step 1 — Intra-chunk outputs (Y_diag)
     ///
     /// In each chunk, compute the output as if the initial state were
-    /// zero. This is the *quadratic attention form* of the SSD layer, on a
+    /// zero. This is the *quadratic attention form* of the plant, on a
     /// window of `chunk_len` tokens (§4.1):
     ///
     /// ```text

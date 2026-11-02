@@ -189,7 +189,7 @@ All four are verified. This derives the error remark of the source, and does
 not only repeat it: **Strang splitting is second-order only when the split is
 symmetric**. That is exactly the condition `λ_t = ½ + O(Δ_t)` that the
 appendix needs for an `O(Δ³)` local truncation error. The script measures the
-state-input quadrature alone, against the exact integral, so that the
+quadrature of the samples alone, against the exact integral, so that the
 right-hand approximation of the transition does not contaminate the fit. The
 fitted orders are **1.93** for exponential-Euler and **3.05** for the
 trapezoid at `λ = ½`.
@@ -462,8 +462,8 @@ key scale) are under this section in the script.
 
 ### 10.1 What the trapezoid is, and how to describe it
 
-The trapezoid is a quadrature of the state-input integral, or equivalently an
-operator splitting with the parameter `λ` (§4). It is entirely in the linear
+The trapezoid is a quadrature of the integral of the samples, or equivalently
+an operator splitting with the parameter `λ` (§4). It is entirely in the linear
 term of the local objective (§3). "A two-tap FIR filter on the gradient
 stream" is an accurate description and the correct one-line summary.
 "Structurally the same move as momentum" needs the qualifier of §6: the entry
@@ -540,7 +540,7 @@ Rust test suites assert, separately, that it agrees with the implementation
 `L = L₁L₂` and the error rate are from the source paper. Three readings are
 prior, and none is a new result in optimization or numerical analysis alone:
 the added term as a two-tap FIR filter on the gradient stream, the observation
-that under a complex transition the older tap arrives parallel-transported,
+that under a rotation the older tap arrives parallel-transported,
 and a wider band as the natural extension. This note assembles:
 
 - `λ` identified as an operator-splitting parameter, which derives the error

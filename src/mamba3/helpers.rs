@@ -581,8 +581,9 @@ pub struct TrapezoidCoeffs {
     /// `νⁱⁿᵗₜ`: the mass of the lag-1 tap of a two-tap pattern. `None` unless
     /// [`has_two_taps`](crate::mamba3::tap_pattern::TapPattern::has_two_taps).
     pub nu_interior: Option<Tensor<3>>,
-    /// `γₜ = λₜ · Δₜ`: the right-endpoint weight. It is **`Δₜ` itself** when
-    /// there is no `λ` (all of the micro-step is paid at the right endpoint).
+    /// `γₜ = λₜ · Δₜ`: the mass of the current sample. It is **`Δₜ` itself**
+    /// when there is no `λ` (all of the micro-step is paid at the right
+    /// endpoint).
     pub gamma: Tensor<3>,
     /// `ℓₜ = ln Λₜ` at every position, when the decay comes from a Kalman gain
     /// ([`crate::mamba3::positive::kalman`]). Its last entry is the next carry.
@@ -594,7 +595,7 @@ impl TrapezoidCoeffs {
     /// padding, `None` ⇒ no padding) the identity micro-step: no decay (`da = 0`,
     /// `α = 1`) and no mass (`Δ = ν = νⁱⁿᵗ = γ = 0`). Each consumer follows:
     ///
-    /// - the SSD core carries the state through unchanged,
+    /// - the SSD scan carries the state through unchanged,
     /// - a tap mass that a real position pays forward to a padded one is
     ///   dropped, exactly as at a call boundary,
     /// - the rotation (which advances by `Δ`) does not move.

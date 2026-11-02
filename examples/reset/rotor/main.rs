@@ -6,8 +6,8 @@
 //! since the last `R`, **mod 3**.
 //!
 //! The rung isolates the one thing that a Mamba-3 block has and a Mamba-2 block
-//! does not: a **complex transition**, the data-dependent rotation absorbed into
-//! `B`/`C`. It adds two requirements, one per adversarial family:
+//! does not: a **rotation**, data-dependent and absorbed into `B`/`C`. It adds
+//! two requirements, one per adversarial family:
 //!
 //! - The state must *turn*. The label is periodic in a count that a real state
 //!   can hold but never reduce ([`Family::Drift`](crate::dataset::Family::Drift)).

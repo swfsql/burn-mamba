@@ -47,7 +47,7 @@ them was rebuilt at the same time, and the rebuild is not incidental. Mamba-3:
 
 Four results:
 
-1. **At initialisation, a Mamba-3 layer is a convolution.** BCNorm pins
+1. **At initialisation, a Mamba-3 block is a convolution.** BCNorm pins
    `‖B‖ = √N`. So the ones-initialised biases add a score term of exactly
    `N`, and the data adds a term of standard deviation `√N` (§4.2). The read
    is thus the *bias-only* read (a decay-weighted causal average) to within
@@ -66,7 +66,7 @@ Four results:
    convolutional floor that the rotation localises. This couples two dials
    that look independent.
 3. **The two replacements for the short convolution are both low-pass.** The
-   trapezoid is exactly a width-2 filter on the *state-input* `B_tx_t` (§5.1).
+   trapezoid is exactly a width-2 filter on the *samples* `B_tx_t` (§5.1).
    Its taps `β, γ` are strictly positive for every input (§5.2), and the bias
    floor is positive by construction. A learned depthwise conv can have a
    negative tap, but the pair that replaced it cannot. What Mamba-3 gave up is
@@ -138,7 +138,7 @@ it folds away at `micro_steps = 1`. Every per-micro-step sub-projection occurs
 Rows 2–4 together have a consequence that is worth a separate statement:
 **the only nonlinearities left on the `B`/`C`/`x` path are the normalisation
 itself and the squashing of the scalar channels** (`softplus` on `Δ` and `A`,
-`σ` on `λ` and `μ`, `tanh` on `θ`). Values reach the SSD core as raw
+`σ` on `λ` and `μ`, `tanh` on `θ`). Values reach the SSD scan as raw
 projections. The `SiLU` of the gate is the only pointwise activation of the
 block.
 
@@ -232,13 +232,13 @@ Three of them are `O(√N)`. The fourth, at the ones init, is exactly `N`
 - Every (query, key) pair scores **positive**, where the unbiased score is
   positive half the time (§4.5).
 
-Through the decay mask, the read of the layer at initialisation is the
+Through the decay mask, the read of the plant at initialisation is the
 bias-only read, to within `O(1/√N)` (§4.10):
 
 $$y_t\;\approx\;N\sum_{s\le t}\Big(\textstyle\prod_{i=s+1}^{t}\alpha_i\Big)\gamma_s\,v_s$$
 
 This is a causal, data-independent, exponentially-weighted moving average: a
-convolution whose kernel is the decay profile. The layer *starts* as a
+convolution whose kernel is the decay profile. The block *starts* as a
 smoother and learns its content-dependence on top of that. It does not start
 from a zero-mean score that must find locality.
 
@@ -302,7 +302,7 @@ $$h_t=\alpha_th_{t-1}+\beta_tv_{t-1}+\gamma_tv_t
 =\alpha_th_{t-1}+\tilde v_t,\qquad \tilde v_t=\gamma_tv_t+\beta_tv_{t-1}$$
 
 So the three-term recurrence is a two-term recurrence that runs on a width-2
-filtered state-input (§5.1). The filter is different from the deleted
+filter of the samples (§5.1). The filter is different from the deleted
 convolution on three axes at the same time:
 
 - It is **data-dependent** (`β`, `γ` are per-token functions of `Δ`, `A`,
@@ -320,7 +320,7 @@ convolution on three axes at the same time:
 (§5.2). Their ratio is unbounded, so the pair sweeps the whole positive
 quadrant and nothing else (§5.3). The bias floor is positive by §4. So the two
 mechanisms that replaced the convolution are both **low-pass**. They can
-average adjacent state-inputs in any proportion, but they cannot subtract one
+average adjacent samples in any proportion, but they cannot subtract one
 from the other. A learned depthwise kernel can. This is the one capability
 that the deletion really costs. It is worth an exact name, because "the
 convolution is redundant" is a claim about a trained 440M language model, not

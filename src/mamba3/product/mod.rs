@@ -103,7 +103,7 @@
 //! ```
 //!
 //! and [`unfold_micro_bs`] reads each `u`-wide channel group as `u`
-//! consecutive write positions. So the SSD core, the trapezoid, the rotation scan, the
+//! consecutive write positions. So the SSD scan, the trapezoid, the rotation scan, the
 //! chunking and the caches all run unchanged on a sequence of length
 //! `sequence · u`. Two placements make that exactly the recurrence above:
 //!

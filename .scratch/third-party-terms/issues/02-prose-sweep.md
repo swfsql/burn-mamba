@@ -1,6 +1,6 @@
 # 02: Sweep source words from our own prose
 
-Status: ready-for-agent
+Status: resolved
 
 Blocked by: None (can start immediately)
 
@@ -56,14 +56,49 @@ Read each line of these groups before you change it:
 Run each `rg` from the repo root with
 `--glob '!.scratch' --glob '!target' --glob '!GLOSSARY.md' --glob '!**/tmp/**'`.
 
-- [ ] `rg -i 'complex transition'` finds only quotes of a source.
-- [ ] `rg -i 'ssd core'` finds no hit.
-- [ ] `rg -i 'endpoint weight'` finds no hit in `src/mamba3/`.
-- [ ] `rg -i 'ssd layer'` finds only quotes of a source.
-- [ ] `rg -i 'state-input'` finds only quotes of a source.
-- [ ] `rg -i 'ssm recurrence'` finds only quotes of a source.
-- [ ] `rg -i 'pre-ln residual'` finds no hit in `README.md`.
-- [ ] `rg -i 'layer' src/mamba1/cache.rs src/mamba2/cache.rs src/mamba3/double_ssd/cache.rs src/mamba3/single_ssd/cache.rs`
+- [x] `rg -i 'complex transition'` finds only quotes of a source.
+- [x] `rg -i 'ssd core'` finds no hit.
+- [x] `rg -i 'endpoint weight'` finds no hit in `src/mamba3/`.
+- [x] `rg -i 'ssd layer'` finds only quotes of a source.
+- [x] `rg -i 'state-input'` finds only quotes of a source.
+- [x] `rg -i 'ssm recurrence'` finds only quotes of a source.
+- [x] `rg -i 'pre-ln residual'` finds no hit in `README.md`.
+- [x] `rg -i 'layer' src/mamba1/cache.rs src/mamba2/cache.rs src/mamba3/double_ssd/cache.rs src/mamba3/single_ssd/cache.rs`
       finds no "Mamba-N layer".
-- [ ] `cargo check` and `cargo doc --all --no-deps` give no warnings.
-- [ ] `cargo check --examples -j 1` passes.
+- [x] `cargo check` and `cargo doc --all --no-deps` give no warnings.
+- [x] `cargo check --examples -j 1` passes.
+
+## Comments
+
+- The acceptance `rg` reads one line at a time. The sweep also changed the forms
+  that it cannot see: the wrapped phrases at `README.md:279`,
+  `info/mamba-3/rotation-as-optimization.md:338`, `:728`,
+  `examples/reset/rotor/tests.rs:283`, `src/mamba2/mod.rs:3`, the emphasis at
+  `examples/reset/spinor/main.rs:9`, and "state input" at
+  `src/mamba3/tap_pattern.rs:3`.
+- "state-input" also had 4 lines in `scripts/`, not only the 6 lines in `info/`.
+  The acceptance `rg` includes them, so they changed too.
+- "Each line works with rotation" is false at two lines. Proposition 3 gives
+  `α·R(φ)`, so the whole transition is the momentum, not only `R(φ)`.
+  `info/mamba-3/rotation-as-optimization.md:426` and `README.md:280` say
+  "rotating transition".
+- `info/mamba-3/architecture-deltas.md:50` and `:241` mean our block, so they say
+  "block". `:235` and `scripts/mamba-3/architecture_deltas.py:232` name the read
+  `y_t`, so they say "plant".
+- `src/mamba2/mamba2.rs:44` said "the layer" for the SSD layer. It says "plant".
+- The banners "cache for a single layer" of the four cache files say "block", to
+  match the doc line below them.
+- These lines did not change. The ticket does not list them, so the user decides:
+  - `examples/reset/README.md:13`: `**complex** transition`. Its column compares
+    the rotation kinds.
+  - "complex-valued state transition": `README.md:40`, `src/lib.rs:22`, `:60`,
+    `src/mamba2/mamba2.rs:55`, `src/mamba3/mamba3.rs:9`, `src/mamba3/mod.rs:7`.
+  - "layer" that means our block: `src/mamba2/cache.rs:13`,
+    `src/mamba3/mamba3.rs:108`, `src/mamba3/rotation/mod.rs:21`.
+  - "residual layers": `src/mamba1/mod.rs:10`, `src/mamba2/mod.rs:15`.
+  - "endpoint weight" out of `src/mamba3/`:
+    `examples/reset/spinor-product/tests.rs:66`,
+    `scripts/mamba-3/mimo_as_batch.py:22`, `:23`,
+    `scripts/mamba-3/trapezoid_as_integration.py:19`, `:20`.
+  - `src/mamba2/mamba2.rs:892`: "state input proj". It names `B`, so "sample" does
+    not fit.

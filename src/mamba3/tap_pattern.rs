@@ -1,6 +1,6 @@
 //! # The tap pattern of the trapezoid — which earlier sample the `β` tap reads
 //!
-//! The write of Mamba-3 is a two-tap filter on the state input: the current
+//! The write of Mamba-3 is a two-tap filter on the samples: the current
 //! sample at `γₜ = λₜΔₜ`, and an earlier one at `βₜ = (1−λₜ)Δₜαₜ`, transported
 //! across the gap between them (`helpers::trapezoidal_coefficients`). At
 //! [`micro_steps`](crate::mamba3::mamba3::Mamba3Config::micro_steps) `= 1`,

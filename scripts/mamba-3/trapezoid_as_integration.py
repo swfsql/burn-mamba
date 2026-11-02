@@ -18,7 +18,7 @@ fast-weight ``S``. Nothing below depends on which. One head throughout.
     alpha[t] = exp(dt[t] * A[t])            decay, A[t] < 0
     beta[t]  = (1 - lam[t]) * dt[t] * alpha[t]      left-endpoint weight
     gamma[t] = lam[t] * dt[t]                       right-endpoint weight
-    v[t]     = outer(B[t], x[t])                    the state-input
+    v[t]     = outer(B[t], x[t])                    the sample
     h[t]     = alpha[t] * h[t-1] + beta[t] * v[t-1] + gamma[t] * v[t]
 
 Where a rotation is present the scalar ``alpha[t]`` becomes ``M[t] = alpha[t] R[t]``
@@ -159,7 +159,7 @@ for t in range(T):
     got.append(h.copy())
 ok("lambda = 0 is the reversed Lie-Trotter (data then ridge)", close(got, H_left))
 
-# Order of the state-input quadrature, isolated by comparing against the exact
+# Order of the quadrature of the samples, isolated by comparing against the exact
 # integral of eq. (approx-step): Lie-Trotter is first order, Strang second, so the
 # local truncation errors are O(dt^2) and O(dt^3). This is the appendix's error
 # remark, derived rather than quoted -- Strang needs the SYMMETRIC split, which is

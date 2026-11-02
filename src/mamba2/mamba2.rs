@@ -1,12 +1,12 @@
 //! # Mamba-2 SSM Block — Structured State Space Duality (SSD)
 //!
-//! This module implements the **Mamba-2 block** (the SSD layer) from the paper
+//! This module implements the **Mamba-2 block** from the paper
 //! *"Transformers are SSMs: Generalized Models and Efficient Algorithms
 //! through Structured State Space Duality"* (Dao & Gu, 2024).
 //!
 //! ## The SSD Model
 //!
-//! The SSD layer is a multi-head selective SSM. Each head sends a sequence of
+//! The plant has multiple heads. Each head sends a sequence of
 //! `per_head_dim`-dimensional inputs `X ∈ ℝ^{sequence×per_head_dim}` through
 //! the recurrence (Eq. 1–2 of the paper):
 //!
@@ -41,7 +41,7 @@
 //!   Lᵢⱼ = 0                     (i < j)
 //! ```
 //!
-//! So the layer is causal linear attention `Y = (L ∘ QKᵀ) V` with the
+//! So the plant is causal linear attention `Y = (L ∘ QKᵀ) V` with the
 //! renaming `(C, B, X) ↦ (Q, K, V)`.
 //!
 //! ## The Chunkwise SSD Algorithm
@@ -52,7 +52,7 @@
 //!
 //! [`Mamba-1`](crate::mamba1) is the predecessor: a sequential selective scan
 //! with a diagonal (not scalar) state transition. [`Mamba-3`](crate::mamba3)
-//! extends this SSD layer with trapezoidal discretisation, a complex-valued
+//! extends this block with trapezoidal discretisation, a complex-valued
 //! state transition (a data-dependent rotation of B/C), MIMO rank expansion and
 //! MambaProduct.
 //!
@@ -100,7 +100,7 @@ use burn::{
 
 /// The Mamba-2 SSM block.
 ///
-/// The full SSD layer of §5 of the paper, in two execution modes:
+/// The full block of §5 of the paper, in two execution modes:
 ///
 /// - [`Self::forward`] — chunkwise SSD for training / prefill (it uses tensor
 ///   cores, and its cost is linear in sequence length)
