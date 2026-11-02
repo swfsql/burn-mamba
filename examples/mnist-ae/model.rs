@@ -203,8 +203,8 @@ pub struct AeConfig {
     /// Number of real (weight-bearing) decoder layers (even: bidi pairs).
     pub n_dec_layers: usize,
     /// Virtual layers per stack: the logical depth, run over the real layers
-    /// with shared weights (must be even, `StridedStretched` schedule). It adds
-    /// depth and expressivity cheaply, without more parameters.
+    /// with shared weights (must be even, `StridedStretched` layer schedule).
+    /// It adds depth and expressivity cheaply, without more parameters.
     #[config(default = 6)]
     pub n_virtual_layers: usize,
     /// Shared Mamba-3 block config for both stacks.

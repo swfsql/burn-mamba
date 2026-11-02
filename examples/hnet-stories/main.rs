@@ -95,7 +95,7 @@ pub fn launch(app_args: &AppArgs) {
         "an H-Net takes no packed rows: its chunks would move the resets. Use --no-pack"
     );
     if is_fresh {
-        // The schedule counts windows. One batch runs the windows of its
+        // The LR schedule counts windows. One batch runs the windows of its
         // longest story: ~1200 characters for 8 draws (see `tiny-stories`).
         const CHARS_PER_LONGEST_STORY: usize = 1200;
         let batches_per_epoch = config.train_stories / config.training.batch_size;
@@ -106,7 +106,7 @@ pub fn launch(app_args: &AppArgs) {
             CosineAnnealingLr::new(config.training.num_epochs * iterations_per_epoch)
                 .with_max_lr(4e-3)
                 .with_min_lr(4e-4)
-                .with_warmup_steps(iterations_per_epoch / 20), // 5% of an epoch
+                .with_warmup_training_steps(iterations_per_epoch / 20), // 5% of an epoch
         );
     }
     app_args.override_training_config(&mut config.training, dtype);

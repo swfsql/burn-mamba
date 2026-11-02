@@ -132,7 +132,7 @@ pub fn train(
 }
 
 /// The training-side classifier: [`MambaLatentNet`] on the autodiff backend,
-/// stepped by a `Trainer`. Under plain SGD (and without `--eager`), the
+/// trained by a `Trainer`. Under plain SGD (and without `--eager`), the
 /// whole training step is a captured step, recorded at the first batch. Under
 /// any other optimizer, it runs eagerly.
 pub struct Wrap {

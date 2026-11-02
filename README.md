@@ -86,7 +86,7 @@ each kind buys.
 - **Right padding**: `forward()` takes a padding mask. Each row then gives the
   outputs and cache that it would give alone.
 - **Virtual layers**: many logical layers over a smaller set of shared weights,
-  with a configurable schedule.
+  with a configurable layer schedule.
 - **Bidirectional stacks** for non-autoregressive tasks.
 - **Class tokens / latents**: learnable class markers in the sequence. They
   land identically for any split of the sequence into `forward()` windows and

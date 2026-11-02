@@ -87,7 +87,7 @@ pub fn launch(app_args: &AppArgs) {
                 CosineAnnealingLr::new(num_epochs * iterations_per_epoch)
                     .with_max_lr(max_lr)
                     .with_min_lr(min_lr)
-                    .with_warmup_steps(iterations_per_epoch * 5 / 100), // 5% of an epoch
+                    .with_warmup_training_steps(iterations_per_epoch * 5 / 100), // 5% of an epoch
             ))
     });
     app_args.override_training_config(&mut training_config, dtype);

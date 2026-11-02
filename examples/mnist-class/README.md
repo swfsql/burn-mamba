@@ -94,11 +94,11 @@ sub-matrix separately, as if each were a separate `Linear`.
 
 `--sgd` trains every parameter with plain SGD (`burn_stack::optim::SgdConfig`:
 gradient clipping at 1.0, no momentum, no weight decay). It uses the same cosine
-schedule, with a peak of 5e-2 instead of the 9.6e-3 of AdamW.
+LR schedule, with a peak of 5e-2 instead of the 9.6e-3 of AdamW.
 
 SGD is the one optimizer whose training step replays as a captured step. The
 first batch records the forward, the backward and the update once. Every batch of
-that shape then replays them. The learning rate is an input, so the schedule
+that shape then replays them. The learning rate is an input, so the LR schedule
 continues to move. The other optimizers of Burn put their host-side state into a
 recording ([tracel-ai/burn#5779](https://github.com/tracel-ai/burn/issues/5779)), so
 they train eagerly. Muon + SGD (`--muon --sgd`, at the SGD rate) also trains

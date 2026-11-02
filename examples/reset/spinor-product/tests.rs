@@ -1144,8 +1144,8 @@ fn handmade_composed(device: &Device, head: Head) -> MambaLatentNet {
 /// function of the pair with no additive form
 /// ([`one_step_generators_add_and_cannot_reach_k`]), so a bilinear one, and the
 /// second layer then reads a rotation affinely from it. Nothing forbids that.
-/// But at the schedule of the ladder, the `--layers 2 --micro-steps 1` run in
-/// `examples/reset/README.md` stays below the counts row, where `u = 2` is
+/// But at the LR schedule of the ladder, the `--layers 2 --micro-steps 1` run
+/// in `examples/reset/README.md` stays below the counts row, where `u = 2` is
 /// exact at every length.
 #[test]
 fn a_second_layer_only_helps_by_composing_the_pair() {

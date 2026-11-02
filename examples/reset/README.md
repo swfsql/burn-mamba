@@ -176,9 +176,9 @@ the readout gain.
 
 - **The selective solution is a basin that training must find.** With a
   constant LR, training either finds it or stalls near the memoryless ceiling.
-  The init decides which. The cosine schedule (warmup to 3e-2, annealed to 1e-4)
-  finds it on most seeds. A run that ends near 80% has stalled. Run it again
-  with a different `seed` in the training config.
+  The init decides which. The cosine LR schedule (warmup to 3e-2, annealed to
+  1e-4) finds it on most seeds. A run that ends near 80% has stalled. Run it
+  again with a different `seed` in the training config.
 - **Ties are unscored on purpose.** A third "vote is exactly zero" class turns a
   sign readout into an exact-zero detector. That costs most of the accuracy, and
   it tests calibration, not memory.
@@ -290,9 +290,9 @@ reads are functions of exactly that number.
   `reset-majority`. Mamba-3 gets it through the data-dependent `A`, not through
   `Δ`. Here `Δ` stays at 1 for every symbol, so the per-micro-step angle is
   `2π·tanh(ϑ)` directly (at the default `rotation_range = 2`).
-- **Training finds it** with the cosine schedule of `reset-majority`, and with
-  no seed search. The rotation can lock onto the detents late. So a run below
-  100% at the halfway mark has not necessarily stalled.
+- **Training finds it** with the cosine LR schedule of `reset-majority`, and
+  with no seed search. The rotation can lock onto the detents late. So a run
+  below 100% at the halfway mark has not necessarily stalled.
 - **`d_model = 2`, not 1.** With a 2-D token, every projection is an independent
   affine functional of the symbol. So `ϑ` can read the turn direction while `x`
   and `A` read the reset flag. That is what makes the closed-form solution
@@ -366,8 +366,8 @@ channels that the heads share. Chance is 12.5%.
 | trained, `--rotation quaternion` | **100%** | **100%** | **100%** |
 | trained, `--rotation complex` | 71.3% | 53.6% | 58.1% |
 
-The last two rows use the same model, the same data and the same schedule. Only
-one enum changes. The quaternion run is exact on all three families
+The last two rows use the same model, the same data and the same training
+config. Only one enum changes. The quaternion run is exact on all three families
 (`16384/16384` each, every element at 100%). The abelian run is far from that.
 
 The two middle rows bound an order-blind model from two directions:
@@ -448,7 +448,7 @@ gives. The ceilings above it are what bound the architecture.
   where `p = 1` gives this one) contains both, at twice the rotation channels.
   `Q₈` does not need that extra reach: the ladder asks for the *smallest* state
   that solves each rung. And the extra reach has a cost. The exact solution needs
-  `p ≡ 1` on the turns, and the same schedule does not find it. In
+  `p ≡ 1` on the turns, and the same LR schedule does not find it. In
   [`reset-swap`](#reset-swap), the task needs the second factor.
 - **Nothing here is the job of `reset-rotor`.** The reset (a selective decay) and
   the periodicity (a rotation) stay the same. The only new requirement is that
@@ -536,8 +536,8 @@ Chance is 16.7%.
 | trained, `--rotation quaternion` | 70.9% | 43.4% | 51.0% |
 | trained, `--rotation complex` | 75.4% | 45.9% | 70.9% |
 
-The last three rows use the same model, the same data and the same schedule.
-Only one enum changes. The two-sided run is exact on all three families
+The last three rows use the same model, the same data and the same training
+config. Only one enum changes. The two-sided run is exact on all three families
 (`16384/16384` each, every permutation at 100%, exact by epoch 20). Neither of
 the other two is close. The middle rung buys less than nothing over the bottom
 one: 71/43/51 against 75/46/71. The theory predicts that. On `S₃`, the only
@@ -615,9 +615,9 @@ The tests:
 - **The extra factor is not always free.** In `reset-spinor`, the same `Rotor4D`
   block trains *worse* than the quaternion one. `Q₈` needs `p ≡ 1` exactly, and a
   spurious right rotation compounds with the word. Here the task needs the right
-  factor, tied to the left as conjugation. The same block, schedule and optimiser
-  get 100% by epoch 20. Extra capacity helps where the task needs it, and costs
-  where it does not. Read the two rungs together.
+  factor, tied to the left as conjugation. The same block, LR schedule and
+  optimiser get 100% by epoch 20. Extra capacity helps where the task needs it,
+  and costs where it does not. Read the two rungs together.
 - **This is the one rung whose ablation is not about lost information.** The real
   state of `reset-rotor` and the abelian state of `reset-spinor` cannot represent
   their targets. Here the left-isoclinic state *can*, and the wall is the readout.
@@ -730,11 +730,12 @@ per-micro-step sub-projections of the in-projection). Chance is 12.5%.
 | trained, `--micro-steps 1 --layers 2` | 43.6% | 29.4% | 35.3% |
 
 The first two trained rows use the same model, the same data and the same
-schedule. Only one integer changes. `u = 2` is **exact**: `16384/16384` on every
-family, every group element at 100%, by epoch 40. The `u = 1` run gets less than
-the counts row on `shuffle` and `runs`. That row is the ceiling for a model that
-sees only how many of each symbol went by. That is the cost of "cannot compose
-the token": the block uses something that the counts already contain instead.
+training config. Only one integer changes. `u = 2` is **exact**: `16384/16384`
+on every family, every group element at 100%, by epoch 40. The `u = 1` run gets
+less than the counts row on `shuffle` and `runs`. That row is the ceiling for a
+model that sees only how many of each symbol went by. That is the cost of
+"cannot compose the token": the block uses something that the counts already
+contain instead.
 
 The same models at **96 tokens**, three times their training length:
 
@@ -756,8 +757,8 @@ an affine functional of the layer *below*, not of the token. So the axis pinning
 that closes `u = 1` does not apply to it. The second layer only needs the product
 of the pair as input (the hand-built rows above are exact at both lengths with
 it). The layer below must compute that product, as a learned feature. At the
-schedule of the ladder, the trained two-layer model stays below the counts row
-on every family.
+LR schedule of the ladder, the trained two-layer model stays below the counts
+row on every family.
 
 The two `u = 1` construction rows in the first table are the twin of the
 hand-built solution. They sweep the generator scale, and report both through the
@@ -1048,7 +1049,7 @@ group at all.
   - `A₅` is exact at the training length. The left-isoclinic and abelian twins
     get the same numbers, as the double cover and perfectness predict.
   - `S₅` is expressible: the hand-built stack is exact at every length. But no
-    trained two-layer run found it. The variations tried (seed, schedule,
+    trained two-layer run found it. The variations tried (seed, LR schedule,
     epochs, depth, width, word length) all stalled between the one-layer rows
     and the `A₅` rows.
   - `learned_rotations` shows why on the first layer. It learns `c` as a
@@ -1076,10 +1077,10 @@ group at all.
     direction of the projection. The generators are projected per head, so the
     heads do not have to agree on one axis.
 - **Each solution is a basin that training must find.** Every rung uses the same
-  cosine schedule (warmup to 3e-2, annealed to 1e-4). Accuracy increases, falls,
-  and then jumps to exact during the run. So a run below 100% at the halfway
-  mark has not necessarily stalled. Only `reset-majority` is sensitive enough to
-  the seed to need a new run.
+  cosine LR schedule (warmup to 3e-2, annealed to 1e-4). Accuracy increases,
+  falls, and then jumps to exact during the run. So a run below 100% at the
+  halfway mark has not necessarily stalled. Only `reset-majority` is sensitive
+  enough to the seed to need a new run.
 - **Each rung inherits the rungs below.** The reset is always the selective decay
   of `reset-majority`. The periodicity is always the rotation of `reset-rotor`. A
   rung adds exactly one requirement. That is why every ablation is one knob and

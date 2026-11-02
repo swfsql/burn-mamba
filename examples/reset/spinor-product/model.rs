@@ -50,7 +50,7 @@ pub const D_MODEL: usize = 8;
 ///   closed-form weight. `per_head_dim = 2` then keeps `nheads = 4`, one head
 ///   per quaternion component. The construction uses the first value channel
 ///   of each head. Two heads are enough for the *readout*, and the five
-///   `reset-*` rungs run at two heads. But here, the same schedule finds
+///   `reset-*` rungs run at two heads. But here, the same training config finds
 ///   nothing with two heads: 61 / 52 / 53% with the trapezoid, 46 / 30 / 33%
 ///   without it.
 /// - The **trapezoid stays on** (the default

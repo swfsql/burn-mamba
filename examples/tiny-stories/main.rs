@@ -89,21 +89,21 @@ pub fn launch(app_args: &AppArgs) {
         TinyStoriesConfig::new(
             TrainingConfig::new(OptimizerConfig::of(optimizer, dtype))
                 .with_num_epochs(num_epochs)
-                // The schedule below is sized from it.
+                // The LR schedule below is sized from it.
                 .with_batch_size(app_args.batch_size.unwrap_or(batch_size))
                 .with_num_workers(2),
         )
     });
     cli.overrides.apply(&mut config);
     if is_fresh {
-        // The cosine schedule spans the whole run, so it can be sized only after
-        // the corpus knobs are known. It counts *windows*, not dataloader items.
-        // The training loop also charges the schedule for the windows that the
-        // frontier gate skipped. So a stalling gate shortens the run, and the
-        // cosine still finishes.
+        // The cosine LR schedule spans the whole run, so it can be sized only
+        // after the corpus knobs are known. It counts *windows*, not dataloader
+        // items. The training loop also charges the LR schedule for the windows
+        // that the frontier gate skipped. So a stalling gate shortens the run,
+        // and the cosine still finishes.
         //
         // One item is one story, and a batch runs the windows of its *longest*
-        // story. So the schedule uses that maximum, not the mean: ~1200
+        // story. So the LR schedule uses that maximum, not the mean: ~1200
         // characters is the expected longest of `batch_size = 8` draws (the mean
         // of the corpus is ~820, its 90th percentile 1103, its longest story
         // 4149).
@@ -115,10 +115,10 @@ pub fn launch(app_args: &AppArgs) {
             CosineAnnealingLr::new(config.training.num_epochs * iterations_per_epoch)
                 .with_max_lr(12e-3)
                 .with_min_lr(12e-4)
-                .with_warmup_steps(iterations_per_epoch / 20), // 5% of an epoch
+                .with_warmup_training_steps(iterations_per_epoch / 20), // 5% of an epoch
         );
     }
-    // After the sizing, so `--epochs` rescales the schedule and `--max-lr`
+    // After the sizing, so `--epochs` rescales the LR schedule and `--max-lr`
     // replaces its peak on a fresh config too.
     app_args.override_training_config(&mut config.training, dtype);
     let model_config = app_args.load_model_config().unwrap_or_else(|| {

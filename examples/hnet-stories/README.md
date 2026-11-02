@@ -54,7 +54,7 @@ run keeps it:
   The metrics report the next-character loss alone.
   `-- --chunk-log N` prints the chunk ratio of each stage every `N` windows.
 - **A learning rate per stage.** Each stage trains at the rate of the
-  schedule times `λˢ` (`lr_multipliers`). The default is the heuristic of the
+  LR schedule times `λˢ` (`lr_multipliers`). The default is the heuristic of the
   paper, normalised to `1` at the main stack. A stage sees more positions
   per training step and is narrower, so it takes a larger rate.
 - **Runs of windows.** A story trains window by window, and the state carries

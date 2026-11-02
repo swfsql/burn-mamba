@@ -1,6 +1,6 @@
 # 10: Follow the training terms of burn-stack
 
-Status: ready-for-agent
+Status: resolved
 
 Blocked by: `../burn-stack/.scratch/glossary-followups/issues/10-training-terms.md`
 
@@ -133,14 +133,44 @@ ticket 09 fixed that site.
 
 ## Acceptance criteria
 
-- [ ] `rg -e total_steps -e warmup_steps -e 'cosine schedule' -e 'stepped by a'`
+- [x] `rg -e total_steps -e warmup_steps -e 'cosine schedule' -e 'stepped by a'`
       over `src`, `examples` (without `tmp/`) and the markdown files finds
       nothing.
-- [ ] Each hit of the command in step 3 is in [These stay](#these-stay). A hit
+- [x] Each hit of the command in step 3 is in [These stay](#these-stay). A hit
       can also be the second line of a wrapped term ("LR" ends the line before).
-- [ ] The help copy in `examples/README.md` is equal to the output of `-h`.
-- [ ] `cargo check`, `cargo test --lib -- --test-threads=1`,
+- [x] The help copy in `examples/README.md` is equal to the output of `-h`.
+- [x] `cargo check`, `cargo test --lib -- --test-threads=1`,
       `cargo test --examples -j 1 -- --test-threads=1` pass (flex).
-- [ ] `cargo doc --all --no-deps` has no warnings.
+- [x] `cargo doc --all --no-deps` has no warnings.
 
 ## Comments
+
+- The pin is rev `9f5e057`, the later commit of burn-stack ticket 10.
+- The word for each "schedule" of `examples/reset/` comes from the config of
+  its rung. Every rung has the same LR schedule (5120 training steps).
+  - "Training config", in the three paragraphs of `README.md` that say that
+    only one enum or integer changes. For `reset-spinor` and `reset-swap`, the
+    `training_config.json` of the compared runs are equal, byte for byte. The
+    `--micro-steps 1` row of `spinor-product` has no saved run at `max_lr` 0.03,
+    so `main.rs` is the only evidence for that row.
+  - "Training config", also in `spinor-product/model.rs:53`. The list above
+    has this line as an LR schedule. But the sentence compares whole runs, and
+    `h2-a`, `base-a` and `reset-swap` `d2-a` have equal configs.
+  - "LR schedule", in the `p ≡ 1` line of `README.md`. `spinor/tmp/` has no
+    `Rotor4D` run, and the sentence does not say that nothing else changes.
+  - "LR schedule", in the two "LR schedule of the ladder" lines (`README.md`,
+    `spinor-product/tests.rs`). The learning rate is the limit of these lines.
+    `l2-s0` (`max_lr` 0.03) gets 43.6 / 29.4 / 35.3%, and `l2-lr1e-2-s0`
+    (`max_lr` 0.01) gets 100 / 99.99 / 100% at the training length.
+- The review found these items, and this ticket does not change them:
+  - The locals `schedule` of `src/unified/tests/untied.rs` hold a layer
+    schedule. [These stay](#these-stay) keeps them, although `CLAUDE.md` asks
+    that an identifier follows a change of its term.
+  - The local `iterations_per_epoch` of `mnist-class`, `mnist-ae`,
+    `tiny-stories` and `hnet-stories` counts training steps.
+  - The doc of `mamba3_untied_tail_trains_one_copy_per_application` has one
+    sentence of 32 words and a passive clause. This ticket sets its wording.
+  - Seven examples repeat the same `CosineAnnealingLr` setup. Each one is its
+    own target and reads alone.
+- `cargo test --lib -- --test-threads=1`: 356 tests pass.
+  `cargo test --examples -j 1 -- --test-threads=1`: 56 tests pass.

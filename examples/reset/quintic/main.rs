@@ -89,20 +89,20 @@ pub fn launch(app_args: &AppArgs) {
     let (batch_size, num_epochs) = (64, 80);
     let mut training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
-        // The schedule of the ladder: a large learning rate to leave the
+        // The LR schedule of the ladder: a large learning rate to leave the
         // order-blind solutions, then a small one to settle the rotation onto
         // the exact turns.
-        let total_steps = num_epochs * dataset::NUM_TRAIN.div_ceil(batch_size);
+        let total_training_steps = num_epochs * dataset::NUM_TRAIN.div_ceil(batch_size);
         let optimizer = app_args.optimizer_or(common::training::OptimizerKind::AdamW);
         TrainingConfig::new(common::training::OptimizerConfig::of(optimizer, dtype))
         .with_num_epochs(num_epochs)
         .with_batch_size(batch_size)
         .with_num_workers(2)
         .with_lr(Lr::CosineAnnealing(
-            CosineAnnealingLr::new(total_steps)
+            CosineAnnealingLr::new(total_training_steps)
                 .with_max_lr(3e-2)
                 .with_min_lr(1e-4)
-                .with_warmup_steps(100),
+                .with_warmup_training_steps(100),
         ))
     });
     app_args.override_training_config(&mut training_config, dtype);

@@ -970,7 +970,7 @@ dependencies = [
 
 [[package]]
 name = "burn-mamba"
-version = "0.74.0"
+version = "0.75.0"
 dependencies = [
  "burn",
  "burn-cubecl",
@@ -1122,8 +1122,8 @@ dependencies = [
 
 [[package]]
 name = "burn-stack"
-version = "0.36.0"
-source = "git+https://github.com/swfsql/burn-stack.git?rev=1915e6994625bb5b97ec056e24e74d68bede62c1#1915e6994625bb5b97ec056e24e74d68bede62c1"
+version = "0.37.0"
+source = "git+https://github.com/swfsql/burn-stack.git?rev=9f5e0578f745d811d61de3c53a52991fcf8f638d#9f5e0578f745d811d61de3c53a52991fcf8f638d"
 dependencies = [
  "burn",
  "burn-cubecl",

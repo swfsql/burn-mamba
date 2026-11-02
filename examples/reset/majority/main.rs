@@ -61,18 +61,18 @@ pub fn launch(app_args: &AppArgs) {
         println!("Initializing new training config");
         // The selective solution needs a *large* learning rate to leave the
         // memoryless basin, and then a small one to settle into an exact hold.
-        // A constant LR does only one of the two, so this schedule anneals.
-        let total_steps = num_epochs * dataset::NUM_TRAIN.div_ceil(batch_size);
+        // A constant LR does only one of the two, so this LR schedule anneals.
+        let total_training_steps = num_epochs * dataset::NUM_TRAIN.div_ceil(batch_size);
         let optimizer = app_args.optimizer_or(common::training::OptimizerKind::AdamW);
         TrainingConfig::new(common::training::OptimizerConfig::of(optimizer, dtype))
         .with_num_epochs(num_epochs)
         .with_batch_size(batch_size)
         .with_num_workers(2)
         .with_lr(Lr::CosineAnnealing(
-            CosineAnnealingLr::new(total_steps)
+            CosineAnnealingLr::new(total_training_steps)
                 .with_max_lr(3e-2)
                 .with_min_lr(1e-4)
-                .with_warmup_steps(100),
+                .with_warmup_training_steps(100),
         ))
     });
     app_args.override_training_config(&mut training_config, dtype);

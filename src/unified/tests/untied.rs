@@ -180,7 +180,7 @@ fn mamba3_layout_follows_the_untie_list() {
 }
 
 /// An untied `in_proj` tail is one weight per application to the optimizer: the
-/// plan tiles its spec, each copy's rotation block is stepped on its own, and
+/// plan tiles its spec, each copy's rotation block is updated on its own, and
 /// the copies part under training.
 #[cfg(all(feature = "mamba3", feature = "optim"))]
 #[test]
