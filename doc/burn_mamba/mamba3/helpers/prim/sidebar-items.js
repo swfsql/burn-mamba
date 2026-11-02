@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["read_causal_mask","read_rows","scatter_read_rows"]};
+window.SIDEBAR_ITEMS = {"fn":["read_causal_mask","read_positions","scatter_read_positions"]};

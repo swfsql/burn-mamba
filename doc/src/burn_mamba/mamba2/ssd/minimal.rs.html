@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba2/ssd/minimal.rs`."><title>minimal.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.101.0-nightly (5c543b0b8 2026-09-29)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba2/ssd/</div>minimal.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! ## The Chunkwise SSD Algorithm
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba2/ssd/minimal.rs`."><title>minimal.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-5c590327.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.101.0-nightly (3e92e1a2d 2026-11-01)" data-channel="nightly" data-search-js="search-835b9732.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-9b351432.js" ><script src="../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-b2682d9c.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-101b5a15.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba2/ssd/</div>minimal.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! ## The Chunkwise SSD Algorithm
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! In training (and prefill), a naive sequential recurrence cannot use GPU
 <a href=#4 id=4 data-nosnippet>4</a>//! tensor cores. The **chunkwise SSD algorithm** (§4 of the paper) can. It
@@ -37,7 +37,7 @@
 <a href=#37 id=37 data-nosnippet>37</a>    ///
 <a href=#38 id=38 data-nosnippet>38</a>    /// ### Step 1 — Intra-chunk outputs (Y_diag)
 <a href=#39 id=39 data-nosnippet>39</a>    ///
-<a href=#40 id=40 data-nosnippet>40</a>    /// In each chunk, compute the output as if the initial hidden state were
+<a href=#40 id=40 data-nosnippet>40</a>    /// In each chunk, compute the output as if the initial state were
 <a href=#41 id=41 data-nosnippet>41</a>    /// zero. This is the *quadratic attention form* of the SSD layer, on a
 <a href=#42 id=42 data-nosnippet>42</a>    /// window of `chunk_len` tokens (§4.1):
 <a href=#43 id=43 data-nosnippet>43</a>    ///
@@ -50,7 +50,7 @@
 <a href=#50 id=50 data-nosnippet>50</a>    ///
 <a href=#51 id=51 data-nosnippet>51</a>    /// ### Step 2 — Chunk state (state_bnhpr)
 <a href=#52 id=52 data-nosnippet>52</a>    ///
-<a href=#53 id=53 data-nosnippet>53</a>    /// Compute the final SSM state of each chunk, from a zero initial state
+<a href=#53 id=53 data-nosnippet>53</a>    /// Compute the final state of each chunk, from a zero initial state
 <a href=#54 id=54 data-nosnippet>54</a>    /// (§4.1, Eq. 20):
 <a href=#55 id=55 data-nosnippet>55</a>    ///
 <a href=#56 id=56 data-nosnippet>56</a>    /// ```text
@@ -61,7 +61,7 @@
 <a href=#61 id=61 data-nosnippet>61</a>    ///
 <a href=#62 id=62 data-nosnippet>62</a>    /// ### Step 3 — Inter-chunk state scan (state passing)
 <a href=#63 id=63 data-nosnippet>63</a>    ///
-<a href=#64 id=64 data-nosnippet>64</a>    /// Carry the true hidden state across chunk boundaries with the
+<a href=#64 id=64 data-nosnippet>64</a>    /// Carry the true state across chunk boundaries with the
 <a href=#65 id=65 data-nosnippet>65</a>    /// recurrence (§4.1, Eq. 22):
 <a href=#66 id=66 data-nosnippet>66</a>    ///
 <a href=#67 id=67 data-nosnippet>67</a>    /// ```text
@@ -235,7 +235,7 @@
 <a href=#235 id=235 data-nosnippet>235</a>        // STEP 2: Compute chunk state (input → state)
 <a href=#236 id=236 data-nosnippet>236</a>        // =============================================================
 <a href=#237 id=237 data-nosnippet>237</a>        //
-<a href=#238 id=238 data-nosnippet>238</a>        // For each chunk n, compute the SSM state at the end of the chunk,
+<a href=#238 id=238 data-nosnippet>238</a>        // For each chunk n, compute the state at the end of the chunk,
 <a href=#239 id=239 data-nosnippet>239</a>        // from a zero initial state (Eq. 20):
 <a href=#240 id=240 data-nosnippet>240</a>        //
 <a href=#241 id=241 data-nosnippet>241</a>        //   s[n] = Σ_{t ∈ [0, chunk_len)} exp(a_cumsum[n,-1] - a_cumsum[n,t]) · B̄[n,t] · x[n,t]ᵀ
@@ -292,7 +292,7 @@
 <a href=#292 id=292 data-nosnippet>292</a>        // STEP 3: Inter-chunk state scan (state passing)
 <a href=#293 id=293 data-nosnippet>293</a>        // =============================================================
 <a href=#294 id=294 data-nosnippet>294</a>        //
-<a href=#295 id=295 data-nosnippet>295</a>        // Carry the hidden state across chunk boundaries. The recurrence is
+<a href=#295 id=295 data-nosnippet>295</a>        // Carry the state across chunk boundaries. The recurrence is
 <a href=#296 id=296 data-nosnippet>296</a>        //
 <a href=#297 id=297 data-nosnippet>297</a>        //   h[n] = Ā_chunk[n] · h[n-1] + s[n]     (Eq. 22)
 <a href=#298 id=298 data-nosnippet>298</a>        //
@@ -302,7 +302,7 @@
 <a href=#302 id=302 data-nosnippet>302</a>        // chunk level: each new state is a weighted sum of all previous chunk
 <a href=#303 id=303 data-nosnippet>303</a>        // states. The same 1-SS segsum trick applies, over the nchunks axis.
 <a href=#304 id=304 data-nosnippet>304</a>        //
-<a href=#305 id=305 data-nosnippet>305</a>        // The result is `new_state[n]`, the true hidden state entering chunk n,
+<a href=#305 id=305 data-nosnippet>305</a>        // The result is `new_state[n]`, the true state entering chunk n,
 <a href=#306 id=306 data-nosnippet>306</a>        // for n ∈ {0, ..., nchunks-1}, plus the final state after all chunks.
 <a href=#307 id=307 data-nosnippet>307</a>        </span><span class="kw">let </span>(state_bnhpr, final_state_bhpr) = {
 <a href=#308 id=308 data-nosnippet>308</a>            <span class="comment">// Prepend the initial state h₀ to the array of chunk state.
@@ -353,7 +353,7 @@
 <a href=#353 id=353 data-nosnippet>353</a>
 <a href=#354 id=354 data-nosnippet>354</a>            <span class="comment">// 1-SS inter-chunk decay matrix.
 <a href=#355 id=355 data-nosnippet>355</a>            //   decay_chunk[i, j] = exp(Σ_{k=j+1..i} a_cum_last[k])  (i ≥ j)
-<a href=#356 id=356 data-nosnippet>356</a>            // Row i times the state vector gives the true hidden state
+<a href=#356 id=356 data-nosnippet>356</a>            // Row i times the state vector gives the true state
 <a href=#357 id=357 data-nosnippet>357</a>            // entering chunk i.
 <a href=#358 id=358 data-nosnippet>358</a>            </span><span class="kw">let </span>decay_chunk_bhNN = segsum(a_chunk_pad_bhN).exp();
 <a href=#359 id=359 data-nosnippet>359</a>            <span class="macro">assert_eq!</span>(
@@ -387,7 +387,7 @@
 <a href=#387 id=387 data-nosnippet>387</a>            //   state[0..nchunks]  — the initial state entering each chunk
 <a href=#388 id=388 data-nosnippet>388</a>            //   state[nchunks]     — the final state after the last real token
 <a href=#389 id=389 data-nosnippet>389</a>            //
-<a href=#390 id=390 data-nosnippet>390</a>            // In a padded sequence, the padding steps are identity steps
+<a href=#390 id=390 data-nosnippet>390</a>            // In a padded sequence, the padded positions are identity updates
 <a href=#391 id=391 data-nosnippet>391</a>            // (Δ=0 ⇒ Ā=1, B̄=0). The state goes through the pad unchanged, so
 <a href=#392 id=392 data-nosnippet>392</a>            // `state[nchunks]` is the correct final state.
 <a href=#393 id=393 data-nosnippet>393</a>            </span><span class="kw">let </span>state_bhnpr = new_state_bhNpr

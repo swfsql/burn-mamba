@@ -1,0 +1,48 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="The tap pattern of the trapezoid — which earlier sample the `β` tap reads"><title>burn_mamba::mamba3::tap_pattern - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-5c590327.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.101.0-nightly (3e92e1a2d 2026-11-01)" data-channel="nightly" data-search-js="search-835b9732.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-9b351432.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../../static.files/main-b2682d9c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-101b5a15.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module tap_pattern</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../burn_mamba/index.html">burn_<wbr>mamba</a><span class="version">0.75.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module tap_<wbr>pattern</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#the-tap-pattern-of-the-trapezoid--which-earlier-sample-the-β-tap-reads" title="The tap pattern of the trapezoid — which earlier sample the `β` tap reads">The tap pattern of the trapezoid — which earlier sample the <code>β</code> tap reads</a><ul><li><a href="#one-rule-for-every-member" title="One rule for every member">One rule for every member</a></li></ul></li></ul><h3><a href="#structs">Module Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li></ul></section><div id="rustdoc-modnav"><h2><a href="../index.html">In burn_<wbr>mamba::<wbr>mamba3</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../index.html">burn_mamba</a>::<wbr><a href="../index.html">mamba3</a></div><h1>Module <span>tap_<wbr>pattern</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../src/burn_mamba/mamba3/tap_pattern.rs.html#1-1435">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="the-tap-pattern-of-the-trapezoid--which-earlier-sample-the-β-tap-reads"><a class="doc-anchor" href="#the-tap-pattern-of-the-trapezoid--which-earlier-sample-the-%CE%B2-tap-reads">§</a>The tap pattern of the trapezoid — which earlier sample the <code>β</code> tap reads</h2>
+<p>The write of Mamba-3 is a two-tap filter on the state input: the current
+sample at <code>γₜ = λₜΔₜ</code>, and an earlier one at <code>βₜ = (1−λₜ)Δₜαₜ</code>, transported
+across the gap between them (<code>helpers::trapezoidal_coefficients</code>). At
+<a href="../mamba3/struct.Mamba3Config.html#structfield.micro_steps" title="field burn_mamba::mamba3::mamba3::Mamba3Config::micro_steps"><code>micro_steps</code></a> <code>= 1</code>,
+“earlier” can only mean the previous token, so there is no choice. At
+<code>u &gt; 1</code>, the write axis has <code>u</code> positions per token
+(<a href="../product/index.html" title="mod burn_mamba::mamba3::product"><code>crate::mamba3::product</code></a>), and the choice is real.</p>
+<p><a href="enum.TapPattern.html" title="enum burn_mamba::mamba3::tap_pattern::TapPattern"><code>TapPattern</code></a> names the members of that lattice.
+<code>info/mamba-3/trapezoid-as-integration.md</code> §§8–9 derives it, prices each
+member, and proves the invariant that all members keep: each tap is
+transported across <em>its own</em> gap, which keeps the single-SSD <code>Δ̃</code> collapse.
+This module cites the note and does not restate it.</p>
+<h3 id="one-rule-for-every-member"><a class="doc-anchor" href="#one-rule-for-every-member">§</a>One rule for every member</h3>
+<p>A pattern says which earlier samples are <strong>admissible</strong> at each write
+position. Their <em>weight</em> is not a second decision. Two learned per-(head,
+micro-step) scalars split the mass <code>Δₚ</code> of the micro-step. A tap that is not
+admissible gives its mass back one level. The lag-1 tap of a two-tap
+member gives it to the lag-<code>u</code> tap. The tap at
+<a href="enum.TapPattern.html#method.tap_lag" title="method burn_mamba::mamba3::tap_pattern::TapPattern::tap_lag"><code>tap_lag</code></a> gives it to <code>γ</code>. Under
+<a href="enum.TapPattern.html#variant.HorizontalReset" title="variant burn_mamba::mamba3::tap_pattern::TapPattern::HorizontalReset"><code>HorizontalReset</code></a>, that tap is a lag-1 tap.
+The masses are:</p>
+<div class="example-wrap"><pre class="language-text"><code>  γ = λΔ            the right endpoint, what the read sees   (λ = σ(λ̂))
+  ν = (1−λ)Δ        the left-endpoint mass                   (μ = σ(μ̂))
+  νⁱⁿᵗ = ν·μ        at the lag-1 tap  — pairs micro-steps inside a token
+  νᶠᵃʳ = ν − νⁱⁿᵗ   at the lag-`u` tap — the same micro-step of the previous token</code></pre></div>
+<p>So <code>γ + νⁱⁿᵗ + νᶠᵃʳ = Δ</code> at every position, open or closed. <code>λ</code> keeps the
+meaning that the note gives it (the splitting parameter of §4). <code>μ</code>, the
+one channel that the two-tap members add, says <strong>which earlier sample is
+the left endpoint</strong>: it interpolates between the two candidates. Thus the
+quadrature weights stay non-negative and still sum to <code>Δ</code>. The “top-up,
+never a rollback” reading of §5 holds for the wider tap set, and so does the
+collapse: sample <code>s</code> carries the one scalar <code>γₛ + νⁱⁿᵗₛ₊₁ + νᶠᵃʳₛ₊ᵤ</code>.</p>
+<p>Because of this fallback, the members whose lag-1 tap closes at token
+boundaries, and the two-tap members, are <em>submodels</em>, not different models:</p>
+<ul>
+<li><a href="enum.TapPattern.html#variant.HorizontalReset" title="variant burn_mamba::mamba3::tap_pattern::TapPattern::HorizontalReset"><code>HorizontalReset</code></a> is
+<a href="enum.TapPattern.html#variant.HorizontalCarryOver" title="variant burn_mamba::mamba3::tap_pattern::TapPattern::HorizontalCarryOver"><code>HorizontalCarryOver</code></a> with <code>λ = 1</code> at
+the first micro-step of each token (the limit of §8).</li>
+<li><a href="enum.TapPattern.html#variant.VerticalPlusHorizontalCarryOver" title="variant burn_mamba::mamba3::tap_pattern::TapPattern::VerticalPlusHorizontalCarryOver"><code>VerticalPlusHorizontalCarryOver</code></a>
+<em>contains</em> both implemented single-tap patterns, at <code>μ ≡ 1</code> and <code>μ ≡ 0</code>.</li>
+</ul>
+<p>If a closed tap dropped its mass instead of giving it back, both statements
+would be false, and the write would silently be weaker at <code>1/u</code> of the
+positions.</p>
+</div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.TapPatternSpec.html" title="struct burn_mamba::mamba3::tap_pattern::TapPatternSpec">TapPattern<wbr>Spec</a></dt><dd>Everything the discretisation needs from the block: the tap pattern, the
+micro-steps (the period of the token boundaries, where a tap can close), and
+the two clamps on the coefficients.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.TapPattern.html" title="enum burn_mamba::mamba3::tap_pattern::TapPattern">TapPattern</a></dt><dd>Which earlier sample(s) the <code>β</code> tap of the trapezoid reads.</dd></dl></section></div></main></body></html>

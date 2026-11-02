@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["LOG_ZERO"],"enum":["Gain","Tropical"],"fn":["fresh_slots"],"mod":["kalman","scan","tropical"]};
+window.SIDEBAR_ITEMS = {"constant":["LOG_ZERO"],"enum":["Gain","Tropical"],"fn":["fresh_fields"],"mod":["kalman","scan","tropical"]};

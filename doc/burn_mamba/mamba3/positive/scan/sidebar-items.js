@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["fold","lse","one_and_zero","prefix","prefix_in_segments"],"struct":["Affine","Mobius","Restart"],"trait":["Element"]};
+window.SIDEBAR_ITEMS = {"fn":["fold","lse","one_and_zero","prefix","prefix_in_segments"],"struct":["Affine","Mobius","Resets"],"trait":["Element"]};

@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba3/double_ssd/ssd/minimal.rs`."><title>minimal.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.101.0-nightly (5c543b0b8 2026-09-29)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba3/double_ssd/ssd/</div>minimal.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! ## The Chunkwise MIMO-SSD Algorithm (Minimal/Segsum variant)
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba3/double_ssd/ssd/minimal.rs`."><title>minimal.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-5c590327.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.101.0-nightly (3e92e1a2d 2026-11-01)" data-channel="nightly" data-search-js="search-835b9732.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-9b351432.js" ><script src="../../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-b2682d9c.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-101b5a15.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba3/double_ssd/ssd/</div>minimal.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! ## The Chunkwise MIMO-SSD Algorithm (the `Minimal` SSD path, by segsum)
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! In training (and prefill), a naive sequential recurrence cannot use GPU
 <a href=#4 id=4 data-nosnippet>4</a>//! tensor cores. The **chunkwise SSD algorithm** can. It splits the sequence
@@ -14,8 +14,8 @@
 <a href=#14 id=14 data-nosnippet>14</a>//! ```
 <a href=#15 id=15 data-nosnippet>15</a>//!
 <a href=#16 id=16 data-nosnippet>16</a>//! The MIMO causal mask `LM_mimo[i,j] = exp(cumA[i//m] - cumA[j//m])` for
-<a href=#17 id=17 data-nosnippet>17</a>//! `i//m &gt;= j//m` lets all `mimo_rank` ranks at the same time step attend to
-<a href=#18 id=18 data-nosnippet>18</a>//! each other, and keeps the causal order across time steps. (At
+<a href=#17 id=17 data-nosnippet>17</a>//! `i//m &gt;= j//m` lets all `mimo_rank` ranks at the same position attend to
+<a href=#18 id=18 data-nosnippet>18</a>//! each other, and keeps the causal order across positions. (At
 <a href=#19 id=19 data-nosnippet>19</a>//! `read_stride &gt; 1` the Y shapes use `chunk_tokens` rows, not `chunk_len`.)
 <a href=#20 id=20 data-nosnippet>20</a>
 <a href=#21 id=21 data-nosnippet>21</a></span><span class="kw">use </span><span class="kw">crate</span>::mamba3::double_ssd::prelude::<span class="kw-2">*</span>;
@@ -25,7 +25,7 @@
 <a href=#25 id=25 data-nosnippet>25</a><span class="kw">use </span>burn::prelude::<span class="kw-2">*</span>;
 <a href=#26 id=26 data-nosnippet>26</a>
 <a href=#27 id=27 data-nosnippet>27</a><span class="kw">impl </span>Mamba3DoubleSsdInput {
-<a href=#28 id=28 data-nosnippet>28</a>    <span class="doccomment">/// MIMO-first chunkwise SSD — minimal/segsum variant.
+<a href=#28 id=28 data-nosnippet>28</a>    <span class="doccomment">/// MIMO-first chunkwise SSD — the `Minimal` SSD path (segsum).
 <a href=#29 id=29 data-nosnippet>29</a>    ///
 <a href=#30 id=30 data-nosnippet>30</a>    /// The four-step decomposition for the MIMO (double-ssd) trapezoidal
 <a href=#31 id=31 data-nosnippet>31</a>    /// recurrence. SISO (mimo_rank=1) is the degenerate case where the fused
@@ -63,7 +63,7 @@
 <a href=#63 id=63 data-nosnippet>63</a>            .v_bnlmhp
 <a href=#64 id=64 data-nosnippet>64</a>            .reshape([batch, nchunks, fused, nheads, per_head_dim]);
 <a href=#65 id=65 data-nosnippet>65</a>
-<a href=#66 id=66 data-nosnippet>66</a>        <span class="comment">// Base per-time-step cumulative log-decay
+<a href=#66 id=66 data-nosnippet>66</a>        <span class="comment">// Base per-position cumulative log-decay
 <a href=#67 id=67 data-nosnippet>67</a>        </span><span class="kw">let </span>a_bhnl = input.da_bnlh.clone().permute([<span class="number">0</span>, <span class="number">3</span>, <span class="number">1</span>, <span class="number">2</span>]);
 <a href=#68 id=68 data-nosnippet>68</a>        <span class="kw">let </span>a_cumsum_bhnl = a_bhnl.clone().cumsum(<span class="number">3</span>);
 <a href=#69 id=69 data-nosnippet>69</a>
@@ -82,12 +82,12 @@
 <a href=#82 id=82 data-nosnippet>82</a>            <span class="comment">// [batch, nchunks, nheads, chunk_tokens*mimo_rank, chunk_len*mimo_rank]
 <a href=#83 id=83 data-nosnippet>83</a>            </span><span class="kw">let </span>cb_bnhTMLM = c_bnhTMr.matmul(b_bnhrLM);
 <a href=#84 id=84 data-nosnippet>84</a>
-<a href=#85 id=85 data-nosnippet>85</a>            <span class="comment">// The causal decay over (read row, folded source): `segsum`'s
+<a href=#85 id=85 data-nosnippet>85</a>            <span class="comment">// The causal decay over (read position, write source): `segsum`'s
 <a href=#86 id=86 data-nosnippet>86</a>            // rectangular counterpart, which is what it *is* at `read_stride = 1`.
 <a href=#87 id=87 data-nosnippet>87</a>            // l_base_bhntl[i,j] = exp(cumA[row(i)] - cumA[j]) if row(i) &gt;= j, else 0
 <a href=#88 id=88 data-nosnippet>88</a>            </span><span class="kw">let </span>l_base_bhntl = {
 <a href=#89 id=89 data-nosnippet>89</a>                <span class="kw">let </span>row: Tensor&lt;<span class="number">5</span>&gt; =
-<a href=#90 id=90 data-nosnippet>90</a>                    helpers::read_rows::&lt;<span class="number">4</span>, <span class="number">5</span>&gt;(a_cumsum_bhnl.clone(), <span class="number">3</span>, read_stride)
+<a href=#90 id=90 data-nosnippet>90</a>                    helpers::read_positions::&lt;<span class="number">4</span>, <span class="number">5</span>&gt;(a_cumsum_bhnl.clone(), <span class="number">3</span>, read_stride)
 <a href=#91 id=91 data-nosnippet>91</a>                        .unsqueeze_dim(<span class="number">4</span>); <span class="comment">// [..., t, 1]
 <a href=#92 id=92 data-nosnippet>92</a>                </span><span class="kw">let </span>col: Tensor&lt;<span class="number">5</span>&gt; = a_cumsum_bhnl.clone().unsqueeze_dim(<span class="number">3</span>); <span class="comment">// [..., 1, l]
 <a href=#93 id=93 data-nosnippet>93</a>                </span><span class="kw">let </span>neg_inf =
@@ -214,8 +214,8 @@
 <a href=#214 id=214 data-nosnippet>214</a>        // Y_off[n, t*m+r] = C[t*m+r]ᵀ · exp(cumA[t]) · h[n-1]
 <a href=#215 id=215 data-nosnippet>215</a>        // =============================================================
 <a href=#216 id=216 data-nosnippet>216</a>        </span><span class="kw">let </span>y_off_bnTMhp = {
-<a href=#217 id=217 data-nosnippet>217</a>            <span class="comment">// Expand the read rows' cumsum to fused, then exp:
-<a href=#218 id=218 data-nosnippet>218</a>            </span><span class="kw">let </span>state_decay_bhnTM = helpers::read_rows::&lt;<span class="number">4</span>, <span class="number">5</span>&gt;(a_cumsum_bhnl, <span class="number">3</span>, read_stride)
+<a href=#217 id=217 data-nosnippet>217</a>            <span class="comment">// Expand the read positions' cumsum to fused, then exp:
+<a href=#218 id=218 data-nosnippet>218</a>            </span><span class="kw">let </span>state_decay_bhnTM = helpers::read_positions::&lt;<span class="number">4</span>, <span class="number">5</span>&gt;(a_cumsum_bhnl, <span class="number">3</span>, read_stride)
 <a href=#219 id=219 data-nosnippet>219</a>                .unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">4</span>) <span class="comment">// a_cumsum_bhnt1
 <a href=#220 id=220 data-nosnippet>220</a>                </span>.expand([batch, nheads, nchunks, chunk_tokens, mimo_rank]) <span class="comment">// a_cumsum_bhntm
 <a href=#221 id=221 data-nosnippet>221</a>                </span>.reshape([batch, nheads, nchunks, read]) <span class="comment">// a_cumsum_bhnTM

@@ -1,24 +1,24 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba3/single_ssd/single_ssd/mod.rs`."><title>mod.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.101.0-nightly (5c543b0b8 2026-09-29)" data-channel="nightly" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba3/single_ssd/single_ssd/</div>mod.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! # Mamba-3 — Single-Pass SSD Forward
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba3/single_ssd/single_ssd/mod.rs`."><title>mod.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-5c590327.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.101.0-nightly (3e92e1a2d 2026-11-01)" data-channel="nightly" data-search-js="search-835b9732.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-9b351432.js" ><script src="../../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-b2682d9c.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-101b5a15.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba3/single_ssd/single_ssd/</div>mod.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! # Mamba-3 — Single-Pass SSD Forward
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! `forward_single_ssd` and `step_single_ssd` on
-<a href=#4 id=4 data-nosnippet>4</a>//! [`Mamba3`](crate::mamba3::mamba3::Mamba3): the **official Mamba-3
-<a href=#5 id=5 data-nosnippet>5</a>//! algorithm**, as in its Triton (SISO) and Tilelang (MIMO) kernels:
+<a href=#4 id=4 data-nosnippet>4</a>//! [`Mamba3`](crate::mamba3::mamba3::Mamba3): the pathway of the **official
+<a href=#5 id=5 data-nosnippet>5</a>//! Mamba-3 kernels**, Triton (SISO) and Tilelang (MIMO):
 <a href=#6 id=6 data-nosnippet>6</a>//!
 <a href=#7 id=7 data-nosnippet>7</a>//! ```text
 <a href=#8 id=8 data-nosnippet>8</a>//!   scaleₜ = γₜ + νₜ₊ₗₐ₉ (+ νⁱⁿᵗₜ₊₁)
 <a href=#9 id=9 data-nosnippet>9</a>//!
 <a href=#10 id=10 data-nosnippet>10</a>//!   forward_single_ssd:    h' = SSD(V_raw, K_scaled = scaleₜ B) with:
 <a href=#11 id=11 data-nosnippet>11</a>//!                               * strict lower-triangular intra-chunk mask
-<a href=#12 id=12 data-nosnippet>12</a>//!                               * additive γ-weighted same-step correction
+<a href=#12 id=12 data-nosnippet>12</a>//!                               * additive γ-weighted diagonal correction
 <a href=#13 id=13 data-nosnippet>13</a>//!                               * boundary β seed Σⱼ νⱼ Kⱼ ⊗ xⱼ over the
 <a href=#14 id=14 data-nosnippet>14</a>//!                                 cache's `lag` tap slots
 <a href=#15 id=15 data-nosnippet>15</a>//!                               * at lag &gt; 1, the rest of the correction band
 <a href=#16 id=16 data-nosnippet>16</a>//!                                 ([`crate::mamba3::single_ssd::token_band`])
 <a href=#17 id=17 data-nosnippet>17</a>//! ```
 <a href=#18 id=18 data-nosnippet>18</a>//!
-<a href=#19 id=19 data-nosnippet>19</a>//! `lag` is [`Trapezoid::tap_lag`](crate::mamba3::trapezoid::Trapezoid::tap_lag):
+<a href=#19 id=19 data-nosnippet>19</a>//! `lag` is [`TapPattern::tap_lag`](crate::mamba3::tap_pattern::TapPattern::tap_lag):
 <a href=#20 id=20 data-nosnippet>20</a>//! `1` for the default tap pattern, `u` for
-<a href=#21 id=21 data-nosnippet>21</a>//! [`Trapezoid::Vertical`](crate::mamba3::trapezoid::Trapezoid::Vertical). A
+<a href=#21 id=21 data-nosnippet>21</a>//! [`TapPattern::Vertical`](crate::mamba3::tap_pattern::TapPattern::Vertical). A
 <a href=#22 id=22 data-nosnippet>22</a>//! two-tap pattern adds the term in parentheses: a second shift of the same
 <a href=#23 id=23 data-nosnippet>23</a>//! shape, because the collapse of §9 leaves one scalar per sample for any
 <a href=#24 id=24 data-nosnippet>24</a>//! number of taps. That is all it costs here: one pass either way.
@@ -41,25 +41,25 @@
 <a href=#41 id=41 data-nosnippet>41</a>
 <a href=#42 id=42 data-nosnippet>42</a><span class="kw">impl </span>Mamba3 {
 <a href=#43 id=43 data-nosnippet>43</a>    <span class="doccomment">/// Process a full input sequence with the **single-ssd (single-pass)**
-<a href=#44 id=44 data-nosnippet>44</a>    /// trapezoidal algorithm.
+<a href=#44 id=44 data-nosnippet>44</a>    /// pathway.
 <a href=#45 id=45 data-nosnippet>45</a>    ///
 <a href=#46 id=46 data-nosnippet>46</a>    /// Functionally equivalent to [`Self::forward_double_ssd`], with about half
 <a href=#47 id=47 data-nosnippet>47</a>    /// the SSD memory in training. The cache is a separate type
-<a href=#48 id=48 data-nosnippet>48</a>    /// ([`Mamba3SingleSsdCache`]), because its hidden state has different
-<a href=#49 id=49 data-nosnippet>49</a>    /// semantics mid-sequence.
+<a href=#48 id=48 data-nosnippet>48</a>    /// ([`Mamba3SingleSsdCache`]), because this pathway carries the
+<a href=#49 id=49 data-nosnippet>49</a>    /// accumulator, which differs from the state mid-sequence.
 <a href=#50 id=50 data-nosnippet>50</a>    ///
 <a href=#51 id=51 data-nosnippet>51</a>    /// "Equivalent" covers **everything that a caller can observe**: the
 <a href=#52 id=52 data-nosnippet>52</a>    /// returned output and every field of the returned cache. It does not cover
-<a href=#53 id=53 data-nosnippet>53</a>    /// the intermediate `y` of the SSD core at each *folded* position. Under a
-<a href=#54 id=54 data-nosnippet>54</a>    /// lag-`u` pattern such as [`Trapezoid::Vertical`], the correction band
+<a href=#53 id=53 data-nosnippet>53</a>    /// the intermediate `y` of the SSD core at each *write* position. Under a
+<a href=#54 id=54 data-nosnippet>54</a>    /// lag-`u` pattern such as [`TapPattern::Vertical`], the correction band
 <a href=#55 id=55 data-nosnippet>55</a>    /// applies only at the last micro-step of each token (the readout). So the
 <a href=#56 id=56 data-nosnippet>56</a>    /// `u−1` per-token partial sums that this pathway discards do not match the
 <a href=#57 id=57 data-nosnippet>57</a>    /// double-SSD ones. Nothing reads them, and the *state* is exact at every
 <a href=#58 id=58 data-nosnippet>58</a>    /// position in both pathways. See [`crate::mamba3::single_ssd::token_band`],
 <a href=#59 id=59 data-nosnippet>59</a>    /// which also tells why that band never has to enter the kernel.
 <a href=#60 id=60 data-nosnippet>60</a>    ///
-<a href=#61 id=61 data-nosnippet>61</a>    /// Under [`Trapezoid::None`] there is no second pass to fuse. The composite
-<a href=#62 id=62 data-nosnippet>62</a>    /// key scale is `γ`, and the same-step correction is the whole diagonal. So
+<a href=#61 id=61 data-nosnippet>61</a>    /// Under [`TapPattern::None`] there is no second pass to fuse. The composite
+<a href=#62 id=62 data-nosnippet>62</a>    /// key scale is `γ`, and the γ-correction is the whole diagonal. So
 <a href=#63 id=63 data-nosnippet>63</a>    /// this *is* the double-SSD form (`h' ≡ h` at every position, not only at
 <a href=#64 id=64 data-nosnippet>64</a>    /// boundaries), and the call delegates to `forward_double_ssd`. It does not
 <a href=#65 id=65 data-nosnippet>65</a>    /// run a strict-mask kernel plus a correction that puts back what the mask
@@ -68,7 +68,7 @@
 <a href=#68 id=68 data-nosnippet>68</a>    /// `pad_bt` marks a right-padded batch of tokens, as in [`Self::forward`].
 <a href=#69 id=69 data-nosnippet>69</a>    /// The last tap installment of a real position, which a padded position
 <a href=#70 id=70 data-nosnippet>70</a>    /// would pay, then stays in the tap slots, exactly as at a call boundary.
-<a href=#71 id=71 data-nosnippet>71</a>    /// So `h'` holds the double-SSD state from the end of each slot on.
+<a href=#71 id=71 data-nosnippet>71</a>    /// So the accumulator `h'` equals the state from the end of each row on.
 <a href=#72 id=72 data-nosnippet>72</a>    ///
 <a href=#73 id=73 data-nosnippet>73</a>    /// # Shapes
 <a href=#74 id=74 data-nosnippet>74</a>    /// - `input_bsm`: `[batch, sequence, d_model]`
@@ -102,7 +102,7 @@
 <a href=#102 id=102 data-nosnippet>102</a>        pad_bt: <span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">2</span>, Bool&gt;&gt;,
 <a href=#103 id=103 data-nosnippet>103</a>        reset_bt: <span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">2</span>, Bool&gt;&gt;,
 <a href=#104 id=104 data-nosnippet>104</a>    ) -&gt; (Tensor&lt;<span class="number">3</span>&gt;, Mamba3SingleSsdCache) {
-<a href=#105 id=105 data-nosnippet>105</a>        <span class="kw">if </span>!<span class="self">self</span>.trapezoid.has_beta_tap() {
+<a href=#105 id=105 data-nosnippet>105</a>        <span class="kw">if </span>!<span class="self">self</span>.tap_pattern.has_beta_tap() {
 <a href=#106 id=106 data-nosnippet>106</a>            <span class="kw">let </span>(out_bsm, cache) = <span class="self">self</span>.forward_double_ssd_packed(
 <a href=#107 id=107 data-nosnippet>107</a>                input_bsm,
 <a href=#108 id=108 data-nosnippet>108</a>                cache.map(Into::into),
@@ -134,13 +134,13 @@
 <a href=#134 id=134 data-nosnippet>134</a>        san(<span class="kw-2">&amp;</span>input_bsm);
 <a href=#135 id=135 data-nosnippet>135</a>
 <a href=#136 id=136 data-nosnippet>136</a>        <span class="comment">// A padded token pads all of its micro-steps. `end_b` is one past the
-<a href=#137 id=137 data-nosnippet>137</a>        // last real position of each slot on the folded axis, where its cache
+<a href=#137 id=137 data-nosnippet>137</a>        // last real position of each row on the write axis, where its cache
 <a href=#138 id=138 data-nosnippet>138</a>        // fields are read.
-<a href=#139 id=139 data-nosnippet>139</a>        </span><span class="kw">let </span>pad_bs = pad_bt.map(|pad_bt| <span class="kw">crate</span>::padding::repeat_rows(pad_bt, micro_steps));
+<a href=#139 id=139 data-nosnippet>139</a>        </span><span class="kw">let </span>pad_bs = pad_bt.map(|pad_bt| <span class="kw">crate</span>::padding::repeat_positions(pad_bt, micro_steps));
 <a href=#140 id=140 data-nosnippet>140</a>        <span class="kw">let </span>end_b = pad_bs.as_ref().map(<span class="kw">crate</span>::padding::real_end_b);
 <a href=#141 id=141 data-nosnippet>141</a>
 <a href=#142 id=142 data-nosnippet>142</a>        <span class="comment">// A reset is at the first token of a chunk, which is its first
-<a href=#143 id=143 data-nosnippet>143</a>        // micro-step on the folded axis. See [`crate::packing`].
+<a href=#143 id=143 data-nosnippet>143</a>        // micro-step on the write axis. See [`crate::packing`].
 <a href=#144 id=144 data-nosnippet>144</a>        </span><span class="kw">let </span>chunk_len = ssd_path.chunk_len_or_optimal(<span class="self">self</span>);
 <a href=#145 id=145 data-nosnippet>145</a>        <span class="kw">let </span>segments = reset_bt.map(|reset_bt| {
 <a href=#146 id=146 data-nosnippet>146</a>            <span class="kw">let </span>chunk_tokens = Mamba3SsdPath::chunk_tokens(chunk_len, micro_steps);
@@ -151,7 +151,7 @@
 <a href=#151 id=151 data-nosnippet>151</a>        <span class="comment">// ── Initialise cache if not provided ──────────────────────────────────
 <a href=#152 id=152 data-nosnippet>152</a>        </span><span class="kw">let </span>fresh = || {
 <a href=#153 id=153 data-nosnippet>153</a>            <span class="kw">let </span>ssm_bhpr = Tensor::zeros([batch, nheads, per_head_dim, state_rank], <span class="kw-2">&amp;</span>device);
-<a href=#154 id=154 data-nosnippet>154</a>            <span class="comment">// Reached only with a β tap (`Trapezoid::None` delegated above).
+<a href=#154 id=154 data-nosnippet>154</a>            <span class="comment">// Reached only with a β tap (`TapPattern::None` delegated above).
 <a href=#155 id=155 data-nosnippet>155</a>            </span><span class="kw">let </span>(k_state_bumhr, v_state_buhp) = <span class="self">self</span>.zero_tap_slots(batch, <span class="kw-2">&amp;</span>device);
 <a href=#156 id=156 data-nosnippet>156</a>            <span class="kw">let </span>rotation = <span class="self">self</span>.zero_rotation_state(batch, <span class="kw-2">&amp;</span>device);
 <a href=#157 id=157 data-nosnippet>157</a>            <span class="kw">let </span>(log_precision_bh, tropical_bh) = <span class="self">self</span>.zero_positive_state(batch, <span class="kw-2">&amp;</span>device);
@@ -166,8 +166,8 @@
 <a href=#166 id=166 data-nosnippet>166</a>        };
 <a href=#167 id=167 data-nosnippet>167</a>        <span class="kw">let </span><span class="kw-2">mut </span>cache = cache.unwrap_or_else(fresh);
 <a href=#168 id=168 data-nosnippet>168</a>        <span class="comment">// A packed row: the cache that each segment starts from. At a call
-<a href=#169 id=169 data-nosnippet>169</a>        // boundary, `h'` is the double-SSD state, so the fields convert as
-<a href=#170 id=170 data-nosnippet>170</a>        // they are.
+<a href=#169 id=169 data-nosnippet>169</a>        // boundary, the accumulator `h'` equals the state, so the fields
+<a href=#170 id=170 data-nosnippet>170</a>        // convert as they are.
 <a href=#171 id=171 data-nosnippet>171</a>        </span><span class="kw">let </span>packed = segments.map(|segments| Packed {
 <a href=#172 id=172 data-nosnippet>172</a>            segments,
 <a href=#173 id=173 data-nosnippet>173</a>            origin: origin.unwrap_or_else(fresh).into(),
@@ -180,14 +180,14 @@
 <a href=#180 id=180 data-nosnippet>180</a>        </span><span class="kw">let </span>(proj_bsd, noise_btH, tropical_btH) = <span class="self">self</span>.split_positive(proj_bsd, <span class="number">2</span>);
 <a href=#181 id=181 data-nosnippet>181</a>        <span class="kw">let </span>bc_size = ngroups * state_rank * mimo_rank;
 <a href=#182 id=182 data-nosnippet>182</a>
-<a href=#183 id=183 data-nosnippet>183</a>        <span class="comment">// `u` = micro_steps widens every per-micro-step segment, and `unfold`
-<a href=#184 id=184 data-nosnippet>184</a>        // reads each of them as `u` consecutive sequence positions. `z`
+<a href=#183 id=183 data-nosnippet>183</a>        <span class="comment">// `u` = micro_steps widens every per-micro-step channel group, and
+<a href=#184 id=184 data-nosnippet>184</a>        // `unfold` reads each of them as `u` consecutive write positions. `z`
 <a href=#185 id=185 data-nosnippet>185</a>        // (per-token gate) and `C` (per-token read) do not widen. See
 <a href=#186 id=186 data-nosnippet>186</a>        // [`crate::mamba3::product`].
-<a href=#187 id=187 data-nosnippet>187</a>        // The optional segments come off the tail first, in reverse layout
+<a href=#187 id=187 data-nosnippet>187</a>        // The optional channel groups come off the tail first, in reverse layout
 <a href=#188 id=188 data-nosnippet>188</a>        // order: the rotation (`Real1D` projects none), then `μ` (only a
 <a href=#189 id=189 data-nosnippet>189</a>        // two-tap pattern projects it), then `λ`. `λ` is always present here,
-<a href=#190 id=190 data-nosnippet>190</a>        // because `Trapezoid::None` delegated above. A zero-width segment would
+<a href=#190 id=190 data-nosnippet>190</a>        // because `TapPattern::None` delegated above. A zero-width group would
 <a href=#191 id=191 data-nosnippet>191</a>        // silently vanish from the split below.
 <a href=#192 id=192 data-nosnippet>192</a>        </span><span class="kw">let </span>u = micro_steps;
 <a href=#193 id=193 data-nosnippet>193</a>        <span class="kw">let </span>(proj_bsd, rot_btA) =
@@ -245,11 +245,11 @@
 <a href=#245 id=245 data-nosnippet>245</a>            <span class="prelude-val">Some</span>(lambda_raw_bsh),
 <a href=#246 id=246 data-nosnippet>246</a>            mu_raw_bsh,
 <a href=#247 id=247 data-nosnippet>247</a>            <span class="self">self</span>.dt_bias_h.val(),
-<a href=#248 id=248 data-nosnippet>248</a>            <span class="self">self</span>.trapezoid_spec(),
+<a href=#248 id=248 data-nosnippet>248</a>            <span class="self">self</span>.tap_pattern_spec(),
 <a href=#249 id=249 data-nosnippet>249</a>            <span class="self">self</span>.gain_input(noise_bsh, cache.log_precision_bh.clone(), packed.as_ref()),
 <a href=#250 id=250 data-nosnippet>250</a>        )
 <a href=#251 id=251 data-nosnippet>251</a>        .padded(pad_bs.as_ref());
-<a href=#252 id=252 data-nosnippet>252</a>        <span class="comment">// The tropical register's inputs, on the same folded axis.
+<a href=#252 id=252 data-nosnippet>252</a>        <span class="comment">// The tropical register's inputs, on the same write axis.
 <a href=#253 id=253 data-nosnippet>253</a>        </span><span class="kw">let </span>tropical_ab_bsh = tropical_btH.map(|(a_btH, b_btH)| {
 <a href=#254 id=254 data-nosnippet>254</a>            (unfold_micro_bs(a_btH, u), unfold_micro_bs(b_btH, u))
 <a href=#255 id=255 data-nosnippet>255</a>        });
@@ -262,15 +262,15 @@
 <a href=#262 id=262 data-nosnippet>262</a>        //
 <a href=#263 id=263 data-nosnippet>263</a>        // Each shifted term is zero for the last positions that its own lag
 <a href=#264 id=264 data-nosnippet>264</a>        // reaches past: the taps that pay them belong to the *next* call, from
-<a href=#265 id=265 data-nosnippet>265</a>        // the tap slots. This also makes `h'` equal to the double-SSD state at
-<a href=#266 id=266 data-nosnippet>266</a>        // a cache boundary, hence the field-identity `From` impls.
+<a href=#265 id=265 data-nosnippet>265</a>        // the tap slots. This also makes the accumulator `h'` equal to the
+<a href=#266 id=266 data-nosnippet>266</a>        // state at a cache boundary, hence the field-identity `From` impls.
 <a href=#267 id=267 data-nosnippet>267</a>        //
-<a href=#268 id=268 data-nosnippet>268</a>        // `t+lag` is a later *folded* position: lag 1 is
-<a href=#269 id=269 data-nosnippet>269</a>        // [`Trapezoid::HorizontalCarryOver`], lag `u` is [`Trapezoid::Vertical`].
+<a href=#268 id=268 data-nosnippet>268</a>        // `t+lag` is a later *write* position: lag 1 is
+<a href=#269 id=269 data-nosnippet>269</a>        // [`TapPattern::HorizontalCarryOver`], lag `u` is [`TapPattern::Vertical`].
 <a href=#270 id=270 data-nosnippet>270</a>        // This is the `Δ̃` collapse (`info/mamba-3/trapezoid-as-integration.md`
 <a href=#271 id=271 data-nosnippet>271</a>        // §5). The collapse theorem of §9 is why it holds unchanged for the
 <a href=#272 id=272 data-nosnippet>272</a>        // wider lag and for a second tap: still one scalar per sample, so one
-<a href=#273 id=273 data-nosnippet>273</a>        // pass. Only the same-step correction widens from the diagonal to a
+<a href=#273 id=273 data-nosnippet>273</a>        // pass. Only the γ-correction widens from the diagonal to a
 <a href=#274 id=274 data-nosnippet>274</a>        // `lag`-wide band (see [`crate::mamba3::single_ssd::token_band`]).
 <a href=#275 id=275 data-nosnippet>275</a>        </span><span class="kw">let </span>lag = <span class="self">self</span>.tap_lag();
 <a href=#276 id=276 data-nosnippet>276</a>        <span class="comment">// νₜ₊ₗ, the mass that a later position pays to this one. Zero past the
@@ -327,10 +327,10 @@
 <a href=#327 id=327 data-nosnippet>327</a>        <span class="comment">// ── Step 5: Data-dependent transition rotation of B and C ─────────────
 <a href=#328 id=328 data-nosnippet>328</a>        // Shared with the double-ssd pathway through [`rotate_bc_forward`]. The
 <a href=#329 id=329 data-nosnippet>329</a>        // single-pass SSD core below does not depend on the rotation: it only
-<a href=#330 id=330 data-nosnippet>330</a>        // uses the rotated B̄/C̄ (the RoPE factoring `C̄ₜᵀB̄ᵢ = Cₜᵀ·Rel(t,i)·Bᵢ`
-<a href=#331 id=331 data-nosnippet>331</a>        // holds for every kind). `C` turns at token resolution: it needs the
-<a href=#332 id=332 data-nosnippet>332</a>        // cumulative rotation of the micro-step where it is read, a stride slice
-<a href=#333 id=333 data-nosnippet>333</a>        // of the rotation of `B`.
+<a href=#330 id=330 data-nosnippet>330</a>        // uses the rotated B̄/C̄. The factoring of the RoPE trick,
+<a href=#331 id=331 data-nosnippet>331</a>        // `C̄ₜᵀB̄ᵢ = Cₜᵀ·Rel(t,i)·Bᵢ`, holds for every kind. `C` turns at token
+<a href=#332 id=332 data-nosnippet>332</a>        // resolution: it needs the cumulative rotation of the micro-step where
+<a href=#333 id=333 data-nosnippet>333</a>        // it is read, a stride slice of the rotation of `B`.
 <a href=#334 id=334 data-nosnippet>334</a>        </span><span class="kw">let </span>(b_bsmhr, c_btmhr, new_rotation) = rotate_bc_forward(
 <a href=#335 id=335 data-nosnippet>335</a>            rot_bsa,
 <a href=#336 id=336 data-nosnippet>336</a>            dt_bsh.clone(),
@@ -358,322 +358,324 @@
 <a href=#358 id=358 data-nosnippet>358</a>            packed.as_ref(),
 <a href=#359 id=359 data-nosnippet>359</a>        );
 <a href=#360 id=360 data-nosnippet>360</a>
-<a href=#361 id=361 data-nosnippet>361</a>        <span class="comment">// ── Boundary β seed for initial state ─────────────────────────────────
+<a href=#361 id=361 data-nosnippet>361</a>        <span class="comment">// ── Boundary β seed for the initial accumulator ─────────────────────
 <a href=#362 id=362 data-nosnippet>362</a>        // Add Σⱼ νⱼ · Σₘ K_prev[j, m] ⊗ (x_prev[j] ⊙ mimo_xₘ) to the carried
-<a href=#363 id=363 data-nosnippet>363</a>        // single-ssd SSM state. Cache slot `j` (oldest first) is the position
+<a href=#363 id=363 data-nosnippet>363</a>        // accumulator. Cache slot `j` (oldest first) is the position
 <a href=#364 id=364 data-nosnippet>364</a>        // whose tap position `j` of this call pays, so it takes `νⱼ` from the
 <a href=#365 id=365 data-nosnippet>365</a>        // first `lag` positions of this call. `x_prev` already carries the
 <a href=#366 id=366 data-nosnippet>366</a>        // decay from its own position to the boundary, and `K_prev` its own
 <a href=#367 id=367 data-nosnippet>367</a>        // rotation, so the pair *is* the transported write.
 <a href=#368 id=368 data-nosnippet>368</a>        //
-<a href=#369 id=369 data-nosnippet>369</a>        // Under [`Trapezoid::VerticalPlusHorizontalCarryOver`], one more
+<a href=#369 id=369 data-nosnippet>369</a>        // Under [`TapPattern::VerticalPlusHorizontalCarryOver`], one more
 <a href=#370 id=370 data-nosnippet>370</a>        // installment crosses. The newest slot is also the lag-1 tap of the
 <a href=#371 id=371 data-nosnippet>371</a>        // *first* position of this call, with the empty decay product. So it is
-<a href=#372 id=372 data-nosnippet>372</a>        // the same term, with `νⁱⁿᵗ₀` added to the own weight of that slot. For
-<a href=#373 id=373 data-nosnippet>373</a>        // every other pattern, the interior tap is closed exactly there.
-<a href=#374 id=374 data-nosnippet>374</a>        </span><span class="kw">let </span>mimo_x_hmp = <span class="self">self</span>.mimo_x_hmp.as_ref().map(|p| p.val());
-<a href=#375 id=375 data-nosnippet>375</a>        <span class="comment">// The masses that the first `width` positions of each chunk pay,
-<a href=#376 id=376 data-nosnippet>376</a>        // `[batch, nchunks, width, nheads]`. Only chunk 0 is the start of the
-<a href=#377 id=377 data-nosnippet>377</a>        // call. In a packed row, every chunk that starts a segment is the
-<a href=#378 id=378 data-nosnippet>378</a>        // start of one from the origin.
-<a href=#379 id=379 data-nosnippet>379</a>        </span><span class="kw">let </span>nchunks = sequence.div_ceil(chunk_len);
-<a href=#380 id=380 data-nosnippet>380</a>        <span class="kw">let </span>heads_of = |t_bsh: Tensor&lt;<span class="number">3</span>&gt;, width: usize| {
-<a href=#381 id=381 data-nosnippet>381</a>            <span class="kw">let </span>pad = nchunks * chunk_len - sequence;
-<a href=#382 id=382 data-nosnippet>382</a>            <span class="kw">let </span>t_bSh = <span class="kw">if </span>pad == <span class="number">0 </span>{
-<a href=#383 id=383 data-nosnippet>383</a>                t_bsh
-<a href=#384 id=384 data-nosnippet>384</a>            } <span class="kw">else </span>{
-<a href=#385 id=385 data-nosnippet>385</a>                Tensor::cat(<span class="macro">vec!</span>[t_bsh, Tensor::zeros([batch, pad, nheads], <span class="kw-2">&amp;</span>device)], <span class="number">1</span>)
-<a href=#386 id=386 data-nosnippet>386</a>            };
-<a href=#387 id=387 data-nosnippet>387</a>            t_bSh
-<a href=#388 id=388 data-nosnippet>388</a>                .reshape([batch, nchunks, chunk_len, nheads])
-<a href=#389 id=389 data-nosnippet>389</a>                .narrow(<span class="number">2</span>, <span class="number">0</span>, width)
-<a href=#390 id=390 data-nosnippet>390</a>        };
-<a href=#391 id=391 data-nosnippet>391</a>        <span class="kw">let </span>nu_heads_bnuh = heads_of(nu_bsh.clone(), lag);
-<a href=#392 id=392 data-nosnippet>392</a>        <span class="kw">let </span>nu_heads_bnuh = <span class="kw">match </span>nu_interior_bsh
-<a href=#393 id=393 data-nosnippet>393</a>            .filter(|<span class="kw">_</span>| <span class="self">self</span>.trapezoid.interior_tap_crosses_tokens())
-<a href=#394 id=394 data-nosnippet>394</a>        {
-<a href=#395 id=395 data-nosnippet>395</a>            <span class="comment">// `lag ≥ 2` here: a two-tap pattern folds at `u = 1`, so an interior
-<a href=#396 id=396 data-nosnippet>396</a>            // tap and a one-slot FIFO never coexist.
-<a href=#397 id=397 data-nosnippet>397</a>            </span><span class="prelude-val">Some</span>(nu_interior_bsh) =&gt; Tensor::cat(
-<a href=#398 id=398 data-nosnippet>398</a>                <span class="macro">vec!</span>[
-<a href=#399 id=399 data-nosnippet>399</a>                    nu_heads_bnuh.clone().narrow(<span class="number">2</span>, <span class="number">0</span>, lag - <span class="number">1</span>),
-<a href=#400 id=400 data-nosnippet>400</a>                    nu_heads_bnuh.narrow(<span class="number">2</span>, lag - <span class="number">1</span>, <span class="number">1</span>) + heads_of(nu_interior_bsh, <span class="number">1</span>),
-<a href=#401 id=401 data-nosnippet>401</a>                ],
-<a href=#402 id=402 data-nosnippet>402</a>                <span class="number">2</span>,
-<a href=#403 id=403 data-nosnippet>403</a>            ),
-<a href=#404 id=404 data-nosnippet>404</a>            <span class="prelude-val">None </span>=&gt; nu_heads_bnuh,
-<a href=#405 id=405 data-nosnippet>405</a>        };
-<a href=#406 id=406 data-nosnippet>406</a>        <span class="comment">// The slots of a FIFO, `v` with MIMO_V applied:
-<a href=#407 id=407 data-nosnippet>407</a>        // `([batch, lag, mimo_rank, nheads, per_head_dim], [batch, lag, mimo_rank, nheads, state_rank])`.
-<a href=#408 id=408 data-nosnippet>408</a>        </span><span class="kw">let </span>slots = <span class="string">"a β tap keeps its (B, x) cache slots"</span>;
-<a href=#409 id=409 data-nosnippet>409</a>        <span class="kw">let </span>prev_slots = |v_state_buhp: <span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">4</span>&gt;&gt;, k_state_bumhr: <span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">5</span>&gt;&gt;| {
-<a href=#410 id=410 data-nosnippet>410</a>            <span class="kw">let </span>v_prev_mimo_bumhp =
-<a href=#411 id=411 data-nosnippet>411</a>                helpers::build_v_with_mimo::&lt;<span class="number">4</span>, <span class="number">5</span>&gt;(v_state_buhp.expect(slots), mimo_x_hmp.as_ref(), <span class="number">2</span>);
-<a href=#412 id=412 data-nosnippet>412</a>            (v_prev_mimo_bumhp, k_state_bumhr.expect(slots))
-<a href=#413 id=413 data-nosnippet>413</a>        };
-<a href=#414 id=414 data-nosnippet>414</a>        <span class="comment">// The seed of the call, from the slots of the cache and the masses of
-<a href=#415 id=415 data-nosnippet>415</a>        // chunk 0.
-<a href=#416 id=416 data-nosnippet>416</a>        </span><span class="kw">let </span>(v_prev_mimo_bumhp, k_prev_bumhr) =
-<a href=#417 id=417 data-nosnippet>417</a>            prev_slots(cache.v_state_buhp.clone(), cache.k_state_bumhr.clone());
-<a href=#418 id=418 data-nosnippet>418</a>        <span class="kw">let </span>nu_head_buh = nu_heads_bnuh.clone().narrow(<span class="number">1</span>, <span class="number">0</span>, <span class="number">1</span>).squeeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">1</span>);
-<a href=#419 id=419 data-nosnippet>419</a>        <span class="kw">let </span>v_prev_mimo_bumhp = v_prev_mimo_bumhp * nu_head_buh.unsqueeze_dims::&lt;<span class="number">5</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">2</span>, <span class="number">4</span>]);
-<a href=#420 id=420 data-nosnippet>420</a>        <span class="comment">// The seed contracts over the slots *and* the ranks (both are outer
-<a href=#421 id=421 data-nosnippet>421</a>        // products into one state). So, fused, it is the same one
-<a href=#422 id=422 data-nosnippet>422</a>        // `mimo_outer_sum` that the per-token write uses.
-<a href=#423 id=423 data-nosnippet>423</a>        </span><span class="kw">let </span>boundary_seed_bhpr = helpers::mimo_outer_sum(
-<a href=#424 id=424 data-nosnippet>424</a>            v_prev_mimo_bumhp.reshape([batch, lag * mimo_rank, nheads, per_head_dim]),
-<a href=#425 id=425 data-nosnippet>425</a>            k_prev_bumhr.reshape([batch, lag * mimo_rank, nheads, state_rank]),
-<a href=#426 id=426 data-nosnippet>426</a>            <span class="self">self</span>.use_siso_decode_kernels(),
-<a href=#427 id=427 data-nosnippet>427</a>        );
-<a href=#428 id=428 data-nosnippet>428</a>        <span class="kw">let </span>initial_state_bhpr = cache.ssm_bhpr.clone() + boundary_seed_bhpr;
-<a href=#429 id=429 data-nosnippet>429</a>        san(<span class="kw-2">&amp;</span>initial_state_bhpr);
-<a href=#430 id=430 data-nosnippet>430</a>        <span class="comment">// A packed row: each chunk gets a seed from the slots of the origin,
-<a href=#431 id=431 data-nosnippet>431</a>        // in case it restarts. Each slot writes one outer product (over the
-<a href=#432 id=432 data-nosnippet>432</a>        // ranks). Each chunk weighs the slots by its own head masses.
-<a href=#433 id=433 data-nosnippet>433</a>        </span><span class="kw">let </span>seed_bnhpr = packed.as_ref().map(|p| {
-<a href=#434 id=434 data-nosnippet>434</a>            <span class="kw">let </span>(v_origin_mimo_bumhp, k_origin_bumhr) =
-<a href=#435 id=435 data-nosnippet>435</a>                prev_slots(p.origin.v_state_buhp.clone(), p.origin.k_state_bumhr.clone());
-<a href=#436 id=436 data-nosnippet>436</a>            <span class="kw">let </span>slot_writes_bhuP = helpers::mimo_outer_sum(
-<a href=#437 id=437 data-nosnippet>437</a>                v_origin_mimo_bumhp.reshape([batch * lag, mimo_rank, nheads, per_head_dim]),
-<a href=#438 id=438 data-nosnippet>438</a>                k_origin_bumhr.reshape([batch * lag, mimo_rank, nheads, state_rank]),
-<a href=#439 id=439 data-nosnippet>439</a>                <span class="self">self</span>.use_siso_decode_kernels(),
-<a href=#440 id=440 data-nosnippet>440</a>            )
-<a href=#441 id=441 data-nosnippet>441</a>            .reshape([batch, lag, nheads, per_head_dim * state_rank])
-<a href=#442 id=442 data-nosnippet>442</a>            .swap_dims(<span class="number">1</span>, <span class="number">2</span>);
-<a href=#443 id=443 data-nosnippet>443</a>            nu_heads_bnuh
-<a href=#444 id=444 data-nosnippet>444</a>                .permute([<span class="number">0</span>, <span class="number">3</span>, <span class="number">1</span>, <span class="number">2</span>]) <span class="comment">// _bhnu
-<a href=#445 id=445 data-nosnippet>445</a>                </span>.matmul(slot_writes_bhuP) <span class="comment">// _bhnP
-<a href=#446 id=446 data-nosnippet>446</a>                </span>.reshape([batch, nheads, nchunks, per_head_dim, state_rank])
-<a href=#447 id=447 data-nosnippet>447</a>                .swap_dims(<span class="number">1</span>, <span class="number">2</span>)
-<a href=#448 id=448 data-nosnippet>448</a>        });
-<a href=#449 id=449 data-nosnippet>449</a>
-<a href=#450 id=450 data-nosnippet>450</a>        <span class="comment">// ── Step 6: Pad sequence to multiple of chunk_len ─────────────────────
-<a href=#451 id=451 data-nosnippet>451</a>        </span><span class="kw">let </span>sequence_padded = sequence.next_multiple_of(chunk_len);
-<a href=#452 id=452 data-nosnippet>452</a>        <span class="kw">let </span>pad = sequence_padded - sequence;
-<a href=#453 id=453 data-nosnippet>453</a>
-<a href=#454 id=454 data-nosnippet>454</a>        <span class="comment">// V passed to SSD is raw x with MIMO_V applied (not γ-scaled).
-<a href=#455 id=455 data-nosnippet>455</a>        </span><span class="kw">let </span>v_bshmp = helpers::build_v_with_mimo::&lt;<span class="number">4</span>, <span class="number">5</span>&gt;(x_bshp.clone(), mimo_x_hmp.as_ref(), <span class="number">2</span>);
-<a href=#456 id=456 data-nosnippet>456</a>        <span class="comment">// v_bshmp has axis order [b, s, m, h, p] (insert_dim=2 onto [b,s,h,p]).
-<a href=#457 id=457 data-nosnippet>457</a>
-<a href=#458 id=458 data-nosnippet>458</a>        // ── The lag-`u` correction band ───────────────────────────────────────
-<a href=#459 id=459 data-nosnippet>459</a>        // At lag 1 the key scale is wrong only on the diagonal, and
-<a href=#460 id=460 data-nosnippet>460</a>        // `ssd/diag.rs` corrects it inside the kernel. At lag `u` the exception
-<a href=#461 id=461 data-nosnippet>461</a>        // is `u` wide, and at the positions that the readout keeps it is
-<a href=#462 id=462 data-nosnippet>462</a>        // exactly the token. So it is one contraction here, not a wider mask.
-<a href=#463 id=463 data-nosnippet>463</a>        // See [`crate::mamba3::single_ssd::token_band`].
-<a href=#464 id=464 data-nosnippet>464</a>        //
-<a href=#465 id=465 data-nosnippet>465</a>        // The band is the **far** installment only, also for a two-tap
-<a href=#466 id=466 data-nosnippet>466</a>        // pattern. At the surviving read `t = τu + u−1`, the interior (lag-1)
-<a href=#467 id=467 data-nosnippet>467</a>        // installment of a sample has already landed for every `j &lt; u−1`. At
-<a href=#468 id=468 data-nosnippet>468</a>        // `j = u−1`, the kernel replaces the whole weight with `γ` anyway. Only
-<a href=#469 id=469 data-nosnippet>469</a>        // the lag-`u` installment is still unpaid there.
-<a href=#470 id=470 data-nosnippet>470</a>        </span><span class="kw">let </span>band_correction_btmhp = (lag &gt; <span class="number">1</span>)
-<a href=#471 id=471 data-nosnippet>471</a>            .then(|| {
-<a href=#472 id=472 data-nosnippet>472</a>                <span class="kw">crate</span>::mamba3::single_ssd::token_band::token_band_correction(
-<a href=#473 id=473 data-nosnippet>473</a>                    v_bshmp.clone(),
-<a href=#474 id=474 data-nosnippet>474</a>                    b_bsmhr.clone(),
-<a href=#475 id=475 data-nosnippet>475</a>                    c_btmhr.clone(),
-<a href=#476 id=476 data-nosnippet>476</a>                    far_shifted_bsh,
-<a href=#477 id=477 data-nosnippet>477</a>                    da_bsh.clone(),
-<a href=#478 id=478 data-nosnippet>478</a>                    micro_steps,
-<a href=#479 id=479 data-nosnippet>479</a>                )
-<a href=#480 id=480 data-nosnippet>480</a>            })
-<a href=#481 id=481 data-nosnippet>481</a>            .flatten();
-<a href=#482 id=482 data-nosnippet>482</a>
-<a href=#483 id=483 data-nosnippet>483</a>        <span class="comment">// `C` and `γ` are on the read axis of the chunk, so they pad by whole
-<a href=#484 id=484 data-nosnippet>484</a>        // tokens. `chunk_len` is a multiple of `u`, so `pad` is too.
-<a href=#485 id=485 data-nosnippet>485</a>        </span><span class="kw">let </span>gamma_bth = helpers::read_rows::&lt;<span class="number">3</span>, <span class="number">4</span>&gt;(gamma_bsh, <span class="number">1</span>, u);
-<a href=#486 id=486 data-nosnippet>486</a>        <span class="kw">let </span>tokens_padded = sequence_padded / u;
-<a href=#487 id=487 data-nosnippet>487</a>        <span class="kw">let </span>pad_tokens = tokens_padded - tokens;
-<a href=#488 id=488 data-nosnippet>488</a>
-<a href=#489 id=489 data-nosnippet>489</a>        <span class="attr">#[rustfmt::skip]
-<a href=#490 id=490 data-nosnippet>490</a>        </span><span class="kw">let </span>(v_bShmp, da_bSh, gamma_bTh, scale_bSh, b_bSmhr, c_bTmhr) = <span class="kw">if </span>pad == <span class="number">0 </span>{
-<a href=#491 id=491 data-nosnippet>491</a>            (v_bshmp, da_bsh, gamma_bth, scale_bsh, b_bsmhr, c_btmhr)
-<a href=#492 id=492 data-nosnippet>492</a>        } <span class="kw">else </span>{
-<a href=#493 id=493 data-nosnippet>493</a>            <span class="kw">let </span>pad_bShmp = Tensor::zeros([batch, pad, mimo_rank, nheads, per_head_dim], <span class="kw-2">&amp;</span>device);
-<a href=#494 id=494 data-nosnippet>494</a>            <span class="kw">let </span>pad_bSh = Tensor::zeros([batch, pad, nheads], <span class="kw-2">&amp;</span>device);
-<a href=#495 id=495 data-nosnippet>495</a>            <span class="kw">let </span>pad_bTh = Tensor::zeros([batch, pad_tokens, nheads], <span class="kw-2">&amp;</span>device);
-<a href=#496 id=496 data-nosnippet>496</a>            <span class="kw">let </span>pad_bSmhr = Tensor::zeros([batch, pad, mimo_rank, nheads, state_rank], <span class="kw-2">&amp;</span>device);
-<a href=#497 id=497 data-nosnippet>497</a>            <span class="kw">let </span>pad_bTmhr =
-<a href=#498 id=498 data-nosnippet>498</a>                Tensor::zeros([batch, pad_tokens, mimo_rank, nheads, state_rank], <span class="kw-2">&amp;</span>device);
-<a href=#499 id=499 data-nosnippet>499</a>            (
-<a href=#500 id=500 data-nosnippet>500</a>                Tensor::cat(<span class="macro">vec!</span>[v_bshmp, pad_bShmp], <span class="number">1</span>),
-<a href=#501 id=501 data-nosnippet>501</a>                Tensor::cat(<span class="macro">vec!</span>[da_bsh, pad_bSh.clone()], <span class="number">1</span>),
-<a href=#502 id=502 data-nosnippet>502</a>                Tensor::cat(<span class="macro">vec!</span>[gamma_bth, pad_bTh], <span class="number">1</span>),
-<a href=#503 id=503 data-nosnippet>503</a>                Tensor::cat(<span class="macro">vec!</span>[scale_bsh, pad_bSh], <span class="number">1</span>),
-<a href=#504 id=504 data-nosnippet>504</a>                Tensor::cat(<span class="macro">vec!</span>[b_bsmhr, pad_bSmhr], <span class="number">1</span>),
-<a href=#505 id=505 data-nosnippet>505</a>                Tensor::cat(<span class="macro">vec!</span>[c_btmhr, pad_bTmhr], <span class="number">1</span>),
-<a href=#506 id=506 data-nosnippet>506</a>            )
-<a href=#507 id=507 data-nosnippet>507</a>        };
-<a href=#508 id=508 data-nosnippet>508</a>
-<a href=#509 id=509 data-nosnippet>509</a>        <span class="comment">// ── Reshape into chunks ───────────────────────────────────────────────
-<a href=#510 id=510 data-nosnippet>510</a>        </span><span class="kw">let </span>nchunks = sequence_padded / chunk_len;
-<a href=#511 id=511 data-nosnippet>511</a>        <span class="kw">let </span>chunk_tokens = Mamba3SsdPath::chunk_tokens(chunk_len, u);
-<a href=#512 id=512 data-nosnippet>512</a>        <span class="kw">let </span>v_bnlmhp =
-<a href=#513 id=513 data-nosnippet>513</a>            v_bShmp.reshape([batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]);
-<a href=#514 id=514 data-nosnippet>514</a>        <span class="kw">let </span>da_bnlh = da_bSh.reshape([batch, nchunks, chunk_len, nheads]);
-<a href=#515 id=515 data-nosnippet>515</a>        <span class="kw">let </span>gamma_bnth = gamma_bTh.reshape([batch, nchunks, chunk_tokens, nheads]);
-<a href=#516 id=516 data-nosnippet>516</a>        <span class="kw">let </span>scale_bnlh = scale_bSh.reshape([batch, nchunks, chunk_len, nheads]);
-<a href=#517 id=517 data-nosnippet>517</a>        <span class="kw">let </span>b_bnlmhr = b_bSmhr.reshape([batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]);
-<a href=#518 id=518 data-nosnippet>518</a>        <span class="kw">let </span>c_bntmhr =
-<a href=#519 id=519 data-nosnippet>519</a>            c_bTmhr.reshape([batch, nchunks, chunk_tokens, mimo_rank, nheads, state_rank]);
-<a href=#520 id=520 data-nosnippet>520</a>
-<a href=#521 id=521 data-nosnippet>521</a>        <span class="comment">// ── Step 7: Run single-pass form SSD ───────────────────────────────────────
-<a href=#522 id=522 data-nosnippet>522</a>        </span><span class="kw">let </span>ssd_input = Mamba3SingleSsdInput {
-<a href=#523 id=523 data-nosnippet>523</a>            v_bnlmhp,
-<a href=#524 id=524 data-nosnippet>524</a>            b_bnlmhr,
-<a href=#525 id=525 data-nosnippet>525</a>            c_bntmhr,
-<a href=#526 id=526 data-nosnippet>526</a>            da_bnlh,
-<a href=#527 id=527 data-nosnippet>527</a>            gamma_bnth,
-<a href=#528 id=528 data-nosnippet>528</a>            scale_bnlh,
-<a href=#529 id=529 data-nosnippet>529</a>            initial_state_bhpr,
-<a href=#530 id=530 data-nosnippet>530</a>            init_state_hpr: <span class="self">self</span>.init_state_hpr.as_ref().map(|s| s.val()),
-<a href=#531 id=531 data-nosnippet>531</a>            read_stride: u,
-<a href=#532 id=532 data-nosnippet>532</a>            siso_specialization: <span class="self">self</span>.siso_specialization,
-<a href=#533 id=533 data-nosnippet>533</a>            restarts: packed.as_ref().map(|p| <span class="kw">crate</span>::packing::Restarts {
-<a href=#534 id=534 data-nosnippet>534</a>                reset_bn: p.segments.reset_bn.clone(),
-<a href=#535 id=535 data-nosnippet>535</a>                origin_bhpr: p.origin.ssm_bhpr.clone(),
-<a href=#536 id=536 data-nosnippet>536</a>            }),
-<a href=#537 id=537 data-nosnippet>537</a>            seed_bnhpr,
-<a href=#538 id=538 data-nosnippet>538</a>        };
-<a href=#539 id=539 data-nosnippet>539</a>        <span class="kw">let </span>(y_bntmhp, final_state_bhpr) = ssd_input.run(ssd_path);
-<a href=#540 id=540 data-nosnippet>540</a>
-<a href=#541 id=541 data-nosnippet>541</a>        san(<span class="kw-2">&amp;</span>y_bntmhp);
-<a href=#542 id=542 data-nosnippet>542</a>        san(<span class="kw-2">&amp;</span>final_state_bhpr);
-<a href=#543 id=543 data-nosnippet>543</a>        cache.ssm_bhpr = final_state_bhpr;
-<a href=#544 id=544 data-nosnippet>544</a>
-<a href=#545 id=545 data-nosnippet>545</a>        <span class="comment">// ── Step 8: Unpad ─────────────────────────────────────────────────────
-<a href=#546 id=546 data-nosnippet>546</a>        // The SSD returns token resolution: the readout is after all `u`
-<a href=#547 id=547 data-nosnippet>547</a>        // writes, and the kernel computed only that row.
-<a href=#548 id=548 data-nosnippet>548</a>        </span><span class="kw">let </span>y_bTmhp = y_bntmhp.reshape([batch, tokens_padded, mimo_rank, nheads, per_head_dim]);
-<a href=#549 id=549 data-nosnippet>549</a>        <span class="kw">let </span>y_bsmhp = <span class="kw">if </span>pad == <span class="number">0 </span>{
-<a href=#550 id=550 data-nosnippet>550</a>            y_bTmhp
-<a href=#551 id=551 data-nosnippet>551</a>        } <span class="kw">else </span>{
-<a href=#552 id=552 data-nosnippet>552</a>            y_bTmhp.narrow(<span class="number">1</span>, <span class="number">0</span>, tokens)
-<a href=#553 id=553 data-nosnippet>553</a>        };
-<a href=#554 id=554 data-nosnippet>554</a>
-<a href=#555 id=555 data-nosnippet>555</a>        <span class="kw">let </span>y_bsmhp = <span class="kw">match </span>band_correction_btmhp {
-<a href=#556 id=556 data-nosnippet>556</a>            <span class="prelude-val">Some</span>(correction_btmhp) =&gt; y_bsmhp - correction_btmhp,
-<a href=#557 id=557 data-nosnippet>557</a>            <span class="prelude-val">None </span>=&gt; y_bsmhp,
-<a href=#558 id=558 data-nosnippet>558</a>        };
-<a href=#559 id=559 data-nosnippet>559</a>        <span class="kw">let </span>(y_bsmhp, log_precision_bh, tropical_bh) = <span class="self">self</span>.positive_tail(
-<a href=#560 id=560 data-nosnippet>560</a>            y_bsmhp,
-<a href=#561 id=561 data-nosnippet>561</a>            log_precision_bsh,
-<a href=#562 id=562 data-nosnippet>562</a>            tropical_ab_bsh,
-<a href=#563 id=563 data-nosnippet>563</a>            cache.tropical_bh.clone(),
-<a href=#564 id=564 data-nosnippet>564</a>            end_b.map(|end_b| (end_b, cache.log_precision_bh.clone())),
-<a href=#565 id=565 data-nosnippet>565</a>            packed.as_ref(),
-<a href=#566 id=566 data-nosnippet>566</a>        );
-<a href=#567 id=567 data-nosnippet>567</a>        cache.log_precision_bh = log_precision_bh;
-<a href=#568 id=568 data-nosnippet>568</a>        cache.tropical_bh = tropical_bh;
-<a href=#569 id=569 data-nosnippet>569</a>        <span class="kw">let </span>x_bthp = <span class="kw">crate</span>::mamba3::product::last_micro4(x_bshp.clone(), micro_steps);
-<a href=#570 id=570 data-nosnippet>570</a>        <span class="kw">let </span>sequence = tokens;
-<a href=#571 id=571 data-nosnippet>571</a>
-<a href=#572 id=572 data-nosnippet>572</a>        <span class="comment">// ── Step 9: D skip + gate + MIMO_O down-projection ────────────────────
-<a href=#573 id=573 data-nosnippet>573</a>        // The D skip uses the raw x ⊙ mimo_x (not γ-scaled, as in the double
-<a href=#574 id=574 data-nosnippet>574</a>        // pathway), at the micro-step of the readout.
-<a href=#575 id=575 data-nosnippet>575</a>        </span><span class="kw">let </span>v_raw_bsmhp = helpers::build_v_with_mimo::&lt;<span class="number">4</span>, <span class="number">5</span>&gt;(x_bthp, mimo_x_hmp.as_ref(), <span class="number">2</span>);
-<a href=#576 id=576 data-nosnippet>576</a>        <span class="kw">let </span>d_111h1 = <span class="self">self</span>.d_h.val().unsqueeze_dims::&lt;<span class="number">5</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">4</span>]);
-<a href=#577 id=577 data-nosnippet>577</a>        <span class="kw">let </span>y_bsmhp = y_bsmhp + d_111h1 * v_raw_bsmhp;
-<a href=#578 id=578 data-nosnippet>578</a>
-<a href=#579 id=579 data-nosnippet>579</a>        <span class="kw">let </span>y_bsi = <span class="kw">if </span>mimo_rank &gt; <span class="number">1 </span>{
-<a href=#580 id=580 data-nosnippet>580</a>            <span class="kw">let </span>mimo_z_hmp = <span class="self">self</span>.mimo_z_hmp.as_ref().map(|p| p.val()).unwrap();
-<a href=#581 id=581 data-nosnippet>581</a>            <span class="kw">let </span>mimo_o_hmp = <span class="self">self</span>.mimo_o_hmp.as_ref().map(|p| p.val()).unwrap();
-<a href=#582 id=582 data-nosnippet>582</a>
-<a href=#583 id=583 data-nosnippet>583</a>            <span class="kw">let </span>z_bshp = z_bsi
-<a href=#584 id=584 data-nosnippet>584</a>                .clone()
-<a href=#585 id=585 data-nosnippet>585</a>                .reshape([batch, sequence, nheads, per_head_dim]);
-<a href=#586 id=586 data-nosnippet>586</a>            <span class="kw">let </span>z_bsmhp = {
-<a href=#587 id=587 data-nosnippet>587</a>                <span class="kw">let </span>z_bsmhp = z_bshp.unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">2</span>).expand([
-<a href=#588 id=588 data-nosnippet>588</a>                    batch,
-<a href=#589 id=589 data-nosnippet>589</a>                    sequence,
-<a href=#590 id=590 data-nosnippet>590</a>                    mimo_rank,
-<a href=#591 id=591 data-nosnippet>591</a>                    nheads,
-<a href=#592 id=592 data-nosnippet>592</a>                    per_head_dim,
-<a href=#593 id=593 data-nosnippet>593</a>                ]);
-<a href=#594 id=594 data-nosnippet>594</a>                <span class="kw">let </span>mimo_z_bsmhp = mimo_z_hmp
-<a href=#595 id=595 data-nosnippet>595</a>                    .swap_dims(<span class="number">0</span>, <span class="number">1</span>)
-<a href=#596 id=596 data-nosnippet>596</a>                    .unsqueeze_dims::&lt;<span class="number">5</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>])
-<a href=#597 id=597 data-nosnippet>597</a>                    .expand([batch, sequence, mimo_rank, nheads, per_head_dim]);
-<a href=#598 id=598 data-nosnippet>598</a>                z_bsmhp * mimo_z_bsmhp
-<a href=#599 id=599 data-nosnippet>599</a>            };
-<a href=#600 id=600 data-nosnippet>600</a>
-<a href=#601 id=601 data-nosnippet>601</a>            <span class="kw">let </span>y_combined_bsmhp = <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.out_norm {
-<a href=#602 id=602 data-nosnippet>602</a>                <span class="prelude-val">Some</span>(norm) =&gt; norm.forward(y_bsmhp, z_bsmhp),
-<a href=#603 id=603 data-nosnippet>603</a>                <span class="prelude-val">None </span>=&gt; y_bsmhp * Silu::new().forward(z_bsmhp),
-<a href=#604 id=604 data-nosnippet>604</a>            };
-<a href=#605 id=605 data-nosnippet>605</a>
-<a href=#606 id=606 data-nosnippet>606</a>            <span class="kw">let </span>mimo_o_bsmhp = mimo_o_hmp
-<a href=#607 id=607 data-nosnippet>607</a>                .swap_dims(<span class="number">0</span>, <span class="number">1</span>)
-<a href=#608 id=608 data-nosnippet>608</a>                .unsqueeze_dims::&lt;<span class="number">5</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>])
-<a href=#609 id=609 data-nosnippet>609</a>                .expand([batch, sequence, mimo_rank, nheads, per_head_dim]);
-<a href=#610 id=610 data-nosnippet>610</a>            <span class="kw">let </span>y_bshp: Tensor&lt;<span class="number">4</span>&gt; = (y_combined_bsmhp * mimo_o_bsmhp).sum_dim(<span class="number">2</span>).squeeze_dim(<span class="number">2</span>);
-<a href=#611 id=611 data-nosnippet>611</a>            y_bshp.reshape([batch, sequence, d_inner])
-<a href=#612 id=612 data-nosnippet>612</a>        } <span class="kw">else </span>{
-<a href=#613 id=613 data-nosnippet>613</a>            <span class="kw">let </span>y_bshp: Tensor&lt;<span class="number">4</span>&gt; = y_bsmhp.squeeze_dim(<span class="number">2</span>);
-<a href=#614 id=614 data-nosnippet>614</a>            <span class="kw">let </span>z_bshp = z_bsi.reshape([batch, sequence, nheads, per_head_dim]);
-<a href=#615 id=615 data-nosnippet>615</a>            <span class="kw">let </span>y_combined_bshp = <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.out_norm {
-<a href=#616 id=616 data-nosnippet>616</a>                <span class="prelude-val">Some</span>(norm) =&gt; norm.forward(y_bshp, z_bshp),
-<a href=#617 id=617 data-nosnippet>617</a>                <span class="prelude-val">None </span>=&gt; y_bshp * Silu::new().forward(z_bshp),
-<a href=#618 id=618 data-nosnippet>618</a>            };
-<a href=#619 id=619 data-nosnippet>619</a>            y_combined_bshp.reshape([batch, sequence, d_inner])
-<a href=#620 id=620 data-nosnippet>620</a>        };
-<a href=#621 id=621 data-nosnippet>621</a>        san(<span class="kw-2">&amp;</span>y_bsi);
-<a href=#622 id=622 data-nosnippet>622</a>
-<a href=#623 id=623 data-nosnippet>623</a>        <span class="comment">// ── Out-projection ────────────────────────────────────────────────────
-<a href=#624 id=624 data-nosnippet>624</a>        </span><span class="kw">let </span>out_bsm = <span class="self">self</span>.out_proj.forward(y_bsi);
-<a href=#625 id=625 data-nosnippet>625</a>        san(<span class="kw-2">&amp;</span>out_bsm);
-<a href=#626 id=626 data-nosnippet>626</a>
-<a href=#627 id=627 data-nosnippet>627</a>        <span class="comment">// ── Update remaining cache fields ─────────────────────────────────────
-<a href=#628 id=628 data-nosnippet>628</a>        </span>cache.k_state_bumhr = b_last_bumhr;
-<a href=#629 id=629 data-nosnippet>629</a>        cache.v_state_buhp = x_last_buhp;
-<a href=#630 id=630 data-nosnippet>630</a>        <span class="comment">// The new cumulative rotation from [`rotate_bc_forward`]. It has the
-<a href=#631 id=631 data-nosnippet>631</a>        // convention of the double-ssd cache, so the two caches convert.
-<a href=#632 id=632 data-nosnippet>632</a>        </span>cache.rotation = new_rotation;
-<a href=#633 id=633 data-nosnippet>633</a>
-<a href=#634 id=634 data-nosnippet>634</a>        (out_bsm, cache)
-<a href=#635 id=635 data-nosnippet>635</a>    }
-<a href=#636 id=636 data-nosnippet>636</a>}
-<a href=#637 id=637 data-nosnippet>637</a>
-<a href=#638 id=638 data-nosnippet>638</a><span class="comment">// ---------------------------------------------------------------------------
-<a href=#639 id=639 data-nosnippet>639</a>// Mamba3::step  (recurrent SSM — token-by-token decoding)
-<a href=#640 id=640 data-nosnippet>640</a>// ---------------------------------------------------------------------------
-<a href=#641 id=641 data-nosnippet>641</a>
-<a href=#642 id=642 data-nosnippet>642</a></span><span class="kw">mod </span>step {
-<a href=#643 id=643 data-nosnippet>643</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
-<a href=#644 id=644 data-nosnippet>644</a>
-<a href=#645 id=645 data-nosnippet>645</a>    <span class="kw">impl </span>Mamba3 {
-<a href=#646 id=646 data-nosnippet>646</a>        <span class="doccomment">/// Process a **single token** with the pure recurrent form (the
-<a href=#647 id=647 data-nosnippet>647</a>        /// formulas are in [`Mamba3::step`]). It converts the cache to the
-<a href=#648 id=648 data-nosnippet>648</a>        /// double-ssd form, runs [`Mamba3::step_double_ssd`], and converts back.
-<a href=#649 id=649 data-nosnippet>649</a>        ///
-<a href=#650 id=650 data-nosnippet>650</a>        /// # Shapes
-<a href=#651 id=651 data-nosnippet>651</a>        /// - `input_bd` : `[batch, d_model]`
-<a href=#652 id=652 data-nosnippet>652</a>        /// - output     : `[batch, d_model]`
-<a href=#653 id=653 data-nosnippet>653</a>        </span><span class="attr">#[allow(non_snake_case)]
-<a href=#654 id=654 data-nosnippet>654</a>        </span><span class="kw">pub fn </span>step_single_ssd(
-<a href=#655 id=655 data-nosnippet>655</a>            <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#656 id=656 data-nosnippet>656</a>            input_bd: Tensor&lt;<span class="number">2</span>&gt;,
-<a href=#657 id=657 data-nosnippet>657</a>            cache: <span class="prelude-ty">Option</span>&lt;Mamba3SingleSsdCache&gt;,
-<a href=#658 id=658 data-nosnippet>658</a>        ) -&gt; (Tensor&lt;<span class="number">2</span>&gt;, Mamba3SingleSsdCache) {
-<a href=#659 id=659 data-nosnippet>659</a>            <span class="comment">// Token-by-token decoding always uses the recurrent (double-ssd)
-<a href=#660 id=660 data-nosnippet>660</a>            // form. A single-ssd cache holds the trapezoid state at a call
-<a href=#661 id=661 data-nosnippet>661</a>            // boundary, where the single- and double-ssd accumulators are equal
-<a href=#662 id=662 data-nosnippet>662</a>            // (see the `From` impls in `crate::mamba3::cache`). So the
-<a href=#663 id=663 data-nosnippet>663</a>            // conversion in and back out is lossless. One recurrence step is
-<a href=#664 id=664 data-nosnippet>664</a>            // itself a boundary-to-boundary transition, so the round trip stays
-<a href=#665 id=665 data-nosnippet>665</a>            // exact.
-<a href=#666 id=666 data-nosnippet>666</a>            </span><span class="kw">let </span>cache = cache.map(Mamba3DoubleSsdCache::from);
-<a href=#667 id=667 data-nosnippet>667</a>            <span class="kw">let </span>(out_bd, cache) = <span class="self">self</span>.step_double_ssd(input_bd, cache);
-<a href=#668 id=668 data-nosnippet>668</a>            (out_bd, cache.into())
-<a href=#669 id=669 data-nosnippet>669</a>        }
-<a href=#670 id=670 data-nosnippet>670</a>    }
-<a href=#671 id=671 data-nosnippet>671</a>}
-<a href=#672 id=672 data-nosnippet>672</a>
-<a href=#673 id=673 data-nosnippet>673</a><span class="comment">// ---------------------------------------------------------------------------
-<a href=#674 id=674 data-nosnippet>674</a>// Tests — forward_single_ssd parity with forward_double_ssd, step, and split-prefill
-<a href=#675 id=675 data-nosnippet>675</a>// ---------------------------------------------------------------------------
-<a href=#676 id=676 data-nosnippet>676</a>
-<a href=#677 id=677 data-nosnippet>677</a></span><span class="attr">#[cfg(all(test, feature = <span class="string">"_dev-test"</span>))]
-<a href=#678 id=678 data-nosnippet>678</a></span><span class="kw">mod </span>tests;
+<a href=#372 id=372 data-nosnippet>372</a>        // the same term, with `νⁱⁿᵗ₀` added to the own weight of that slot.
+<a href=#373 id=373 data-nosnippet>373</a>        // Every other pattern has no such term. Either it has no lag-1 tap
+<a href=#374 id=374 data-nosnippet>374</a>        // beside the tap at `tap_lag`, or that lag-1 tap is closed exactly
+<a href=#375 id=375 data-nosnippet>375</a>        // there.
+<a href=#376 id=376 data-nosnippet>376</a>        </span><span class="kw">let </span>mimo_x_hmp = <span class="self">self</span>.mimo_x_hmp.as_ref().map(|p| p.val());
+<a href=#377 id=377 data-nosnippet>377</a>        <span class="comment">// The masses that the first `width` positions of each chunk pay,
+<a href=#378 id=378 data-nosnippet>378</a>        // `[batch, nchunks, width, nheads]`. Only chunk 0 is the start of the
+<a href=#379 id=379 data-nosnippet>379</a>        // call. In a packed row, every chunk that starts a segment is the
+<a href=#380 id=380 data-nosnippet>380</a>        // start of one from the origin.
+<a href=#381 id=381 data-nosnippet>381</a>        </span><span class="kw">let </span>nchunks = sequence.div_ceil(chunk_len);
+<a href=#382 id=382 data-nosnippet>382</a>        <span class="kw">let </span>heads_of = |t_bsh: Tensor&lt;<span class="number">3</span>&gt;, width: usize| {
+<a href=#383 id=383 data-nosnippet>383</a>            <span class="kw">let </span>pad = nchunks * chunk_len - sequence;
+<a href=#384 id=384 data-nosnippet>384</a>            <span class="kw">let </span>t_bSh = <span class="kw">if </span>pad == <span class="number">0 </span>{
+<a href=#385 id=385 data-nosnippet>385</a>                t_bsh
+<a href=#386 id=386 data-nosnippet>386</a>            } <span class="kw">else </span>{
+<a href=#387 id=387 data-nosnippet>387</a>                Tensor::cat(<span class="macro">vec!</span>[t_bsh, Tensor::zeros([batch, pad, nheads], <span class="kw-2">&amp;</span>device)], <span class="number">1</span>)
+<a href=#388 id=388 data-nosnippet>388</a>            };
+<a href=#389 id=389 data-nosnippet>389</a>            t_bSh
+<a href=#390 id=390 data-nosnippet>390</a>                .reshape([batch, nchunks, chunk_len, nheads])
+<a href=#391 id=391 data-nosnippet>391</a>                .narrow(<span class="number">2</span>, <span class="number">0</span>, width)
+<a href=#392 id=392 data-nosnippet>392</a>        };
+<a href=#393 id=393 data-nosnippet>393</a>        <span class="kw">let </span>nu_heads_bnuh = heads_of(nu_bsh.clone(), lag);
+<a href=#394 id=394 data-nosnippet>394</a>        <span class="kw">let </span>nu_heads_bnuh = <span class="kw">match </span>nu_interior_bsh
+<a href=#395 id=395 data-nosnippet>395</a>            .filter(|<span class="kw">_</span>| <span class="self">self</span>.tap_pattern.two_tap_lag1_crosses_tokens())
+<a href=#396 id=396 data-nosnippet>396</a>        {
+<a href=#397 id=397 data-nosnippet>397</a>            <span class="comment">// `lag ≥ 2` here: a two-tap pattern folds at `u = 1`, so the lag-1
+<a href=#398 id=398 data-nosnippet>398</a>            // tap of a two-tap pattern and a one-slot FIFO never coexist.
+<a href=#399 id=399 data-nosnippet>399</a>            </span><span class="prelude-val">Some</span>(nu_interior_bsh) =&gt; Tensor::cat(
+<a href=#400 id=400 data-nosnippet>400</a>                <span class="macro">vec!</span>[
+<a href=#401 id=401 data-nosnippet>401</a>                    nu_heads_bnuh.clone().narrow(<span class="number">2</span>, <span class="number">0</span>, lag - <span class="number">1</span>),
+<a href=#402 id=402 data-nosnippet>402</a>                    nu_heads_bnuh.narrow(<span class="number">2</span>, lag - <span class="number">1</span>, <span class="number">1</span>) + heads_of(nu_interior_bsh, <span class="number">1</span>),
+<a href=#403 id=403 data-nosnippet>403</a>                ],
+<a href=#404 id=404 data-nosnippet>404</a>                <span class="number">2</span>,
+<a href=#405 id=405 data-nosnippet>405</a>            ),
+<a href=#406 id=406 data-nosnippet>406</a>            <span class="prelude-val">None </span>=&gt; nu_heads_bnuh,
+<a href=#407 id=407 data-nosnippet>407</a>        };
+<a href=#408 id=408 data-nosnippet>408</a>        <span class="comment">// The slots of a FIFO, `v` with MIMO_V applied:
+<a href=#409 id=409 data-nosnippet>409</a>        // `([batch, lag, mimo_rank, nheads, per_head_dim], [batch, lag, mimo_rank, nheads, state_rank])`.
+<a href=#410 id=410 data-nosnippet>410</a>        </span><span class="kw">let </span>slots = <span class="string">"a β tap keeps its (B, x) cache slots"</span>;
+<a href=#411 id=411 data-nosnippet>411</a>        <span class="kw">let </span>prev_slots = |v_state_buhp: <span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">4</span>&gt;&gt;, k_state_bumhr: <span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">5</span>&gt;&gt;| {
+<a href=#412 id=412 data-nosnippet>412</a>            <span class="kw">let </span>v_prev_mimo_bumhp =
+<a href=#413 id=413 data-nosnippet>413</a>                helpers::build_v_with_mimo::&lt;<span class="number">4</span>, <span class="number">5</span>&gt;(v_state_buhp.expect(slots), mimo_x_hmp.as_ref(), <span class="number">2</span>);
+<a href=#414 id=414 data-nosnippet>414</a>            (v_prev_mimo_bumhp, k_state_bumhr.expect(slots))
+<a href=#415 id=415 data-nosnippet>415</a>        };
+<a href=#416 id=416 data-nosnippet>416</a>        <span class="comment">// The seed of the call, from the slots of the cache and the masses of
+<a href=#417 id=417 data-nosnippet>417</a>        // chunk 0.
+<a href=#418 id=418 data-nosnippet>418</a>        </span><span class="kw">let </span>(v_prev_mimo_bumhp, k_prev_bumhr) =
+<a href=#419 id=419 data-nosnippet>419</a>            prev_slots(cache.v_state_buhp.clone(), cache.k_state_bumhr.clone());
+<a href=#420 id=420 data-nosnippet>420</a>        <span class="kw">let </span>nu_head_buh = nu_heads_bnuh.clone().narrow(<span class="number">1</span>, <span class="number">0</span>, <span class="number">1</span>).squeeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">1</span>);
+<a href=#421 id=421 data-nosnippet>421</a>        <span class="kw">let </span>v_prev_mimo_bumhp = v_prev_mimo_bumhp * nu_head_buh.unsqueeze_dims::&lt;<span class="number">5</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">2</span>, <span class="number">4</span>]);
+<a href=#422 id=422 data-nosnippet>422</a>        <span class="comment">// The seed contracts over the slots *and* the ranks (both are outer
+<a href=#423 id=423 data-nosnippet>423</a>        // products into one accumulator). So, fused, it is the same one
+<a href=#424 id=424 data-nosnippet>424</a>        // `mimo_outer_sum` that the per-token write uses.
+<a href=#425 id=425 data-nosnippet>425</a>        </span><span class="kw">let </span>boundary_seed_bhpr = helpers::mimo_outer_sum(
+<a href=#426 id=426 data-nosnippet>426</a>            v_prev_mimo_bumhp.reshape([batch, lag * mimo_rank, nheads, per_head_dim]),
+<a href=#427 id=427 data-nosnippet>427</a>            k_prev_bumhr.reshape([batch, lag * mimo_rank, nheads, state_rank]),
+<a href=#428 id=428 data-nosnippet>428</a>            <span class="self">self</span>.use_siso_decode_kernels(),
+<a href=#429 id=429 data-nosnippet>429</a>        );
+<a href=#430 id=430 data-nosnippet>430</a>        <span class="kw">let </span>initial_state_bhpr = cache.ssm_bhpr.clone() + boundary_seed_bhpr;
+<a href=#431 id=431 data-nosnippet>431</a>        san(<span class="kw-2">&amp;</span>initial_state_bhpr);
+<a href=#432 id=432 data-nosnippet>432</a>        <span class="comment">// A packed row: each chunk gets a seed from the slots of the origin,
+<a href=#433 id=433 data-nosnippet>433</a>        // in case it restarts. Each slot writes one outer product (over the
+<a href=#434 id=434 data-nosnippet>434</a>        // ranks). Each chunk weighs the slots by its own head masses.
+<a href=#435 id=435 data-nosnippet>435</a>        </span><span class="kw">let </span>seed_bnhpr = packed.as_ref().map(|p| {
+<a href=#436 id=436 data-nosnippet>436</a>            <span class="kw">let </span>(v_origin_mimo_bumhp, k_origin_bumhr) =
+<a href=#437 id=437 data-nosnippet>437</a>                prev_slots(p.origin.v_state_buhp.clone(), p.origin.k_state_bumhr.clone());
+<a href=#438 id=438 data-nosnippet>438</a>            <span class="kw">let </span>slot_writes_bhuP = helpers::mimo_outer_sum(
+<a href=#439 id=439 data-nosnippet>439</a>                v_origin_mimo_bumhp.reshape([batch * lag, mimo_rank, nheads, per_head_dim]),
+<a href=#440 id=440 data-nosnippet>440</a>                k_origin_bumhr.reshape([batch * lag, mimo_rank, nheads, state_rank]),
+<a href=#441 id=441 data-nosnippet>441</a>                <span class="self">self</span>.use_siso_decode_kernels(),
+<a href=#442 id=442 data-nosnippet>442</a>            )
+<a href=#443 id=443 data-nosnippet>443</a>            .reshape([batch, lag, nheads, per_head_dim * state_rank])
+<a href=#444 id=444 data-nosnippet>444</a>            .swap_dims(<span class="number">1</span>, <span class="number">2</span>);
+<a href=#445 id=445 data-nosnippet>445</a>            nu_heads_bnuh
+<a href=#446 id=446 data-nosnippet>446</a>                .permute([<span class="number">0</span>, <span class="number">3</span>, <span class="number">1</span>, <span class="number">2</span>]) <span class="comment">// _bhnu
+<a href=#447 id=447 data-nosnippet>447</a>                </span>.matmul(slot_writes_bhuP) <span class="comment">// _bhnP
+<a href=#448 id=448 data-nosnippet>448</a>                </span>.reshape([batch, nheads, nchunks, per_head_dim, state_rank])
+<a href=#449 id=449 data-nosnippet>449</a>                .swap_dims(<span class="number">1</span>, <span class="number">2</span>)
+<a href=#450 id=450 data-nosnippet>450</a>        });
+<a href=#451 id=451 data-nosnippet>451</a>
+<a href=#452 id=452 data-nosnippet>452</a>        <span class="comment">// ── Step 6: Pad sequence to multiple of chunk_len ─────────────────────
+<a href=#453 id=453 data-nosnippet>453</a>        </span><span class="kw">let </span>sequence_padded = sequence.next_multiple_of(chunk_len);
+<a href=#454 id=454 data-nosnippet>454</a>        <span class="kw">let </span>pad = sequence_padded - sequence;
+<a href=#455 id=455 data-nosnippet>455</a>
+<a href=#456 id=456 data-nosnippet>456</a>        <span class="comment">// V passed to SSD is raw x with MIMO_V applied (not γ-scaled).
+<a href=#457 id=457 data-nosnippet>457</a>        </span><span class="kw">let </span>v_bshmp = helpers::build_v_with_mimo::&lt;<span class="number">4</span>, <span class="number">5</span>&gt;(x_bshp.clone(), mimo_x_hmp.as_ref(), <span class="number">2</span>);
+<a href=#458 id=458 data-nosnippet>458</a>        <span class="comment">// v_bshmp has axis order [b, s, m, h, p] (insert_dim=2 onto [b,s,h,p]).
+<a href=#459 id=459 data-nosnippet>459</a>
+<a href=#460 id=460 data-nosnippet>460</a>        // ── The lag-`u` correction band ───────────────────────────────────────
+<a href=#461 id=461 data-nosnippet>461</a>        // At lag 1 the key scale is wrong only on the diagonal, and
+<a href=#462 id=462 data-nosnippet>462</a>        // `ssd/diag.rs` corrects it inside the kernel. At lag `u` the exception
+<a href=#463 id=463 data-nosnippet>463</a>        // is `u` wide, and at the positions that the readout keeps it is
+<a href=#464 id=464 data-nosnippet>464</a>        // exactly the token. So it is one contraction here, not a wider mask.
+<a href=#465 id=465 data-nosnippet>465</a>        // See [`crate::mamba3::single_ssd::token_band`].
+<a href=#466 id=466 data-nosnippet>466</a>        //
+<a href=#467 id=467 data-nosnippet>467</a>        // The band is the **lag-`u`** installment only, also for a two-tap
+<a href=#468 id=468 data-nosnippet>468</a>        // pattern. At the surviving read `t = τu + u−1`, the lag-1 installment
+<a href=#469 id=469 data-nosnippet>469</a>        // of a sample has already landed for every `j &lt; u−1`. At
+<a href=#470 id=470 data-nosnippet>470</a>        // `j = u−1`, the kernel replaces the whole weight with `γ` anyway. Only
+<a href=#471 id=471 data-nosnippet>471</a>        // the lag-`u` installment is still unpaid there.
+<a href=#472 id=472 data-nosnippet>472</a>        </span><span class="kw">let </span>band_correction_btmhp = (lag &gt; <span class="number">1</span>)
+<a href=#473 id=473 data-nosnippet>473</a>            .then(|| {
+<a href=#474 id=474 data-nosnippet>474</a>                <span class="kw">crate</span>::mamba3::single_ssd::token_band::token_band_correction(
+<a href=#475 id=475 data-nosnippet>475</a>                    v_bshmp.clone(),
+<a href=#476 id=476 data-nosnippet>476</a>                    b_bsmhr.clone(),
+<a href=#477 id=477 data-nosnippet>477</a>                    c_btmhr.clone(),
+<a href=#478 id=478 data-nosnippet>478</a>                    far_shifted_bsh,
+<a href=#479 id=479 data-nosnippet>479</a>                    da_bsh.clone(),
+<a href=#480 id=480 data-nosnippet>480</a>                    micro_steps,
+<a href=#481 id=481 data-nosnippet>481</a>                )
+<a href=#482 id=482 data-nosnippet>482</a>            })
+<a href=#483 id=483 data-nosnippet>483</a>            .flatten();
+<a href=#484 id=484 data-nosnippet>484</a>
+<a href=#485 id=485 data-nosnippet>485</a>        <span class="comment">// `C` and `γ` are on the read axis of the chunk, so they pad by whole
+<a href=#486 id=486 data-nosnippet>486</a>        // tokens. `chunk_len` is a multiple of `u`, so `pad` is too.
+<a href=#487 id=487 data-nosnippet>487</a>        </span><span class="kw">let </span>gamma_bth = helpers::read_positions::&lt;<span class="number">3</span>, <span class="number">4</span>&gt;(gamma_bsh, <span class="number">1</span>, u);
+<a href=#488 id=488 data-nosnippet>488</a>        <span class="kw">let </span>tokens_padded = sequence_padded / u;
+<a href=#489 id=489 data-nosnippet>489</a>        <span class="kw">let </span>pad_tokens = tokens_padded - tokens;
+<a href=#490 id=490 data-nosnippet>490</a>
+<a href=#491 id=491 data-nosnippet>491</a>        <span class="attr">#[rustfmt::skip]
+<a href=#492 id=492 data-nosnippet>492</a>        </span><span class="kw">let </span>(v_bShmp, da_bSh, gamma_bTh, scale_bSh, b_bSmhr, c_bTmhr) = <span class="kw">if </span>pad == <span class="number">0 </span>{
+<a href=#493 id=493 data-nosnippet>493</a>            (v_bshmp, da_bsh, gamma_bth, scale_bsh, b_bsmhr, c_btmhr)
+<a href=#494 id=494 data-nosnippet>494</a>        } <span class="kw">else </span>{
+<a href=#495 id=495 data-nosnippet>495</a>            <span class="kw">let </span>pad_bShmp = Tensor::zeros([batch, pad, mimo_rank, nheads, per_head_dim], <span class="kw-2">&amp;</span>device);
+<a href=#496 id=496 data-nosnippet>496</a>            <span class="kw">let </span>pad_bSh = Tensor::zeros([batch, pad, nheads], <span class="kw-2">&amp;</span>device);
+<a href=#497 id=497 data-nosnippet>497</a>            <span class="kw">let </span>pad_bTh = Tensor::zeros([batch, pad_tokens, nheads], <span class="kw-2">&amp;</span>device);
+<a href=#498 id=498 data-nosnippet>498</a>            <span class="kw">let </span>pad_bSmhr = Tensor::zeros([batch, pad, mimo_rank, nheads, state_rank], <span class="kw-2">&amp;</span>device);
+<a href=#499 id=499 data-nosnippet>499</a>            <span class="kw">let </span>pad_bTmhr =
+<a href=#500 id=500 data-nosnippet>500</a>                Tensor::zeros([batch, pad_tokens, mimo_rank, nheads, state_rank], <span class="kw-2">&amp;</span>device);
+<a href=#501 id=501 data-nosnippet>501</a>            (
+<a href=#502 id=502 data-nosnippet>502</a>                Tensor::cat(<span class="macro">vec!</span>[v_bshmp, pad_bShmp], <span class="number">1</span>),
+<a href=#503 id=503 data-nosnippet>503</a>                Tensor::cat(<span class="macro">vec!</span>[da_bsh, pad_bSh.clone()], <span class="number">1</span>),
+<a href=#504 id=504 data-nosnippet>504</a>                Tensor::cat(<span class="macro">vec!</span>[gamma_bth, pad_bTh], <span class="number">1</span>),
+<a href=#505 id=505 data-nosnippet>505</a>                Tensor::cat(<span class="macro">vec!</span>[scale_bsh, pad_bSh], <span class="number">1</span>),
+<a href=#506 id=506 data-nosnippet>506</a>                Tensor::cat(<span class="macro">vec!</span>[b_bsmhr, pad_bSmhr], <span class="number">1</span>),
+<a href=#507 id=507 data-nosnippet>507</a>                Tensor::cat(<span class="macro">vec!</span>[c_btmhr, pad_bTmhr], <span class="number">1</span>),
+<a href=#508 id=508 data-nosnippet>508</a>            )
+<a href=#509 id=509 data-nosnippet>509</a>        };
+<a href=#510 id=510 data-nosnippet>510</a>
+<a href=#511 id=511 data-nosnippet>511</a>        <span class="comment">// ── Reshape into chunks ───────────────────────────────────────────────
+<a href=#512 id=512 data-nosnippet>512</a>        </span><span class="kw">let </span>nchunks = sequence_padded / chunk_len;
+<a href=#513 id=513 data-nosnippet>513</a>        <span class="kw">let </span>chunk_tokens = Mamba3SsdPath::chunk_tokens(chunk_len, u);
+<a href=#514 id=514 data-nosnippet>514</a>        <span class="kw">let </span>v_bnlmhp =
+<a href=#515 id=515 data-nosnippet>515</a>            v_bShmp.reshape([batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]);
+<a href=#516 id=516 data-nosnippet>516</a>        <span class="kw">let </span>da_bnlh = da_bSh.reshape([batch, nchunks, chunk_len, nheads]);
+<a href=#517 id=517 data-nosnippet>517</a>        <span class="kw">let </span>gamma_bnth = gamma_bTh.reshape([batch, nchunks, chunk_tokens, nheads]);
+<a href=#518 id=518 data-nosnippet>518</a>        <span class="kw">let </span>scale_bnlh = scale_bSh.reshape([batch, nchunks, chunk_len, nheads]);
+<a href=#519 id=519 data-nosnippet>519</a>        <span class="kw">let </span>b_bnlmhr = b_bSmhr.reshape([batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]);
+<a href=#520 id=520 data-nosnippet>520</a>        <span class="kw">let </span>c_bntmhr =
+<a href=#521 id=521 data-nosnippet>521</a>            c_bTmhr.reshape([batch, nchunks, chunk_tokens, mimo_rank, nheads, state_rank]);
+<a href=#522 id=522 data-nosnippet>522</a>
+<a href=#523 id=523 data-nosnippet>523</a>        <span class="comment">// ── Step 7: Run single-pass form SSD ───────────────────────────────────────
+<a href=#524 id=524 data-nosnippet>524</a>        </span><span class="kw">let </span>ssd_input = Mamba3SingleSsdInput {
+<a href=#525 id=525 data-nosnippet>525</a>            v_bnlmhp,
+<a href=#526 id=526 data-nosnippet>526</a>            b_bnlmhr,
+<a href=#527 id=527 data-nosnippet>527</a>            c_bntmhr,
+<a href=#528 id=528 data-nosnippet>528</a>            da_bnlh,
+<a href=#529 id=529 data-nosnippet>529</a>            gamma_bnth,
+<a href=#530 id=530 data-nosnippet>530</a>            scale_bnlh,
+<a href=#531 id=531 data-nosnippet>531</a>            initial_state_bhpr,
+<a href=#532 id=532 data-nosnippet>532</a>            init_state_hpr: <span class="self">self</span>.init_state_hpr.as_ref().map(|s| s.val()),
+<a href=#533 id=533 data-nosnippet>533</a>            read_stride: u,
+<a href=#534 id=534 data-nosnippet>534</a>            siso_specialization: <span class="self">self</span>.siso_specialization,
+<a href=#535 id=535 data-nosnippet>535</a>            restarts: packed.as_ref().map(|p| <span class="kw">crate</span>::packing::Restarts {
+<a href=#536 id=536 data-nosnippet>536</a>                reset_bn: p.segments.reset_bn.clone(),
+<a href=#537 id=537 data-nosnippet>537</a>                origin_bhpr: p.origin.ssm_bhpr.clone(),
+<a href=#538 id=538 data-nosnippet>538</a>            }),
+<a href=#539 id=539 data-nosnippet>539</a>            seed_bnhpr,
+<a href=#540 id=540 data-nosnippet>540</a>        };
+<a href=#541 id=541 data-nosnippet>541</a>        <span class="kw">let </span>(y_bntmhp, final_state_bhpr) = ssd_input.run(ssd_path);
+<a href=#542 id=542 data-nosnippet>542</a>
+<a href=#543 id=543 data-nosnippet>543</a>        san(<span class="kw-2">&amp;</span>y_bntmhp);
+<a href=#544 id=544 data-nosnippet>544</a>        san(<span class="kw-2">&amp;</span>final_state_bhpr);
+<a href=#545 id=545 data-nosnippet>545</a>        cache.ssm_bhpr = final_state_bhpr;
+<a href=#546 id=546 data-nosnippet>546</a>
+<a href=#547 id=547 data-nosnippet>547</a>        <span class="comment">// ── Step 8: Unpad ─────────────────────────────────────────────────────
+<a href=#548 id=548 data-nosnippet>548</a>        // The SSD returns token resolution: the readout is after all `u`
+<a href=#549 id=549 data-nosnippet>549</a>        // writes, and the kernel computed only that position.
+<a href=#550 id=550 data-nosnippet>550</a>        </span><span class="kw">let </span>y_bTmhp = y_bntmhp.reshape([batch, tokens_padded, mimo_rank, nheads, per_head_dim]);
+<a href=#551 id=551 data-nosnippet>551</a>        <span class="kw">let </span>y_bsmhp = <span class="kw">if </span>pad == <span class="number">0 </span>{
+<a href=#552 id=552 data-nosnippet>552</a>            y_bTmhp
+<a href=#553 id=553 data-nosnippet>553</a>        } <span class="kw">else </span>{
+<a href=#554 id=554 data-nosnippet>554</a>            y_bTmhp.narrow(<span class="number">1</span>, <span class="number">0</span>, tokens)
+<a href=#555 id=555 data-nosnippet>555</a>        };
+<a href=#556 id=556 data-nosnippet>556</a>
+<a href=#557 id=557 data-nosnippet>557</a>        <span class="kw">let </span>y_bsmhp = <span class="kw">match </span>band_correction_btmhp {
+<a href=#558 id=558 data-nosnippet>558</a>            <span class="prelude-val">Some</span>(correction_btmhp) =&gt; y_bsmhp - correction_btmhp,
+<a href=#559 id=559 data-nosnippet>559</a>            <span class="prelude-val">None </span>=&gt; y_bsmhp,
+<a href=#560 id=560 data-nosnippet>560</a>        };
+<a href=#561 id=561 data-nosnippet>561</a>        <span class="kw">let </span>(y_bsmhp, log_precision_bh, tropical_bh) = <span class="self">self</span>.positive_tail(
+<a href=#562 id=562 data-nosnippet>562</a>            y_bsmhp,
+<a href=#563 id=563 data-nosnippet>563</a>            log_precision_bsh,
+<a href=#564 id=564 data-nosnippet>564</a>            tropical_ab_bsh,
+<a href=#565 id=565 data-nosnippet>565</a>            cache.tropical_bh.clone(),
+<a href=#566 id=566 data-nosnippet>566</a>            end_b.map(|end_b| (end_b, cache.log_precision_bh.clone())),
+<a href=#567 id=567 data-nosnippet>567</a>            packed.as_ref(),
+<a href=#568 id=568 data-nosnippet>568</a>        );
+<a href=#569 id=569 data-nosnippet>569</a>        cache.log_precision_bh = log_precision_bh;
+<a href=#570 id=570 data-nosnippet>570</a>        cache.tropical_bh = tropical_bh;
+<a href=#571 id=571 data-nosnippet>571</a>        <span class="kw">let </span>x_bthp = <span class="kw">crate</span>::mamba3::product::last_micro4(x_bshp.clone(), micro_steps);
+<a href=#572 id=572 data-nosnippet>572</a>        <span class="kw">let </span>sequence = tokens;
+<a href=#573 id=573 data-nosnippet>573</a>
+<a href=#574 id=574 data-nosnippet>574</a>        <span class="comment">// ── Step 9: D skip + gate + MIMO_O down-projection ────────────────────
+<a href=#575 id=575 data-nosnippet>575</a>        // The D skip uses the raw x ⊙ mimo_x (not γ-scaled, as in the double
+<a href=#576 id=576 data-nosnippet>576</a>        // pathway), at the micro-step of the readout.
+<a href=#577 id=577 data-nosnippet>577</a>        </span><span class="kw">let </span>v_raw_bsmhp = helpers::build_v_with_mimo::&lt;<span class="number">4</span>, <span class="number">5</span>&gt;(x_bthp, mimo_x_hmp.as_ref(), <span class="number">2</span>);
+<a href=#578 id=578 data-nosnippet>578</a>        <span class="kw">let </span>d_111h1 = <span class="self">self</span>.d_h.val().unsqueeze_dims::&lt;<span class="number">5</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">4</span>]);
+<a href=#579 id=579 data-nosnippet>579</a>        <span class="kw">let </span>y_bsmhp = y_bsmhp + d_111h1 * v_raw_bsmhp;
+<a href=#580 id=580 data-nosnippet>580</a>
+<a href=#581 id=581 data-nosnippet>581</a>        <span class="kw">let </span>y_bsi = <span class="kw">if </span>mimo_rank &gt; <span class="number">1 </span>{
+<a href=#582 id=582 data-nosnippet>582</a>            <span class="kw">let </span>mimo_z_hmp = <span class="self">self</span>.mimo_z_hmp.as_ref().map(|p| p.val()).unwrap();
+<a href=#583 id=583 data-nosnippet>583</a>            <span class="kw">let </span>mimo_o_hmp = <span class="self">self</span>.mimo_o_hmp.as_ref().map(|p| p.val()).unwrap();
+<a href=#584 id=584 data-nosnippet>584</a>
+<a href=#585 id=585 data-nosnippet>585</a>            <span class="kw">let </span>z_bshp = z_bsi
+<a href=#586 id=586 data-nosnippet>586</a>                .clone()
+<a href=#587 id=587 data-nosnippet>587</a>                .reshape([batch, sequence, nheads, per_head_dim]);
+<a href=#588 id=588 data-nosnippet>588</a>            <span class="kw">let </span>z_bsmhp = {
+<a href=#589 id=589 data-nosnippet>589</a>                <span class="kw">let </span>z_bsmhp = z_bshp.unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">2</span>).expand([
+<a href=#590 id=590 data-nosnippet>590</a>                    batch,
+<a href=#591 id=591 data-nosnippet>591</a>                    sequence,
+<a href=#592 id=592 data-nosnippet>592</a>                    mimo_rank,
+<a href=#593 id=593 data-nosnippet>593</a>                    nheads,
+<a href=#594 id=594 data-nosnippet>594</a>                    per_head_dim,
+<a href=#595 id=595 data-nosnippet>595</a>                ]);
+<a href=#596 id=596 data-nosnippet>596</a>                <span class="kw">let </span>mimo_z_bsmhp = mimo_z_hmp
+<a href=#597 id=597 data-nosnippet>597</a>                    .swap_dims(<span class="number">0</span>, <span class="number">1</span>)
+<a href=#598 id=598 data-nosnippet>598</a>                    .unsqueeze_dims::&lt;<span class="number">5</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>])
+<a href=#599 id=599 data-nosnippet>599</a>                    .expand([batch, sequence, mimo_rank, nheads, per_head_dim]);
+<a href=#600 id=600 data-nosnippet>600</a>                z_bsmhp * mimo_z_bsmhp
+<a href=#601 id=601 data-nosnippet>601</a>            };
+<a href=#602 id=602 data-nosnippet>602</a>
+<a href=#603 id=603 data-nosnippet>603</a>            <span class="kw">let </span>y_combined_bsmhp = <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.out_norm {
+<a href=#604 id=604 data-nosnippet>604</a>                <span class="prelude-val">Some</span>(norm) =&gt; norm.forward(y_bsmhp, z_bsmhp),
+<a href=#605 id=605 data-nosnippet>605</a>                <span class="prelude-val">None </span>=&gt; y_bsmhp * Silu::new().forward(z_bsmhp),
+<a href=#606 id=606 data-nosnippet>606</a>            };
+<a href=#607 id=607 data-nosnippet>607</a>
+<a href=#608 id=608 data-nosnippet>608</a>            <span class="kw">let </span>mimo_o_bsmhp = mimo_o_hmp
+<a href=#609 id=609 data-nosnippet>609</a>                .swap_dims(<span class="number">0</span>, <span class="number">1</span>)
+<a href=#610 id=610 data-nosnippet>610</a>                .unsqueeze_dims::&lt;<span class="number">5</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>])
+<a href=#611 id=611 data-nosnippet>611</a>                .expand([batch, sequence, mimo_rank, nheads, per_head_dim]);
+<a href=#612 id=612 data-nosnippet>612</a>            <span class="kw">let </span>y_bshp: Tensor&lt;<span class="number">4</span>&gt; = (y_combined_bsmhp * mimo_o_bsmhp).sum_dim(<span class="number">2</span>).squeeze_dim(<span class="number">2</span>);
+<a href=#613 id=613 data-nosnippet>613</a>            y_bshp.reshape([batch, sequence, d_inner])
+<a href=#614 id=614 data-nosnippet>614</a>        } <span class="kw">else </span>{
+<a href=#615 id=615 data-nosnippet>615</a>            <span class="kw">let </span>y_bshp: Tensor&lt;<span class="number">4</span>&gt; = y_bsmhp.squeeze_dim(<span class="number">2</span>);
+<a href=#616 id=616 data-nosnippet>616</a>            <span class="kw">let </span>z_bshp = z_bsi.reshape([batch, sequence, nheads, per_head_dim]);
+<a href=#617 id=617 data-nosnippet>617</a>            <span class="kw">let </span>y_combined_bshp = <span class="kw">match </span><span class="kw-2">&amp;</span><span class="self">self</span>.out_norm {
+<a href=#618 id=618 data-nosnippet>618</a>                <span class="prelude-val">Some</span>(norm) =&gt; norm.forward(y_bshp, z_bshp),
+<a href=#619 id=619 data-nosnippet>619</a>                <span class="prelude-val">None </span>=&gt; y_bshp * Silu::new().forward(z_bshp),
+<a href=#620 id=620 data-nosnippet>620</a>            };
+<a href=#621 id=621 data-nosnippet>621</a>            y_combined_bshp.reshape([batch, sequence, d_inner])
+<a href=#622 id=622 data-nosnippet>622</a>        };
+<a href=#623 id=623 data-nosnippet>623</a>        san(<span class="kw-2">&amp;</span>y_bsi);
+<a href=#624 id=624 data-nosnippet>624</a>
+<a href=#625 id=625 data-nosnippet>625</a>        <span class="comment">// ── Out-projection ────────────────────────────────────────────────────
+<a href=#626 id=626 data-nosnippet>626</a>        </span><span class="kw">let </span>out_bsm = <span class="self">self</span>.out_proj.forward(y_bsi);
+<a href=#627 id=627 data-nosnippet>627</a>        san(<span class="kw-2">&amp;</span>out_bsm);
+<a href=#628 id=628 data-nosnippet>628</a>
+<a href=#629 id=629 data-nosnippet>629</a>        <span class="comment">// ── Update remaining cache fields ─────────────────────────────────────
+<a href=#630 id=630 data-nosnippet>630</a>        </span>cache.k_state_bumhr = b_last_bumhr;
+<a href=#631 id=631 data-nosnippet>631</a>        cache.v_state_buhp = x_last_buhp;
+<a href=#632 id=632 data-nosnippet>632</a>        <span class="comment">// The new cumulative rotation from [`rotate_bc_forward`]. It has the
+<a href=#633 id=633 data-nosnippet>633</a>        // convention of the double-ssd cache, so the two caches convert.
+<a href=#634 id=634 data-nosnippet>634</a>        </span>cache.rotation = new_rotation;
+<a href=#635 id=635 data-nosnippet>635</a>
+<a href=#636 id=636 data-nosnippet>636</a>        (out_bsm, cache)
+<a href=#637 id=637 data-nosnippet>637</a>    }
+<a href=#638 id=638 data-nosnippet>638</a>}
+<a href=#639 id=639 data-nosnippet>639</a>
+<a href=#640 id=640 data-nosnippet>640</a><span class="comment">// ---------------------------------------------------------------------------
+<a href=#641 id=641 data-nosnippet>641</a>// Mamba3::step  (recurrent SSM — token-by-token decoding)
+<a href=#642 id=642 data-nosnippet>642</a>// ---------------------------------------------------------------------------
+<a href=#643 id=643 data-nosnippet>643</a>
+<a href=#644 id=644 data-nosnippet>644</a></span><span class="kw">mod </span>step {
+<a href=#645 id=645 data-nosnippet>645</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+<a href=#646 id=646 data-nosnippet>646</a>
+<a href=#647 id=647 data-nosnippet>647</a>    <span class="kw">impl </span>Mamba3 {
+<a href=#648 id=648 data-nosnippet>648</a>        <span class="doccomment">/// Process a **single token** with the pure recurrent form (the
+<a href=#649 id=649 data-nosnippet>649</a>        /// formulas are in [`Mamba3::step`]). It converts the cache to the
+<a href=#650 id=650 data-nosnippet>650</a>        /// double-ssd form, runs [`Mamba3::step_double_ssd`], and converts back.
+<a href=#651 id=651 data-nosnippet>651</a>        ///
+<a href=#652 id=652 data-nosnippet>652</a>        /// # Shapes
+<a href=#653 id=653 data-nosnippet>653</a>        /// - `input_bd` : `[batch, d_model]`
+<a href=#654 id=654 data-nosnippet>654</a>        /// - output     : `[batch, d_model]`
+<a href=#655 id=655 data-nosnippet>655</a>        </span><span class="attr">#[allow(non_snake_case)]
+<a href=#656 id=656 data-nosnippet>656</a>        </span><span class="kw">pub fn </span>step_single_ssd(
+<a href=#657 id=657 data-nosnippet>657</a>            <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#658 id=658 data-nosnippet>658</a>            input_bd: Tensor&lt;<span class="number">2</span>&gt;,
+<a href=#659 id=659 data-nosnippet>659</a>            cache: <span class="prelude-ty">Option</span>&lt;Mamba3SingleSsdCache&gt;,
+<a href=#660 id=660 data-nosnippet>660</a>        ) -&gt; (Tensor&lt;<span class="number">2</span>&gt;, Mamba3SingleSsdCache) {
+<a href=#661 id=661 data-nosnippet>661</a>            <span class="comment">// Token-by-token decoding always uses the recurrent (double-ssd)
+<a href=#662 id=662 data-nosnippet>662</a>            // form. A single-ssd cache holds the accumulator at a call
+<a href=#663 id=663 data-nosnippet>663</a>            // boundary, where the accumulator equals the state (see the `From`
+<a href=#664 id=664 data-nosnippet>664</a>            // impls in `crate::mamba3::cache`). So the
+<a href=#665 id=665 data-nosnippet>665</a>            // conversion in and back out is lossless. One `step` call is
+<a href=#666 id=666 data-nosnippet>666</a>            // itself a boundary-to-boundary transition, so the round trip stays
+<a href=#667 id=667 data-nosnippet>667</a>            // exact.
+<a href=#668 id=668 data-nosnippet>668</a>            </span><span class="kw">let </span>cache = cache.map(Mamba3DoubleSsdCache::from);
+<a href=#669 id=669 data-nosnippet>669</a>            <span class="kw">let </span>(out_bd, cache) = <span class="self">self</span>.step_double_ssd(input_bd, cache);
+<a href=#670 id=670 data-nosnippet>670</a>            (out_bd, cache.into())
+<a href=#671 id=671 data-nosnippet>671</a>        }
+<a href=#672 id=672 data-nosnippet>672</a>    }
+<a href=#673 id=673 data-nosnippet>673</a>}
+<a href=#674 id=674 data-nosnippet>674</a>
+<a href=#675 id=675 data-nosnippet>675</a><span class="comment">// ---------------------------------------------------------------------------
+<a href=#676 id=676 data-nosnippet>676</a>// Tests — forward_single_ssd parity with forward_double_ssd, step, and split-prefill
+<a href=#677 id=677 data-nosnippet>677</a>// ---------------------------------------------------------------------------
+<a href=#678 id=678 data-nosnippet>678</a>
+<a href=#679 id=679 data-nosnippet>679</a></span><span class="attr">#[cfg(all(test, feature = <span class="string">"_dev-test"</span>))]
+<a href=#680 id=680 data-nosnippet>680</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>
