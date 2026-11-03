@@ -219,5 +219,5 @@ benches/layer.rs         single-block benches, run by `bench.sh`/`kernels.sh`
 info/                    derivation notes
 scripts/                 the float64 checks of the `info/` notes
 examples/                see `examples/README.md`
-docs/                    `adr/`, `agents/`
+docs/                    `adr/`, `agents/`, `source-terms.md`
 ```

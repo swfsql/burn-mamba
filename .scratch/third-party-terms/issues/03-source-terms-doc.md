@@ -1,6 +1,6 @@
 # 03: The map from Mamba source terms to our terms
 
-Status: ready-for-agent
+Status: resolved
 
 Blocked by: None (can start immediately)
 
@@ -92,13 +92,50 @@ you find as you write.
 
 ## Acceptance criteria
 
-- [ ] `docs/source-terms.md` has the four sections.
-- [ ] Its first row covers the official `Block` and `mixer`.
-- [ ] Each word of research part 3 that a Mamba source uses has a row.
-- [ ] Each cell of "Our code follows" holds `?`.
-- [ ] Each source citation has the form `file:line`, and no citation of our own
+- [x] `docs/source-terms.md` has the four sections.
+- [x] Its first row covers the official `Block` and `mixer`.
+- [x] Each word of research part 3 that a Mamba source uses has a row.
+- [x] Each cell of "Our code follows" holds `?`.
+- [x] Each source citation has the form `file:line`, and no citation of our own
       code has a line number.
-- [ ] The File Map has the file. `docs/agents/domain.md` and "Where to look" do
+- [x] The File Map has the file. `docs/agents/domain.md` and "Where to look" do
       not name it yet.
-- [ ] `scripts/ste-lint.py` of the `asd-ste100` skill gives no hard violation on
+- [x] `scripts/ste-lint.py` of the `asd-ste100` skill gives no hard violation on
       the doc.
+
+## Comments
+
+The doc follows the structure of the reviewed `docs/source-terms.md` of
+burn-stack. These choices go past the text of the ticket:
+
+- **The glossaries are newer than `research.md`.** Research part 4 marks some rows
+  as "no term" that now have a term: `Δ_t` is Step size, `α_t` is Decay, `GatedMLP`
+  is Feed-forward. These rows moved to "Source names that a reader cannot decode".
+  Research also gives "none" for some rows whose item exists now, such as
+  `Mamba3::b_norm`. The doc names these items. `hidden_states` maps to Residual
+  stream, as the burn-stack doc does for its "hidden state".
+- **Rows of section 3 past the seed list:** "The coefficient `β`", "What
+  `ssm_state` holds", "Feed-forward part", "Form with no rotation" and "Count of
+  heads".
+- **The seed "The split `λ`" is the row "The share `λ`".** The doc defines "split"
+  as a kind of source word, and **Mass** defines a mass as a share.
+- **Section 3 has one column "Papers".** The Mamba-1 and Mamba-2 papers apply to
+  only a few rows, so a cell gives the name of the paper.
+- **Spellings past the ticket:** the rows `i`, `h`, `m` and `v`. Research 5.1 marks
+  them as true for one source only, not as incomplete. Their cells of the Notation
+  table have the same gap.
+- **Facts in two sections.** A word can have a row in sections 1 or 2 and a concept
+  in section 3, because the ticket asks for both. So some facts repeat, for example
+  the two forms of `trap`. A lookup of a word must show the fact that causes its
+  wrong port.
+- **Rows of `research.md` with no row here:** the `renamed` rows with a name that
+  explains itself. They are `InferenceCache`, `generate`, `MambaLMHeadModel`,
+  `Mamba3LMHeadModel`, "gradient step" and "Mamba architecture". "Process prompt"
+  also explains itself, but it has a row because its tail differs from **Prefill**.
+- **Citations that differ from `research.md`.** `TIL/mamba3_mimo.py:255` is `DT`,
+  so the `Trap` citation is `:256`, and the row for `Δ_t` uses `:255`. These
+  citations are new, from lines that I read: `MM/mamba3.py:76`, `:178`, `:373`,
+  `:676`, `:677`, `:678`, and `SSM/modules/mamba2.py:85`.
+
+This ticket did not check the rows against their citations. A script checked only
+that each cited file and line exists. Ticket 04 does the check of the content.

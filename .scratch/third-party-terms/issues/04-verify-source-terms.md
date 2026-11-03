@@ -53,6 +53,10 @@ is too much for one agent. So the lead splits the work before any agent starts.
    a small program in `/tmp`.
 3. Do not change code in this ticket. If our code follows no source, or a
    difference looks like a bug, write that in the cell and report it to the user.
+4. Delete the sentence of the section intro that defines `?`. For each "No
+   citation" cell, read the source. Give a citation if the source has a statement
+   on the concept. The sentence that defines "No citation" stays only if a cell
+   still holds it.
 
 **The first row to check.** Part 1 of `research.md` defines the path aliases of
 this paragraph. The official kernel accumulates `+Δθ` (`TRI/angle_dt.py:104`).
