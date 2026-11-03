@@ -80,7 +80,7 @@ cargo run --example reset-majority -- --training --inference
   through Bash. That reminder does not apply here.
   - No `python - <<'PY'`, no `sed -i`, no `cat > file <<'EOF'`.
   - Use Bash to read and inspect (`cat`, `sed -n`, `rg`, `grep`), to move and
-    copy files (`mv`, `cp`), and to write throwaway files in `/tmp`.
+    copy files (`mv`, `cp`), and to write throwaway files in `tmp/`.
 - `rg` is available. Do not use `cargo fmt`.
 - A dangerous-command-guard hook (`dcg`) checks each Bash command. It blocks
   a `>` redirect to a path that holds a variable. Use a literal path, or a
@@ -91,6 +91,12 @@ cargo run --example reset-majority -- --training --inference
   `run_in_background`, then return the turn to the user. The watch also
   reports each failure state (for example, a crash). Do not hold the turn with
   a foreground loop (`until`, `while`), a `sleep` or a long `timeout`.
+- **Agents**: run one agent at a time, even if a skill or a ticket asks for
+  parallel agents. A usage limit makes each active agent pay for a cold cache.
+- **Agent size**: keep each agent under ~150k tokens (200k at most), estimated
+  from its reads. State the batches first.
+- **Temporary work**: use the `tmp/` of the repo, not `/tmp`, which a power loss
+  clears. Save each agent report there. To discard work, move it to `/tmp`.
 - **Memory**: ask the user before you write to the auto-memory. Show the
   change that you propose, and write it only after the user approves it.
 - **Commits**: when a skill or the user tells you to commit, commit your work

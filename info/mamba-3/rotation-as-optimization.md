@@ -112,7 +112,10 @@ $$\mu_{t,j} := e^{\Delta_t(A_t + i\theta_{t,j})} = \alpha_t\,e^{i\varphi_{t,j}},
 
 In real form, `μ` acts as `α·R(φ)`, with `R` the 2×2 rotation. This is the
 *complex-to-real SSM equivalence* of the source paper. It is the reason why
-the `state_rank` `N` of the crate carries `N/2` rotating pairs.
+the `state_rank` `N` of the crate carries `N/2` rotating pairs. This note uses
+the direction of the paper. The `Complex2D` block of the crate turns the other
+way, as the official kernels do, and the sign of `θ` absorbs the difference
+(`src/mamba3/mamba3.rs`, section 2).
 
 ### 2.2 Fast-weight orientation
 

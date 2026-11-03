@@ -57,8 +57,8 @@
 //! Equivalence*):
 //!
 //! ```text
-//!   ρₜ = R(Δₜ · ϱ · π · tanh(ϑₜ)) ∈ SO(2)^{N/2}  — per-micro-step rotation (data-dependent)
-//!   hₜ = αₜ ρₜ hₜ₋₁ + Δₜ Bₜ xₜᵀ                   — rotational state update
+//!   ρₜ = R(−Δₜ · ϱ · π · tanh(ϑₜ)) ∈ SO(2)^{N/2}  — per-micro-step rotation (data-dependent)
+//!   hₜ = αₜ ρₜ hₜ₋₁ + Δₜ Bₜ xₜᵀ                    — rotational state update
 //! ```
 //!
 //! `ϱ` is [`Mamba3Config::rotation_range`], the per-micro-step bound in half-turns
@@ -81,7 +81,7 @@
 //!
 //! ```text
 //!   θₜ = θₜ₋₁ + Δₜ · ϱ · π · tanh(ϑₜ)    — cumulative angles (per-pair)
-//!   Rₜ = R(θₜ) = ρₜ ⋯ ρ₁ ∈ SO(2)^{N/2}   — block-diagonal cumulative rotation
+//!   Rₜ = R(θₜ) = ρₜᵀ ⋯ ρ₁ᵀ ∈ SO(2)^{N/2} — block-diagonal cumulative rotation
 //!   B̃ₜ = Rₜ Bₜ,   C̃ₜ = Rₜ Cₜ              — rotated state-space projections
 //! ```
 //!
@@ -99,16 +99,28 @@
 //!   C̃ᵢᵀ B̃ⱼ = (Rᵢ Cᵢ)ᵀ (Rⱼ Bⱼ) = Cᵢᵀ R(θⱼ − θᵢ) Bⱼ
 //! ```
 //!
-//! `θⱼ − θᵢ` is not a position. It is `Σ Δ·ϱ·π·tanh(ϑ)` over the micro-steps
-//! between:
+//! For a read `i` after a write `j`, `θᵢ − θⱼ` is not a position. It is
+//! `Σ Δ·ϱ·π·tanh(ϑ)` over the micro-steps between:
 //! how far the transition itself rotated, driven by the inputs. It is a
 //! relative position (as in a rotary position embedding) only in the
 //! degenerate case of an input-independent, constant per-micro-step angle
-//! (`θⱼ − θᵢ = (j−i)·θ`). The data dependence is the point: it gives the
+//! (`θᵢ − θⱼ = (i−j)·θ`). The data dependence is the point: it gives the
 //! block rotational state dynamics, and
 //! thus state-tracking (parity, mod-k), which a real SSM with non-negative
 //! eigenvalues provably cannot express. See [`crate::mamba3::rotation`]. Its
 //! `Quaternion4D` applies the same argument to a non-abelian rotation group.
+//!
+//! **The sources turn in opposite directions.** The official kernels apply
+//! `R(+θ)` to `B` and `C`, and this block follows them. The paper and
+//! mamba3-minimal turn the other way: `ρₜ = R(+Δₜθₜ)`, `B̃ₜ = Rₜᵀ Bₜ` and
+//! `C̃ₜ = Rₜᵀ Cₜ`. With the same weights, the outputs differ, so a checkpoint
+//! cannot load unchanged across the two groups. A sign flip of the weights and
+//! the bias of the angle channels of the in-projection makes the outputs equal,
+//! if the bound on the angle is also equal. The flip works because `tanh` is odd
+//! and `SO(2)` is abelian. So the direction changes no capacity, and it is not a
+//! defect of either form. `handmade_block_solves_every_family` of `reset-rotor`
+//! pins our direction: its hand-built decoder reads `(cos φ, −sin φ)`.
+//! `docs/source-terms.md` gives the citations of each source.
 //!
 //! ## 3. MIMO Extension (no trapezoid coefficients, no rotation — `mimo_rank = M > 1`)
 //!
@@ -151,7 +163,7 @@
 //! *token* is then the **product**
 //!
 //! ```text
-//!   Mₜ = (∏ⱼ αₜ,ⱼ) · Rₜ,ᵤ ⋯ Rₜ,₁
+//!   Mₜ = (∏ⱼ αₜ,ⱼ) · ρₜ,ᵤ ⋯ ρₜ,₁
 //! ```
 //!
 //! and its write is a sum of `u` outer products staggered along it. The read

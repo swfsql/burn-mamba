@@ -45,6 +45,14 @@
 //! quaternion has one fixed axis, they commute, and [`quat_cumprod`] reduces to
 //! a sum of half-angles (asserted in the tests).
 //!
+//! The collapse holds up to the sign of the generators. `Complex2D` applies
+//! `R(+θ)` to `B`/`C`, as the official kernels do. The quaternion kinds apply
+//! `conj(Qₜ)`, the direction of the paper. A quaternion kind has no sign flip
+//! that absorbs this difference, because `conj(Qₜ)` reverses the order of the
+//! factors. So the direct form above is correct only with `conj(Qₜ)`. A
+//! comparison of weights across these kinds must know this. The header of
+//! [`crate::mamba3::mamba3`], section 2, gives the direction of `Complex2D`.
+//!
 //! ## Pipeline (the `k = 4` instantiation of the rotation block)
 //!
 //! ```text

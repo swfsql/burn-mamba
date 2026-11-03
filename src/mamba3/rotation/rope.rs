@@ -45,6 +45,10 @@ pub fn wrap_angle<const D: usize>(angles: Tensor<D>) -> Tensor<D> {
 /// cumulative rotation of the *state transition* (see [`crate::mamba3::mamba3`]),
 /// not a position index.
 ///
+/// The matrix of a pair is `R(+angle)`: `x₀' = cos·x₀ − sin·x₁` and
+/// `x₁' = sin·x₀ + cos·x₁`. Section 2 of that header compares this direction with
+/// the sources.
+///
 /// Two pairing conventions are supported, selected by `rotate_pairwise`:
 ///
 /// - `rotate_pairwise = true` — **interleaved** (NeoX / Triton style): adjacent

@@ -101,8 +101,8 @@ Add these after the merge:
 - **Agents:** 12 for the batches, not 6 to 8. The cap of 25 rows forces this, because
   a row counts once for each source group that it cites. One more agent answered one
   question from the review. A harness rule refuses a report file from a subagent, so
-  each report came as the final message of its agent. The reports and the numeric
-  checks are in `../reports/`, as `full-<batch>.md`.
+  each report came as the final message of its agent. The user removed the reports
+  and the numeric checks from the repo after the merge.
 - **Agents over 150k tokens:** `s3-rotation` (197k), `s3-paths` (191k) and
   `s3-coefficients` (168k). The user accepted up to 200k.
 
@@ -128,22 +128,28 @@ needs these conditions:
 
 Trained models also match only if the start law and the optimizer are symmetric in
 the sign. SGD with momentum stays mirrored in a numeric check. Adam and Muon had no
-run. The float64 check is `../reports/l128_sign.py`. It models the conventions. It
-is not our Rust block.
+run. A float64 model of the conventions gave these conditions.
 
-### Open questions for the user
+`handmade_block_solves_every_family` of `reset-rotor` pins the direction in the real
+block. Its hand-built decoder reads `(cos φ, −sin φ)`. It gives 100% on each family
+with our sign, and 33.8% to 40.1% with a flipped `ϑ`, in a transient mutation.
 
-1. **A sign in the header of `src/mamba3/mamba3.rs`, section 2.** The header gives
-   `ρₜ = R(+Δₜ·ϱ·π·tanh(ϑₜ))` with `hₜ = αₜ ρₜ hₜ₋₁ + Δₜ Bₜ xₜᵀ`, and then says that
-   `B̃ₜ = Rₜ Bₜ` absorbs this form. These two statements do not match. Absorption of
+### Questions for the user, with the answers
+
+1. **A sign in the header of `src/mamba3/mamba3.rs`, section 2.** The header gave
+   `ρₜ = R(+Δₜ·ϱ·π·tanh(ϑₜ))` with `hₜ = αₜ ρₜ hₜ₋₁ + Δₜ Bₜ xₜᵀ`, and then said that
+   `B̃ₜ = Rₜ Bₜ` absorbs this form. These two statements did not match. Absorption of
    that `ρₜ` gives `B̃ₜ = Rₜᵀ Bₜ`, the form of the paper. Our code applies `R(+θ)`, as
-   the official kernels do, and that equals a direct form with `ρₜ = R(−…)`. Output
-   and capacity do not change. The fault looks like it is in the prose only. Which
-   side changes? This ticket does not change `src/`.
-2. **The path of `utils/`.** The local checkout of the official code holds
-   `mamba_ssm/utils/` at `mamba_ssm/ops/utils/`, with byte-equal files. Commit
-   `a14b1df` has no such path. The doc keeps the local path, and the alias table says
-   this. Is the move intended?
+   the official kernels do, and that equals a direct form with `ρₜ = R(−…)`.
+   **Answer:** the code stays, and the docs change. A follow-up change corrects the
+   header, and it adds a note that the sources turn in opposite directions. That
+   change touches only doc comments under `src/`. The check found no bug.
+2. **The path of `utils/`.** The checkout of the official code held
+   `mamba_ssm/utils/` at `mamba_ssm/ops/utils/`, as an uncommitted change.
+   **Answer:** the user restored the checkout, and the doc cites `mamba_ssm/utils/`.
+3. **The size of the doc.** The doc grew from 45.7 KB to about 64 KB, and some
+   "Differences" text of section 3 restates the module headers.
+   **Answer:** no trim.
 
 ### Reports for the user, with no decision needed
 
@@ -181,11 +187,10 @@ gives a word or a proof that a port needs:
 - L79: `MIMO_V`, `MIMO_Z`, `MIMO_O`, and the `φ` of the appendix.
 - L85 and L87: the proof lines of the count and of the `Δ` projection.
 - L160 and L184: the spellings of the Cute kernel. The row checks of these two rows
-  did not cover this word, so its proof is only the line in the report of `mixed-1`.
+  did not cover this word, so its proof is only the cited line.
 - L185 and L188: the spellings of the Tilelang kernels.
 
-The other optional findings stayed out, so that the doc stays small. They are in the
-reports, under `## Extra findings`.
+The other optional findings stayed out, so that the doc stays small.
 
 ### Review
 
@@ -194,9 +199,5 @@ the doc:
 
 - **Standards:** 6 source words in our own voice, and 4 judgement calls on words.
 - **Spec:** L109, L110, L136 and L140. The MIMO forward was not in the first check of
-  L40 and L134, so one agent read it (`../reports/full-tilelang-accumulator.md`). It
-  writes an accumulator, in the same form as SISO, and it takes no input state.
-
-A judgement call stays open for the user. The doc grew from 45.7 KB to about 64 KB,
-and some "Differences" text of section 3 restates the module headers. The ticket
-asked for these cells, so the lead did not trim them.
+  L40 and L134, so one agent read it. It writes an accumulator, in the same form as
+  SISO, and it takes no input state.
