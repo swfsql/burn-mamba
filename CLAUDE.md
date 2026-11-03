@@ -106,6 +106,10 @@ cargo run --example reset-majority -- --training --inference
 - `GLOSSARY.md`: the terms of this crate. `../burn-stack/GLOSSARY.md`: the
   terms of the containers (block, layer, cache, row, segment, …).
 - `docs/adr/`: the decisions with a trade-off.
+- `docs/source-terms.md`: the words of the Mamba papers, the Mamba blog, the
+  official code and mamba3-minimal, with our term and the wrong port for each. It
+  also gives the reading that our code follows where the sources disagree. Read it
+  before you read or port from a source.
 - The module header of each file: its mechanisms, its math and its
   non-obvious choices. The headers of `src/mamba2/mamba2.rs` and
   `src/mamba3/mamba3.rs` are the math reference.
