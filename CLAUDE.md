@@ -72,8 +72,8 @@ cargo run --example reset-majority -- --training --inference
 ### Custom Commands
 
 - The project root is `/shared/claude/burn-mamba/`. You can read and write
-  inside it, in `../{burn-stack,burn,cubecl,cubek}/` and in `/tmp`. Ask the
-  user before you read `../py/`, or before any other access outside these
+  inside it, in `../{burn-stack,burn,cubecl,cubek}/` and in `/tmp`. You can read
+  `../papers/` and `../py/`. Ask the user before any other access outside these
   directories.
 - **Always** edit the content of a file with the Edit/Write tools. This rule
   also applies when a harness or auto-mode reminder says to change files
@@ -127,7 +127,7 @@ cargo run --example reset-majority -- --training --inference
 - `docs/agents/`: the configuration of the engineering skills (see
   [Agent skills](#agent-skills)).
 - `../burn/`, `../cubecl/`, `../cubek/`: Burn and CubeCL.
-- Ask the user before you read these external references:
+- The external references. Read `docs/source-terms.md` first:
   - `../papers/mamba/mamba-3/`: the TeX of the Mamba-3 paper.
   - `../py/state-spaces/mamba/`: the official implementation, authoritative.
     Its Triton SISO and Tilelang MIMO kernels are the single-SSD reference.

@@ -7,6 +7,14 @@ The terms of the containers (family, sequence, token, row, cache, segment, …)
 are in the [burn-stack glossary](../burn-stack/GLOSSARY.md). The families of
 this crate are Mamba-1, Mamba-2 and Mamba-3.
 
+A source can use another word for a term here, or use one of our words with another
+meaning. These docs map the words of the sources to our terms:
+
+- The Mamba papers, the Mamba blog, the official code and mamba3-minimal:
+  [`docs/source-terms.md`](docs/source-terms.md).
+- The H-Net and Multi-Gate Residuals papers:
+  [`../burn-stack/docs/source-terms.md`](../burn-stack/docs/source-terms.md).
+
 ## Language
 
 ### The plant
