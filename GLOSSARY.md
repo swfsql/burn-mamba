@@ -64,8 +64,8 @@ The fused projection at the entry of a block. It gives `x`, the gate and, in
 Mamba-2 and Mamba-3, the data-dependent parameters of the plant.
 
 **Learnable initial state**:
-A trained state that each forward adds to the state of its cache. Only Mamba-2
-has it.
+A trained state that each forward adds to the state of its cache. Mamba-2 and
+Mamba-3 have it. Only the `Minimal` SSD path supports it.
 _Avoid_: origin
 
 **Gate**:

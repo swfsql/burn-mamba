@@ -1,0 +1,23 @@
+[package]
+name = "spike-block-enum"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Its own workspace root, so that the parent repo does not claim it.
+[workspace]
+
+[features]
+default = ["mamba1", "mamba2", "mamba3"]
+mamba1 = ["burn-mamba/mamba1"]
+mamba2 = ["burn-mamba/mamba2"]
+mamba3 = ["burn-mamba/mamba3"]
+
+[dependencies]
+burn-mamba = { path = "../..", default-features = false, features = ["autodiff", "optim", "backend-flex"] }
+burn-stack = { git = "https://github.com/swfsql/burn-stack.git", rev = "9f5e0578f745d811d61de3c53a52991fcf8f638d", default-features = false, features = ["autodiff", "optim", "backend-flex"] }
+burn = { version = "0.22.1", default-features = false, features = ["extension", "std", "autodiff", "optim", "flex"] }
+serde = { version = "1.0.0", features = ["derive"] }
+
+[dev-dependencies]
+burn-stack = { git = "https://github.com/swfsql/burn-stack.git", rev = "9f5e0578f745d811d61de3c53a52991fcf8f638d", default-features = false, features = ["test-helpers", "examples-common"] }
