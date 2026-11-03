@@ -18,7 +18,7 @@ our own code gives the item name.
 | `M1/` | `../papers/mamba/mamba-1/src/`: the Mamba-1 paper |
 | `M2/` | `../papers/mamba/mamba-2/structure/`: the Mamba-2 paper |
 | `M3/` | `../papers/mamba/mamba-3/`: the Mamba-3 paper |
-| `BLOG/` | `../papers/mamba/blogs/goombalab/mamba2/`: the blog on Mamba-2 |
+| `BLOG/` | `../papers/mamba/blogs/goombalab/mamba2/`: the blog on Mamba-2. The line numbers fit a local copy that writes the pictures as code. They do not fit the original posts that `docs/box.tsv` gets on a new box |
 | `SSM/` | `../py/state-spaces/mamba/mamba_ssm/`: the official code, commit `a14b1df` |
 | `TRI/` | `../py/state-spaces/mamba/mamba_ssm/ops/triton/mamba3/`: the official Triton kernels |
 | `TIL/` | `../py/state-spaces/mamba/mamba_ssm/ops/tilelang/mamba3/`: the official Tilelang kernels |

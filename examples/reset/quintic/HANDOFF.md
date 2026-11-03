@@ -87,7 +87,7 @@ Files: `tmp/reflections/notes.md` (fuller notes, § numbers match `check.py`),
 
 ### §1 Why one layer cannot hold S₅: orientation, not negative eigenvalues
 
-- **Negative eigenvalues** (Grazzi et al., `/shared/claude/papers/deltanet/state-tracking/main.tex`
+- **Negative eigenvalues** (Grazzi et al., arXiv:2411.12537v5, `main.tex`
   :395–411): for real-diagonal (Mamba) and one generalized Householder (DeltaNet),
   widening [0,1] → [−1,1] lets one eigenvalue hit −1 — for those classes a
   reflection (det −1). Parity needs no more.
@@ -113,7 +113,7 @@ Files: `tmp/reflections/notes.md` (fuller notes, § numbers match `check.py`),
 - **Grazzi's Mamba [−1,1]** (`2s−1`, scalar) gives −I: central ⇒ no outer automorphism;
   already in SO on even blocks. Their Mamba change needed CUDA scan edits and breaks
   log-space cumprods (:722, :1486–1488).
-- **DeltaProduct** (`/shared/claude/papers/deltanet/deltaproduct/neurips_2024.tex`):
+- **DeltaProduct** (`../papers/deltanet/deltaproduct/neurips_2024.tex`):
   two reflections = a rotation (:322–328); S₄/A₅ at `n_h=2` via SO(3), S₅ needs `n_h=4`
   (:465–468); S₅ with `n_h=1` not learned even at 10 layers (:603); the 2-layer dihedral
   theorem (:1029) is the mirror image of quintic's cascade (it emulates rotations with

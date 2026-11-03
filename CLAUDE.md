@@ -127,11 +127,13 @@ cargo run --example reset-majority -- --training --inference
 - `docs/agents/`: the configuration of the engineering skills (see
   [Agent skills](#agent-skills)).
 - `../burn/`, `../cubecl/`, `../cubek/`: Burn and CubeCL.
-- The external references. Read `docs/source-terms.md` first:
+- The sources. Read `docs/source-terms.md` first:
   - `../papers/mamba/mamba-3/`: the TeX of the Mamba-3 paper.
   - `../py/state-spaces/mamba/`: the official implementation, authoritative.
     Its Triton SISO and Tilelang MIMO kernels are the single-SSD reference.
   - `../py/VikramLex/mamba3-minimal/`: the base of double-SSD.
+- `docs/box.tsv`: the directories next to this repo that the docs name.
+  `../burn-stack/scripts/setup-box.sh` creates the missing ones on a new box.
 
 ## Agent skills
 
@@ -229,5 +231,5 @@ benches/layer.rs         single-block benches, run by `bench.sh`/`kernels.sh`
 info/                    derivation notes
 scripts/                 the float64 checks of the `info/` notes
 examples/                see `examples/README.md`
-docs/                    `adr/`, `agents/`, `source-terms.md`
+docs/                    `adr/`, `agents/`, `source-terms.md`, `box.tsv`
 ```

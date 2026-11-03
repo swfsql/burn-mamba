@@ -298,6 +298,22 @@ launches per case and writes [`kernels.md`](kernels.md).
 - Contributors: `CLAUDE.md` maps the structure and conventions of the
   repository, and points to the rest of the docs.
 
+## Box setup
+
+The docs name directories next to this repo, for example
+`../py/state-spaces/mamba/` and `../papers/mamba/mamba-3/`. To create them on a
+new box, clone burn-stack next to this repo and run its script:
+
+```bash
+git clone https://github.com/swfsql/burn-stack ../burn-stack
+../burn-stack/scripts/setup-box.sh
+```
+
+The script gets each directory at the exact version that
+[`docs/box.tsv`](docs/box.tsv) lists, because the docs cite `file:line`. It does
+not change a directory that exists. When a source is not available, the script
+gives a warning and continues.
+
 ## Scope
 
 This crate is experimental and not tuned for performance. It uses only portable

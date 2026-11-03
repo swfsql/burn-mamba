@@ -1,0 +1,12 @@
+# The directories next to this repo that its docs name. ../burn-stack/scripts/setup-box.sh reads this list, and its header gives the format.
+# dir	kind	origin	version	aliases	note
+py/state-spaces/mamba	git	https://github.com/state-spaces/mamba.git	a14b1dff0454a3bc27d9eb31355dc01e4b2490ec	SSM/ TRI/ TIL/ SSR	-
+py/VikramLex/mamba3-minimal	git	https://github.com/VikramLex/mamba3-minimal.git	15ba9983123703d9f4f7d6f8709152d0a07edbd9	MM/	-
+papers/mamba/mamba-1	arxiv	2312.00752	v2	M1/	-
+papers/mamba/mamba-2	arxiv	2405.21060	v1	M2/	-
+papers/mamba/mamba-3	arxiv	2603.15569	v1	M3/	-
+papers/deltanet/deltaproduct	arxiv	2502.10297	v7	-	-
+papers/mamba/blogs/goombalab/mamba2/part1.md	file	https://raw.githubusercontent.com/goombalab/goombalab.github.io/2456a614a0765d61a903917c1087757f4e201614/_posts/2024-05-31-mamba2-part1-model.md	-	BLOG/	The line numbers of the BLOG/ citations fit a local copy, not these original posts.
+papers/mamba/blogs/goombalab/mamba2/part2.md	file	https://raw.githubusercontent.com/goombalab/goombalab.github.io/2456a614a0765d61a903917c1087757f4e201614/_posts/2024-05-31-mamba2-part2-theory.md	-	BLOG/	-
+papers/mamba/blogs/goombalab/mamba2/part3.md	file	https://raw.githubusercontent.com/goombalab/goombalab.github.io/2456a614a0765d61a903917c1087757f4e201614/_posts/2024-05-31-mamba2-part3-algorithm.md	-	BLOG/	-
+papers/mamba/blogs/goombalab/mamba2/part4.md	file	https://raw.githubusercontent.com/goombalab/goombalab.github.io/2456a614a0765d61a903917c1087757f4e201614/_posts/2024-05-31-mamba2-part4-systems.md	-	BLOG/	-
