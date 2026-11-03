@@ -13,20 +13,20 @@ rely on it.
 
 | Alias | Path |
 |---|---|
-| `M1/` | `/shared/claude/papers/mamba/mamba-1/src/` |
-| `M2/` | `/shared/claude/papers/mamba/mamba-2/structure/` |
-| `M3/` | `/shared/claude/papers/mamba/mamba-3/` |
-| `BLOG/` | `/shared/claude/papers/mamba/blogs/goombalab/mamba2/` |
-| `SSM/` | `/shared/claude/py/state-spaces/mamba/mamba_ssm/` (commit `a14b1df`) |
+| `M1/` | `../papers/mamba/mamba-1/src/` |
+| `M2/` | `../papers/mamba/mamba-2/structure/` |
+| `M3/` | `../papers/mamba/mamba-3/` |
+| `BLOG/` | `../papers/mamba/blogs/goombalab/mamba2/` |
+| `SSM/` | `../py/state-spaces/mamba/mamba_ssm/` (commit `a14b1df`) |
 | `TRI/` | `SSM/ops/triton/mamba3/` |
 | `TIL/` | `SSM/ops/tilelang/mamba3/` |
-| `SSR` | `/shared/claude/py/state-spaces/mamba/README.md` |
-| `MM/` | `/shared/claude/py/VikramLex/mamba3-minimal/` (commit `15ba998`) |
-| `HN/` | `/shared/claude/papers/hnet/` |
+| `SSR` | `../py/state-spaces/mamba/README.md` |
+| `MM/` | `../py/VikramLex/mamba3-minimal/` (commit `15ba998`) |
+| `HN/` | `../papers/hnet/` |
 | `HNM` | `HN/sections/2_method_v2.tex` |
-| `MGR` | `/shared/claude/papers/multi-gate-res/tex/main.tex` |
-| `BM/` | `/shared/claude/burn-mamba/` |
-| `BS/` | `/shared/claude/burn-stack/` |
+| `MGR` | `../papers/multi-gate-res/tex/main.tex` |
+| `BM/` | `../burn-mamba/` |
+| `BS/` | `../burn-stack/` |
 
 A citation has the form `alias/file:line`. In one table cell, `:N` after a
 citation is another line of the same file.
@@ -46,7 +46,7 @@ Read in full:
 - `MM/mamba3.py`, `MM/README.md`.
 - `HNM`, `HN/tab/architecture.tex`, the macros of `HN/main.tex`.
 - `MGR` lines 114-213 and 571-614.
-- `/shared/claude/py/state-spaces/mamba/usage.md`.
+- `../py/state-spaces/mamba/usage.md`.
 
 Searched with `rg`, with the matched lines read:
 
@@ -72,12 +72,12 @@ Notation table of `BM/CLAUDE.md`, `BS/src/modules/layer.rs`,
 | Source | Reason |
 |---|---|
 | The figure PDFs (`M3/fig/mamba3-arch.pdf`, `M1/../fig/architecture.pdf`, `MGR` `images/flow_mgr.pdf`, tried) | The Read tool failed: `pdftoppm` is not installed. I used the TeX captions. No claim here cites a figure. |
-| `/shared/claude/papers/misc/tiny-stories/` | The directory holds only the TinyStories paper. No glossary term comes from it. I read its title line only. |
+| `../papers/misc/tiny-stories/` | The directory holds only the TinyStories paper. No glossary term comes from it. I read its title line only. |
 | A Muon paper | Not found. `papers/misc/` has none. The approved sources only cite Muon (`MGR:285`, `MGR:621`). |
-| `/shared/claude/papers/multi-gate-res/html/` | Same title as the TeX. I read the title and counted a term. I did not compare the text. |
+| `../papers/multi-gate-res/html/` | Same title as the TeX. I read the title and counted a term. I did not compare the text. |
 | `M3/ref/*.rs` | First 12 lines of `data.rs` only: music data code. The term searches excluded `*.rs`. |
 | `M3/.structure.tex.swp`, `*.bib`, `*.bbl` | Not read. The term searches excluded them. |
-| `papers/deltanet`, `papers/hrm`, `/shared/claude/hnet` | Excluded by the task. So `DeltaProduct` is checked only against the approved sources. |
+| `papers/deltanet`, `papers/hrm`, `../hnet` | Excluded by the task. So `DeltaProduct` is checked only against the approved sources. |
 
 ## 2. Comparison tables
 

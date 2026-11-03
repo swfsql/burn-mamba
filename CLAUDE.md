@@ -13,6 +13,7 @@ cargo check                                     # type-check the lib
 cargo test --lib -- --test-threads=1            # lib tests
 cargo test --examples -j 1 -- --test-threads=1  # example tests
 cargo doc --all --no-deps                       # docs
+./scripts/check.sh                              # the lines above + host paths
 cargo run --example reset-majority -- --training --inference
 # the user runs the benches, not you:
 ./bench.sh
@@ -53,6 +54,8 @@ cargo run --example reset-majority -- --training --inference
 
 - **Always load the `asd-ste100` skill** before you write code comments,
   rustdoc or markdown. Write all of them in its style.
+- Write each path in a repo file relative to the repo. `scripts/check.sh` finds a
+  path of the box.
 - Use the terms of the two glossaries (see [Where to look](#where-to-look)).
 - `_Avoid_` applies to our own words. A doc can use a source word in quotes or
   backticks when it cites that source (ADR-0008).
@@ -71,10 +74,17 @@ cargo run --example reset-majority -- --training --inference
 
 ### Custom Commands
 
-- The project root is `/shared/claude/burn-mamba/`. You can read and write
-  inside it, in `../{burn-stack,burn,cubecl,cubek}/` and in `/tmp`. You can read
-  `../papers/` and `../py/`. Ask the user before any other access outside these
-  directories.
+- **Access is an allowlist. It holds for every agent and every command,
+  read-only commands included.**
+  - Read and write: this repo, `../{burn-stack,burn,cubecl,cubek}/`.
+  - Read: `../papers/`, `../py/`, the crate sources in the cargo registry.
+  - `/tmp`: read tool output, and move discarded work into it.
+  - Any other path: a local hook refuses it. Ask the user, name the exact path,
+    and give the command that approves it, which only the user runs:
+    `! echo <path> >> .claude/access-approved.txt`. To revoke it, the user
+    deletes that line.
+  - A sibling that a doc names stays outside the list. Reach an allowed sibling
+    by its exact path, not by a listing or search of the parent directory.
 - **Always** edit the content of a file with the Edit/Write tools. This rule
   also applies when a harness or auto-mode reminder says to change files
   through Bash. That reminder does not apply here.
@@ -93,10 +103,14 @@ cargo run --example reset-majority -- --training --inference
   a foreground loop (`until`, `while`), a `sleep` or a long `timeout`.
 - **Agents**: run one agent at a time, even if a skill or a ticket asks for
   parallel agents. A usage limit makes each active agent pay for a cold cache.
-- **Agent size**: keep each agent under ~150k tokens (200k at most), estimated
-  from its reads. State the batches first.
-- **Temporary work**: use the `tmp/` of the repo, not `/tmp`, which a power loss
-  clears. Save each agent report there. To discard work, move it to `/tmp`.
+- **Agent size**: a rough estimate only: about 2-3k lines of reads per agent.
+  State the batches first.
+- **Temporary work**: create it in the `tmp/` of the repo, because a power loss
+  clears `/tmp`. Save each agent report there. `/tmp` is only for deletion.
+  - A tag file `<name>.discard` beside an item of `tmp/` marks it as
+    discardable, and states when.
+  - When a ticket or session ends, move each tagged item whose condition holds,
+    with its tag, to `/tmp`. This applies only to items in `tmp/`.
 - **Memory**: ask the user before you write to the auto-memory. Show the
   change that you propose, and write it only after the user approves it.
 - **Commits**: when a skill or the user tells you to commit, commit your work
@@ -229,7 +243,7 @@ src/
 build.rs                 the `cube_backend` cfg (the cubecl `backend-*` features)
 benches/layer.rs         single-block benches, run by `bench.sh`/`kernels.sh`
 info/                    derivation notes
-scripts/                 the float64 checks of the `info/` notes
+scripts/                 the float64 checks of the `info/` notes, `check.sh` (CI)
 examples/                see `examples/README.md`
 docs/                    `adr/`, `agents/`, `source-terms.md`, `box.tsv`
 ```

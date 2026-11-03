@@ -34,6 +34,9 @@ this box has it.
   wraps monomorphisations in enums, so rewrite that header.
 - Go to 0.76.0. The commit message states the clean break: saved configs and
   records stop loading, and no migration exists.
+- Move `../spike/` to `/tmp`, and commit its removal. The code now holds its
+  content. `tmp/spike-block-enum.discard` tags the throwaway project for the same
+  move.
 
 **Tests:** add `src/family/tests/block.rs` from `../spike/arch.rs`. Keep the tests
 that only the enum can break:
