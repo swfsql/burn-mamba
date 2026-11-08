@@ -28,3 +28,21 @@ Spec: `../spec.md`. Run only one session on the two repos.
 - `cargo test --lib -- --test-threads=1` passes. The only missing tests are those
   of the removed behaviour.
 - `cargo test --examples -j 1 -- --test-threads=1` passes.
+
+## Comments
+
+A review of burn-stack ticket `02-remove-per-layer-class-latents.md` found more
+work for this ticket:
+
+- Three docs of this repo need an update:
+  - `src/unified/network.rs:96` says "all three marker levels". Two levels stay.
+  - `src/unified/tests/optim.rs:238` and `examples/mnist-ae/model.rs:289` name
+    `straight_block`/`reverse_block`. `BidiLayers` holds its blocks under
+    `real_layers.N.block`.
+- Five tests set a stack-level latent and a per-layer latent. Delete only their
+  per-layer lines and their asserts on `class.per_layer`:
+  - `prime_on_a_network_covers_every_class_level`
+  - `class_markers_split_forward_matches_single_forward`
+  - `latent_network_multi_gate_class_markers_prime_step_matches_forward`
+  - `layers_multi_gate_class_latents_split_forward_matches_single`
+  - `layers_multi_gate_prime_then_step_matches_step`
