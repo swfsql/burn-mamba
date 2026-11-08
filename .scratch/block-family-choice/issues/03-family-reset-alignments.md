@@ -1,6 +1,6 @@
 # 03: The reset alignment of each family
 
-Status: ready-for-agent
+Status: resolved
 
 Blocked by: `02-family-module-and-configs.md`, `../burn-stack/.scratch/block-family-choice/issues/03-reset-align-and-checked-packed.md`
 
@@ -30,3 +30,15 @@ Spec: `../spec.md`. Run only one session on the two repos.
 - `cargo check` and `cargo doc --all --no-deps` have no warnings.
 - `cargo test --lib -- --test-threads=1` passes.
 - `cargo test --examples -j 1 -- --test-threads=1` passes.
+
+## Comments
+
+The burn-stack ticket is complete. Move the pin to `9363e8d`.
+
+`reference/tests.rs` of burn-stack does not hold these two checks of `packed.rs`.
+So keep them:
+
+- **Gradient parity.** burn-stack compares the outputs and the caches with each
+  segment alone. For gradients, it only checks that a class latent gets one.
+- **Multi-Gate with packed rows.** Only
+  `packed_mamba3_u2_vertical_multigate_matches_alone` covers it.

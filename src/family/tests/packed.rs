@@ -119,7 +119,7 @@ fn check(net: MambaVocabNet, path: MambaSsdPath) {
         }
     }
     let packed_ids = Tensor::<1, Int>::from_ints(packed_ids.as_slice(), &device).reshape([batch, width, 2]);
-    let layout = Packed::from_starts(&starts, lead, width, &device);
+    let layout = Packed::from_starts(&starts, align, lead, width, &device);
 
     // A fixed weight per logit (the vocab and the flag), so the loss reaches
     // every one of them.

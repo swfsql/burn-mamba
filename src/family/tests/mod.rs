@@ -18,4 +18,5 @@ mod multi_gate;
 #[cfg(feature = "optim")]
 mod optim;
 mod packed;
+mod reset_align;
 mod untied;

@@ -152,21 +152,18 @@ impl MambaBidiLayersConfig {
         }
     }
 
-    /// The [`MuonPlan`] of this stack: the fused projections of the block, plus
-    /// the `CatLinear` merge of each pair. A `CatLinear` merge is a plain hidden
-    /// matrix, and a `Mean` merge has no parameters. [`BidiShape::muon_plan`]
-    /// gives only the block specs, so this method adds the merge spec.
+    /// The [`MuonPlan`] of this stack: the fused projections of the block, and
+    /// the spec of the `CatLinear` merges. See [`BidiShape::muon_plan`].
     #[cfg(feature = "optim")]
     pub fn muon_plan(&self) -> MuonPlan {
-        let (plan, d_model) = match &self.block {
+        match &self.block {
             #[cfg(feature = "mamba1")]
-            MambaBlockConfig::Mamba1(c) => (self.shape.muon_plan(c), BlockConfig::d_model(c)),
+            MambaBlockConfig::Mamba1(c) => self.shape.muon_plan(c),
             #[cfg(feature = "mamba2")]
-            MambaBlockConfig::Mamba2(c) => (self.shape.muon_plan(c), BlockConfig::d_model(c)),
+            MambaBlockConfig::Mamba2(c) => self.shape.muon_plan(c),
             #[cfg(feature = "mamba3")]
-            MambaBlockConfig::Mamba3(c) => (self.shape.muon_plan(c), BlockConfig::d_model(c)),
-        };
-        plan.extend(MuonPlan::new(vec![ProjSpec::path_whole("CatLinear.weight", d_model)]))
+            MambaBlockConfig::Mamba3(c) => self.shape.muon_plan(c),
+        }
     }
 }
 

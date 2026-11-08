@@ -300,24 +300,17 @@ impl MambaVocabNet {
         }
     }
 
-    /// Where [`Self::forward_packed`] accepts a reset on `ssd_path`: at the
-    /// multiples of the returned token count. It is the chunk of the blocks,
-    /// in tokens (`chunk_len / micro_steps` for Mamba-3). `None` for Mamba-1,
-    /// which takes no packed rows.
+    /// The reset alignment of the first block on `ssd_path`, in tokens (see
+    /// [`Block::reset_align`]). [`Self::forward_packed`] accepts a reset only
+    /// at a multiple of it. `None` for Mamba-1, which takes no packed rows.
     pub fn pack_align(&self, ssd_path: &MambaSsdPath) -> Option<usize> {
         match (self, ssd_path) {
             #[cfg(feature = "mamba1")]
-            (Self::Mamba1(_), _) => None,
+            (Self::Mamba1(net), _) => net.layers.real_layers[0].block.reset_align(&()),
             #[cfg(feature = "mamba2")]
-            (Self::Mamba2(net), MambaSsdPath::Mamba2(path)) => {
-                let block = &net.layers.real_layers[0].block;
-                Some(path.chunk_len_or_optimal(block.state_rank, block.per_head_dim()))
-            }
+            (Self::Mamba2(net), MambaSsdPath::Mamba2(path)) => net.layers.real_layers[0].block.reset_align(path),
             #[cfg(feature = "mamba3")]
-            (Self::Mamba3(net), MambaSsdPath::Mamba3(path)) => {
-                let block = &net.layers.real_layers[0].block;
-                Some(path.chunk_len_or_optimal(block) / block.micro_steps.max(1))
-            }
+            (Self::Mamba3(net), MambaSsdPath::Mamba3(path)) => net.layers.real_layers[0].block.reset_align(path),
             #[allow(unreachable_patterns)]
             _ => panic!("ssd_path family does not match the network"),
         }

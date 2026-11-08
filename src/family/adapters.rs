@@ -217,6 +217,10 @@ mod impl_mamba2 {
         ) -> (Tensor<3>, Mamba2Cache) {
             self.forward_packed(x, cache, None, options, None, Some(reset))
         }
+        /// The chunk length of `options`, in tokens.
+        fn reset_align(&self, options: &Mamba2SsdPath) -> Option<usize> {
+            Some(options.chunk_len_or_optimal(self.state_rank, self.per_head_dim()))
+        }
         fn block_step(&self, x: Tensor<2>, cache: Option<Mamba2Cache>) -> (Tensor<2>, Mamba2Cache) {
             self.step(x, cache)
         }
@@ -406,6 +410,10 @@ mod impl_mamba3 {
             reset: Tensor<2, Bool>,
         ) -> (Tensor<3>, Mamba3Cache) {
             self.forward_packed(x, cache, None, options, None, Some(reset))
+        }
+        /// The chunk length of `options`, in tokens: `chunk_len / micro_steps`.
+        fn reset_align(&self, options: &Mamba3SsdPath) -> Option<usize> {
+            Some(Mamba3SsdPath::chunk_tokens(options.chunk_len_or_optimal(self), self.micro_steps))
         }
         fn block_step(&self, x: Tensor<2>, cache: Option<Mamba3Cache>) -> (Tensor<2>, Mamba3Cache) {
             self.step(x, cache)
