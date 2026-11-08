@@ -70,10 +70,10 @@ Also run the crate with each family alone. The spike did this with
 The implementation of ticket 02 found this:
 
 - `MambaBidiLayersConfig::muon_plan` of the spike delegates to
-  `BidiShape::muon_plan`, and that method gives only the block specs. So the
-  `CatLinear.weight` spec is lost, and `assert_plan_fits` does not see it. Keep the
-  spec in the `muon_plan` of `src/family/config.rs`. The test
-  `bidi_plan_holds_the_cat_linear_merge` guards it.
+  `BidiShape::muon_plan`. That delegation is correct only after
+  `../burn-stack/.scratch/block-family-choice/issues/03-reset-align-and-checked-packed.md`,
+  which moves the `CatLinear.weight` spec into that method. `assert_plan_fits` does
+  not see a lost spec. The test `bidi_plan_holds_the_cat_linear_merge` guards it.
 - `init` and `muon_plan` stay inherent methods, and the `ModelConfigExt` impls
   forward to them. The prelude of burn-stack does not export the trait, and each
   `.init(&device)` of the tests and examples needs one of the two.

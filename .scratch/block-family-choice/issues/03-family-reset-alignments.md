@@ -18,6 +18,11 @@ Spec: `../spec.md`. Run only one session on the two repos.
   that the check reads the device.
 - `packed.rs` keeps only the parity of each family. Delete a test only when
   `reference/tests.rs` of burn-stack holds the same check.
+- `MambaBidiLayersConfig::muon_plan` (`src/family/config.rs`): delete the
+  `CatLinear.weight` spec and the `d_model` read, because `BidiShape::muon_plan` of
+  burn-stack gives that spec. Update the doc of the method. The test
+  `bidi_plan_holds_the_cat_linear_merge` stays. `examples/mnist-ae/model.rs` keeps
+  its own spec, because `AeConfig` holds no `BidiShape`.
 - Move the pin.
 
 **Done when:**
