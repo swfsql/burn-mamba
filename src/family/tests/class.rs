@@ -43,7 +43,7 @@ fn latent_network_builder_mamba2() {
 
 #[cfg(feature = "mamba2")]
 #[test]
-fn unified_net_config_mamba2() {
+fn family_net_config_mamba2() {
     let device = test_device();
     let block = Mamba2Config::new(16)
         .with_expand(2)
@@ -83,7 +83,7 @@ fn unified_net_config_mamba2() {
 
 #[cfg(feature = "mamba3")]
 #[test]
-fn unified_net_config_mamba3() {
+fn family_net_config_mamba3() {
     let device = test_device();
     let block = Mamba3Config::new(16)
         .with_expand(2)
@@ -112,7 +112,7 @@ fn unified_net_config_mamba3() {
 
 #[cfg(feature = "mamba1")]
 #[test]
-fn unified_net_config_mamba1() {
+fn family_net_config_mamba1() {
     let device = test_device();
     let block = Mamba1Config::new(16).with_state_rank(8);
     let net = MambaLatentNetConfig::new(
@@ -228,7 +228,7 @@ fn bidi_layers_mamba1() {
 
 #[cfg(feature = "mamba2")]
 #[test]
-fn unified_bidi_config_mamba2() {
+fn family_bidi_config_mamba2() {
     let device = test_device();
     let block = Mamba2Config::new(16)
         .with_expand(2)
