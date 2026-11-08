@@ -26,7 +26,7 @@
 <a href=#26 id=26 data-nosnippet>26</a>//! the Pre-LN [`Layer`](burn_stack::modules::Layer), the (virtual-)layer
 <a href=#27 id=27 data-nosnippet>27</a>//! [`Layers`](burn_stack::modules::Layers) stack, bidirectional pairs,
 <a href=#28 id=28 data-nosnippet>28</a>//! latent/vocab networks, multi-gate residuals, class tokens, LR and
-<a href=#29 id=29 data-nosnippet>29</a>//! virtual-layer schedules, and the Muon parameter groups. The [`unified`]
+<a href=#29 id=29 data-nosnippet>29</a>//! virtual-layer schedules, and the Muon parameter groups. The [`family`]
 <a href=#30 id=30 data-nosnippet>30</a>//! module holds the enums that select a family at run time.
 <a href=#31 id=31 data-nosnippet>31</a>//!
 <a href=#32 id=32 data-nosnippet>32</a>//! ## Two execution modes
@@ -74,25 +74,26 @@
 <a href=#74 id=74 data-nosnippet>74</a>    <span class="attr">#[cfg(feature = <span class="string">"mamba3"</span>)]
 <a href=#75 id=75 data-nosnippet>75</a>    </span><span class="kw">pub use </span><span class="kw">crate</span>::mamba3::{<span class="self">self</span>, prelude::<span class="kw-2">*</span>};
 <a href=#76 id=76 data-nosnippet>76</a>
-<a href=#77 id=77 data-nosnippet>77</a>    <span class="comment">// The runtime-selectable unified API (this crate).
+<a href=#77 id=77 data-nosnippet>77</a>    <span class="comment">// The run-time family choice (this crate).
 <a href=#78 id=78 data-nosnippet>78</a>    </span><span class="attr">#[cfg(any(feature = <span class="string">"mamba1"</span>, feature = <span class="string">"mamba2"</span>, feature = <span class="string">"mamba3"</span>))]
-<a href=#79 id=79 data-nosnippet>79</a>    </span><span class="kw">pub use </span><span class="kw">crate</span>::unified::{
+<a href=#79 id=79 data-nosnippet>79</a>    </span><span class="kw">pub use </span><span class="kw">crate</span>::family::{
 <a href=#80 id=80 data-nosnippet>80</a>        MambaBidiLayers, MambaBidiLayersConfig, MambaBlockConfig, MambaHNetCaches,
 <a href=#81 id=81 data-nosnippet>81</a>        MambaHNetVocabNet, MambaHNetVocabNetConfig, MambaLatentNet, MambaLatentNetConfig,
 <a href=#82 id=82 data-nosnippet>82</a>        MambaVocabNet, MambaVocabNetConfig,
 <a href=#83 id=83 data-nosnippet>83</a>    };
-<a href=#84 id=84 data-nosnippet>84</a>    <span class="kw">pub use </span><span class="kw">crate</span>::unified::{MambaCaches, MambaSsdPath};
+<a href=#84 id=84 data-nosnippet>84</a>    <span class="kw">pub use </span><span class="kw">crate</span>::family::{MambaCaches, MambaSsdPath};
 <a href=#85 id=85 data-nosnippet>85</a>
 <a href=#86 id=86 data-nosnippet>86</a>    <span class="comment">// The block-generic composition layer (`burn-stack`).
-<a href=#87 id=87 data-nosnippet>87</a>    </span><span class="kw">pub use </span>burn_stack::prelude::<span class="kw-2">*</span>;
-<a href=#88 id=88 data-nosnippet>88</a>}
-<a href=#89 id=89 data-nosnippet>89</a>
-<a href=#90 id=90 data-nosnippet>90</a><span class="kw">pub mod </span>unified;
-<a href=#91 id=91 data-nosnippet>91</a>
-<a href=#92 id=92 data-nosnippet>92</a><span class="kw">pub mod </span>packing;
-<a href=#93 id=93 data-nosnippet>93</a><span class="kw">mod </span>padding;
-<a href=#94 id=94 data-nosnippet>94</a>
-<a href=#95 id=95 data-nosnippet>95</a><span class="doccomment">/// Re-export of the block-generic composition crate this one builds on, so a
-<a href=#96 id=96 data-nosnippet>96</a>/// dependent can reach `Layer`/`Layers`/networks without naming it separately.
-<a href=#97 id=97 data-nosnippet>97</a></span><span class="kw">pub use </span>burn_stack;
+<a href=#87 id=87 data-nosnippet>87</a>    </span><span class="kw">pub use </span>burn_stack::modules::{BidiShape, LatentShape, NetworkShape, VocabShape};
+<a href=#88 id=88 data-nosnippet>88</a>    <span class="kw">pub use </span>burn_stack::prelude::<span class="kw-2">*</span>;
+<a href=#89 id=89 data-nosnippet>89</a>}
+<a href=#90 id=90 data-nosnippet>90</a>
+<a href=#91 id=91 data-nosnippet>91</a><span class="kw">pub mod </span>family;
+<a href=#92 id=92 data-nosnippet>92</a>
+<a href=#93 id=93 data-nosnippet>93</a><span class="kw">pub mod </span>packing;
+<a href=#94 id=94 data-nosnippet>94</a><span class="kw">mod </span>padding;
+<a href=#95 id=95 data-nosnippet>95</a>
+<a href=#96 id=96 data-nosnippet>96</a><span class="doccomment">/// Re-export of the block-generic composition crate this one builds on, so a
+<a href=#97 id=97 data-nosnippet>97</a>/// dependent can reach `Layer`/`Layers`/networks without naming it separately.
+<a href=#98 id=98 data-nosnippet>98</a></span><span class="kw">pub use </span>burn_stack;
 </code></pre></div></section></main></body></html>
