@@ -27,9 +27,12 @@ use burn_mamba::prelude::*;
 use burn_stack::examples::tiny_stories::lm::{self, Frontier, LmModel, dataloaders_for, epoch_train, epoch_valid};
 use burn_stack::examples::{prof, vram};
 use burn_stack::modules::ModelConfigExt;
-use burn_stack::modules::hnet::{Routing, StepMode};
+use burn_stack::modules::hnet::{HNetCaches, Routing, StepMode};
 use burn_stack::utils::ClassCursors;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+/// The caches of the H-Net.
+type Caches = HNetCaches<MambaBlock, MambaBlock>;
 
 /// Run the full training routine. Load or initialize the model and the
 /// optimizer, then train for the configured number of epochs, with
@@ -138,9 +141,9 @@ impl Run {
         let n_stages = config.model.stage_blocks.len();
         assert_eq!(config.ratio_targets.len(), n_stages, "one ratio target per stage");
         assert_eq!(config.lr_multipliers.len(), n_stages + 1, "one LR multiplier per stage, then the main stack");
-        assert_eq!(
-            config.model.families(),
-            ("mamba3", "mamba3"),
+        let mut blocks = config.model.stage_blocks.iter().chain([&config.model.main_block]);
+        assert!(
+            blocks.all(|block| matches!(block, MambaBlockConfig::Mamba3(_))),
             "this example runs Mamba-3 in every stack"
         );
         Self {
@@ -171,8 +174,8 @@ impl Wrap {
     fn forward_lm(
         &self,
         batch: TinyStoriesBatch,
-        caches: Option<MambaHNetCaches>,
-    ) -> (ClassificationOutput, MambaHNetCaches, Vec<Routing>) {
+        caches: Option<Caches>,
+    ) -> (ClassificationOutput, Caches, Vec<Routing>) {
         let TinyStoriesBatch { inputs, targets, scored, packed, .. } = batch;
         assert!(packed.is_none(), "an H-Net takes no packed rows");
         let [batch_size, seq_len, 2] = inputs.dims() else { unreachable!() };
@@ -232,7 +235,7 @@ fn log_chunks(routing: &[Routing], targets: &[f64]) {
 
 impl LmModel for Wrap {
     type Valid = Wrap;
-    type Caches = MambaHNetCaches;
+    type Caches = Caches;
 
     fn valid(&self) -> Self::Valid {
         Wrap(self.0.valid(), self.1.clone())

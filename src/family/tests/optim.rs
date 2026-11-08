@@ -545,9 +545,10 @@ fn module_optimizer_state_round_trips_through_a_record() {
         let grads = burn::optim::GradientsParams::from_grads(y.sum().backward(), &model);
         optim.step(1e-3, model, grads)
     };
-    let in_proj = |m: &MambaLatentNet| match m {
-        MambaLatentNet::Mamba3(net) => net.layers.real_layers[0].block.in_proj.weight.val(),
-        _ => panic!("expected a Mamba-3 network"),
+    let in_proj = |m: &MambaLatentNet| match &m.layers.real_layers[0].block {
+        MambaBlock::Mamba3(block) => block.in_proj.weight.val(),
+        #[allow(unreachable_patterns)]
+        _ => panic!("expected a Mamba-3 block"),
     };
 
     let mut live = plan.build(&adamw().into(), &muon());

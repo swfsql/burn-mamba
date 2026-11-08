@@ -418,7 +418,6 @@ fn loss_matches_reference(one_sided: bool) {
 
     let embedding_grad = |loss: Tensor<1>| -> Tensor<2> {
         let grads = loss.backward();
-        let MambaVocabNet::Mamba3(net) = &net else { panic!("a Mamba-3 network") };
         net.embedding.weight.val().grad(&grads).expect("embedding grad")
     };
     let (got_grad, want_grad) = (embedding_grad(got), embedding_grad(want));

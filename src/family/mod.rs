@@ -2,11 +2,14 @@
 //!
 //! [`burn_stack`] composes any [`Block`](burn_stack::modules::Block) into
 //! layers and networks, but `M` is fixed at the type level. This module lets a
-//! caller choose the family at *runtime*, and serialize that choice. It wraps
-//! the three monomorphisations in enums: [`MambaLatentNet`] /
-//! [`MambaVocabNet`] / [`MambaBidiLayers`] / [`MambaCaches`] /
-//! [`MambaSsdPath`], each with a `#[derive(Config)]` companion where one
-//! applies. They panic on a cache or SSD path of the wrong family.
+//! caller choose the family at *run time*, and serialize that choice. The choice
+//! sits at the block: [`MambaBlock`] is one enum over the three blocks, and it
+//! fills `Block` (`docs/adr/0009-family-choice-at-the-block.md`). So the
+//! containers need no enum of their own. [`MambaLatentNet`], [`MambaVocabNet`],
+//! [`MambaBidiLayers`] and [`MambaHNetVocabNet`] are type aliases, and each has
+//! a `{ shape, block }` config in [`config`]. [`MambaCaches`] is a flat list of
+//! slots, and [`MambaSsdPath`] is the `Options` of the enum. A cache or an SSD
+//! path of the wrong family panics.
 //!
 //! This is also where the three families meet the generic stack: the
 //! `impl Block for Mamba{1,2,3}`, `impl BlockConfig for Mamba{1,2,3}Config` and
@@ -49,35 +52,28 @@
 //! diagonal or embedding-like.
 //!
 
-/// A runtime-tagged cache collection + the per-family `Block` / `BlockConfig` /
-/// `CacheStack` impls.
+/// The `Block` / `BlockConfig` / `CacheStack` impls of each family.
 pub mod adapters;
+/// [`MambaBlock`], its caches, and the type aliases of the containers.
+#[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
+pub mod block;
 /// Each family's `CacheTensors` traversal: a captured `step` writing its new
 /// cache in place.
 pub mod capture;
 /// The serializable `{ shape, block }` configs, and [`MambaBlockConfig`].
 #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
 pub mod config;
-/// Runtime-selectable networks ([`MambaLatentNet`] / [`MambaVocabNet`]).
-#[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
-pub mod network;
-/// Runtime-selectable bidirectional stacks ([`MambaBidiLayers`]).
-#[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
-pub mod bidi;
-/// Runtime-selectable H-Net language models ([`MambaHNetVocabNet`]): one
-/// family for the stages, one for the main stack.
-#[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
-pub mod hnet;
 
-pub use adapters::MambaCaches;
 #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
-pub use bidi::MambaBidiLayers;
+pub use block::{
+    MambaBidiLayers, MambaBlock, MambaCache, MambaCaches, MambaHNetVocabNet, MambaLatentNet,
+    MambaVocabNet,
+};
 #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
-pub use config::{MambaBidiLayersConfig, MambaBlockConfig, MambaLatentNetConfig, MambaVocabNetConfig};
-#[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
-pub use hnet::{MambaHNetCaches, MambaHNetVocabNet, MambaHNetVocabNetConfig};
-#[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
-pub use network::{MambaLatentNet, MambaVocabNet};
+pub use config::{
+    MambaBidiLayersConfig, MambaBlockConfig, MambaHNetVocabNetConfig, MambaLatentNetConfig,
+    MambaVocabNetConfig,
+};
 
 #[cfg(all(test, feature = "_dev-test"))]
 mod tests;

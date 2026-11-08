@@ -11,7 +11,8 @@
 use crate::prelude::*;
 use burn::config::Config;
 use burn::prelude::*;
-use burn_stack::modules::ModelConfigExt;
+use burn_stack::modules::hnet::HNetVocabShape;
+use burn_stack::modules::{BlockConfig, ModelConfigExt};
 
 /// A Mamba block config, tagged with its family.
 #[derive(Config, Debug)]
@@ -28,18 +29,6 @@ pub enum MambaBlockConfig {
 }
 
 impl MambaBlockConfig {
-    /// The family tag: `"mamba1"`, `"mamba2"` or `"mamba3"`.
-    pub fn family(&self) -> &'static str {
-        match self {
-            #[cfg(feature = "mamba1")]
-            Self::Mamba1(_) => "mamba1",
-            #[cfg(feature = "mamba2")]
-            Self::Mamba2(_) => "mamba2",
-            #[cfg(feature = "mamba3")]
-            Self::Mamba3(_) => "mamba3",
-        }
-    }
-
     /// The default SSD path of the family of this block config.
     pub fn default_ssd_path(&self) -> MambaSsdPath {
         match self {
@@ -49,6 +38,44 @@ impl MambaBlockConfig {
             Self::Mamba2(_) => MambaSsdPath::mamba2_default(),
             #[cfg(feature = "mamba3")]
             Self::Mamba3(_) => MambaSsdPath::mamba3_default(),
+        }
+    }
+}
+
+impl BlockConfig for MambaBlockConfig {
+    type Block = MambaBlock;
+
+    fn d_model(&self) -> usize {
+        match self {
+            #[cfg(feature = "mamba1")]
+            Self::Mamba1(c) => BlockConfig::d_model(c),
+            #[cfg(feature = "mamba2")]
+            Self::Mamba2(c) => BlockConfig::d_model(c),
+            #[cfg(feature = "mamba3")]
+            Self::Mamba3(c) => BlockConfig::d_model(c),
+        }
+    }
+
+    fn init_block(&self, n_applications: usize, device: &Device) -> MambaBlock {
+        match self {
+            #[cfg(feature = "mamba1")]
+            Self::Mamba1(c) => MambaBlock::Mamba1(c.init_block(n_applications, device)),
+            #[cfg(feature = "mamba2")]
+            Self::Mamba2(c) => MambaBlock::Mamba2(c.init_block(n_applications, device)),
+            #[cfg(feature = "mamba3")]
+            Self::Mamba3(c) => MambaBlock::Mamba3(c.init_block(n_applications, device)),
+        }
+    }
+
+    #[cfg(feature = "optim")]
+    fn muon_projections(&self) -> Vec<burn_stack::optim::ProjSpec> {
+        match self {
+            #[cfg(feature = "mamba1")]
+            Self::Mamba1(c) => BlockConfig::muon_projections(c),
+            #[cfg(feature = "mamba2")]
+            Self::Mamba2(c) => BlockConfig::muon_projections(c),
+            #[cfg(feature = "mamba3")]
+            Self::Mamba3(c) => BlockConfig::muon_projections(c),
         }
     }
 }
@@ -66,28 +93,14 @@ impl MambaLatentNetConfig {
     /// Allocate and initialise the network on `device`, in the family of the
     /// block.
     pub fn init(&self, device: &Device) -> MambaLatentNet {
-        match &self.block {
-            #[cfg(feature = "mamba1")]
-            MambaBlockConfig::Mamba1(c) => MambaLatentNet::Mamba1(self.shape.init(c.clone(), device)),
-            #[cfg(feature = "mamba2")]
-            MambaBlockConfig::Mamba2(c) => MambaLatentNet::Mamba2(self.shape.init(c.clone(), device)),
-            #[cfg(feature = "mamba3")]
-            MambaBlockConfig::Mamba3(c) => MambaLatentNet::Mamba3(self.shape.init(c.clone(), device)),
-        }
+        self.shape.init(self.block.clone(), device)
     }
 
     /// The [`MuonPlan`] of this network: the fused projections of the block and
     /// of the optional MLP. See [`NetworkShape::muon_plan`].
     #[cfg(feature = "optim")]
     pub fn muon_plan(&self) -> MuonPlan {
-        match &self.block {
-            #[cfg(feature = "mamba1")]
-            MambaBlockConfig::Mamba1(c) => self.shape.stack.muon_plan(c),
-            #[cfg(feature = "mamba2")]
-            MambaBlockConfig::Mamba2(c) => self.shape.stack.muon_plan(c),
-            #[cfg(feature = "mamba3")]
-            MambaBlockConfig::Mamba3(c) => self.shape.stack.muon_plan(c),
-        }
+        self.shape.stack.muon_plan(&self.block)
     }
 }
 
@@ -104,28 +117,14 @@ impl MambaVocabNetConfig {
     /// Allocate and initialise the language model on `device`, in the family of
     /// the block.
     pub fn init(&self, device: &Device) -> MambaVocabNet {
-        match &self.block {
-            #[cfg(feature = "mamba1")]
-            MambaBlockConfig::Mamba1(c) => MambaVocabNet::Mamba1(self.shape.init(c.clone(), device)),
-            #[cfg(feature = "mamba2")]
-            MambaBlockConfig::Mamba2(c) => MambaVocabNet::Mamba2(self.shape.init(c.clone(), device)),
-            #[cfg(feature = "mamba3")]
-            MambaBlockConfig::Mamba3(c) => MambaVocabNet::Mamba3(self.shape.init(c.clone(), device)),
-        }
+        self.shape.init(self.block.clone(), device)
     }
 
     /// The [`MuonPlan`] of this network: the fused projections of the block and
     /// of the optional MLP. See [`NetworkShape::muon_plan`].
     #[cfg(feature = "optim")]
     pub fn muon_plan(&self) -> MuonPlan {
-        match &self.block {
-            #[cfg(feature = "mamba1")]
-            MambaBlockConfig::Mamba1(c) => self.shape.stack.muon_plan(c),
-            #[cfg(feature = "mamba2")]
-            MambaBlockConfig::Mamba2(c) => self.shape.stack.muon_plan(c),
-            #[cfg(feature = "mamba3")]
-            MambaBlockConfig::Mamba3(c) => self.shape.stack.muon_plan(c),
-        }
+        self.shape.stack.muon_plan(&self.block)
     }
 }
 
@@ -142,28 +141,41 @@ impl MambaBidiLayersConfig {
     /// Allocate and initialise the bidirectional stack on `device`, in the
     /// family of the block.
     pub fn init(&self, device: &Device) -> MambaBidiLayers {
-        match &self.block {
-            #[cfg(feature = "mamba1")]
-            MambaBlockConfig::Mamba1(c) => MambaBidiLayers::Mamba1(self.shape.init(c.clone(), device)),
-            #[cfg(feature = "mamba2")]
-            MambaBlockConfig::Mamba2(c) => MambaBidiLayers::Mamba2(self.shape.init(c.clone(), device)),
-            #[cfg(feature = "mamba3")]
-            MambaBlockConfig::Mamba3(c) => MambaBidiLayers::Mamba3(self.shape.init(c.clone(), device)),
-        }
+        self.shape.init(self.block.clone(), device)
     }
 
     /// The [`MuonPlan`] of this stack: the fused projections of the block, and
     /// the spec of the `CatLinear` merges. See [`BidiShape::muon_plan`].
     #[cfg(feature = "optim")]
     pub fn muon_plan(&self) -> MuonPlan {
-        match &self.block {
-            #[cfg(feature = "mamba1")]
-            MambaBlockConfig::Mamba1(c) => self.shape.muon_plan(c),
-            #[cfg(feature = "mamba2")]
-            MambaBlockConfig::Mamba2(c) => self.shape.muon_plan(c),
-            #[cfg(feature = "mamba3")]
-            MambaBlockConfig::Mamba3(c) => self.shape.muon_plan(c),
-        }
+        self.shape.muon_plan(&self.block)
+    }
+}
+
+/// The serializable config of a [`MambaHNetVocabNet`].
+#[derive(Config, Debug)]
+pub struct MambaHNetVocabNetConfig {
+    /// The stacks, the vocabulary and the knobs of the chunking.
+    pub shape: HNetVocabShape,
+    /// One block config per stage, outermost first, all of one family. The
+    /// block config of a stage builds both its encoder and its decoder, and
+    /// sets the width of the stage.
+    pub stage_blocks: Vec<MambaBlockConfig>,
+    /// The block config of the main stack.
+    pub main_block: MambaBlockConfig,
+}
+
+impl MambaHNetVocabNetConfig {
+    /// Allocate and initialise the network on `device`.
+    pub fn init(&self, device: &Device) -> MambaHNetVocabNet {
+        self.shape.init(&self.stage_blocks, &self.main_block, device)
+    }
+
+    /// The [`MuonPlan`] of the network: each stack at its own block config,
+    /// scoped to that stack. See `HNetShape::muon_plan` of `burn-stack`.
+    #[cfg(feature = "optim")]
+    pub fn muon_plan(&self) -> MuonPlan {
+        self.shape.muon_plan(&self.stage_blocks, &self.main_block)
     }
 }
 
@@ -195,6 +207,17 @@ impl ModelConfigExt for MambaVocabNetConfig {
 
 impl ModelConfigExt for MambaBidiLayersConfig {
     type Model = MambaBidiLayers;
+    fn init(&self, device: &Device) -> Self::Model {
+        self.init(device)
+    }
+    #[cfg(feature = "optim")]
+    fn muon_plan(&self) -> MuonPlan {
+        self.muon_plan()
+    }
+}
+
+impl ModelConfigExt for MambaHNetVocabNetConfig {
+    type Model = MambaHNetVocabNet;
     fn init(&self, device: &Device) -> Self::Model {
         self.init(device)
     }

@@ -124,10 +124,7 @@ enum Arm {
 
 fn handmade(device: &Device, arm: Arm) -> MambaLatentNet {
     let cfg = model_config(matches!(arm, Arm::Register));
-    let mut model = crate::common::model::ModelConfigExt::init(&cfg, device);
-    let MambaLatentNet::Mamba3(net) = &mut model else {
-        unreachable!("tally-record configures the Mamba-3 family")
-    };
+    let mut net = crate::common::model::ModelConfigExt::init(&cfg, device);
     let embeddings = match arm {
         Arm::ExpWrite => by_exp(),
         _ => by_value(),
@@ -142,7 +139,9 @@ fn handmade(device: &Device, arm: Arm) -> MambaLatentNet {
 
     let layer = &mut net.layers.real_layers[0];
     layer.norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([3]), device));
-    let block = &mut layer.block;
+    let MambaBlock::Mamba3(block) = &mut layer.block else {
+        unreachable!("tally-record configures the Mamba-3 family")
+    };
 
     // ── block in_proj ────────────────────────────────────────────────────────
     // Channel order: `[z(3) | x(3) | B(1) | C(1) | Δ(3) | A(3) | a(3) | b(3)]`.
@@ -272,7 +271,7 @@ fn handmade(device: &Device, arm: Arm) -> MambaLatentNet {
         device,
     );
     net.out_proj.bias = Some(param(&[0.0; NUM_CLASSES], [NUM_CLASSES], device));
-    model
+    net
 }
 
 fn worst_family(model: &MambaLatentNet, count: usize, device: &Device) -> (f64, Vec<f64>) {

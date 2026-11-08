@@ -167,10 +167,7 @@ fn build(
     d_h: [f64; 2],
     head: Head,
 ) -> MambaLatentNet {
-    let mut model = ModelConfigExt::init(cfg, device);
-    let MambaLatentNet::Mamba3(net) = &mut model else {
-        unreachable!("reset-rotor configures the Mamba-3 family")
-    };
+    let mut net = ModelConfigExt::init(cfg, device);
 
     // ── network in_proj: one-hot → the symbol embedding ──────────────────────
     net.in_proj.weight = Param::from_tensor(t1(&EMBED.concat(), [NUM_SYMBOLS, 2], device));
@@ -178,7 +175,9 @@ fn build(
 
     let layer = &mut net.layers.real_layers[0];
     layer.norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([2]), device));
-    let block = &mut layer.block;
+    let MambaBlock::Mamba3(block) = &mut layer.block else {
+        unreachable!("reset-rotor configures the Mamba-3 family")
+    };
 
     // ── block in_proj: one affine functional per channel ─────────────────────
     let rows = [
@@ -238,7 +237,7 @@ fn build(
         device,
     )));
 
-    model
+    net
 }
 
 /// The rotor block: `R` writes the zero detent, `±` turn the phase, the two

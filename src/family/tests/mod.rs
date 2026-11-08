@@ -1,4 +1,4 @@
-//! Tests for the family enums, and for the block-generic `burn_stack`
+//! Tests for the family enum, and for the block-generic `burn_stack`
 //! containers as exercised through the Mamba families.
 //!
 //! The containers themselves live in `burn-stack` and are tested there against
@@ -7,6 +7,7 @@
 //! a `grad_horizon` cut, class-marker placement, and the Muon allowlist.
 
 mod bidi;
+mod block;
 mod capture;
 mod class;
 mod config;

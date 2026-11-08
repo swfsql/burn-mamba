@@ -189,10 +189,7 @@ enum Head {
 ///   and `r` become half-turns of the two pairs, which commute.
 fn handmade(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentNet {
     let cfg = crate::model::model_config(rotation);
-    let mut model = ModelConfigExt::init(&cfg, device);
-    let MambaLatentNet::Mamba3(net) = &mut model else {
-        unreachable!("reset-swap configures the Mamba-3 family")
-    };
+    let mut net = ModelConfigExt::init(&cfg, device);
 
     // ── network in_proj: one-hot → the symbol embedding ──────────────────────
     net.in_proj.weight = Param::from_tensor(t1(&EMBED.concat(), [NUM_SYMBOLS, D_MODEL], device));
@@ -203,7 +200,9 @@ fn handmade(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentN
 
     let layer = &mut net.layers.real_layers[0];
     layer.norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([D_MODEL]), device));
-    let block = &mut layer.block;
+    let MambaBlock::Mamba3(block) = &mut layer.block else {
+        unreachable!("reset-swap configures the Mamba-3 family")
+    };
 
     // ── block in_proj: one affine functional per channel ─────────────────────
     // Channel order: [z(2) | x(2) | B_raw(4) | C_raw(4) | Δ(2) | A(2) | ϑ(2, 6 or 12)].
@@ -302,7 +301,7 @@ fn handmade(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentN
         device,
     )));
 
-    model
+    net
 }
 
 /// The rotation channels, per [`RotationKind`]. Every entry is the value of the
@@ -983,12 +982,11 @@ fn left_isoclinic_with_final_norm() {
     println!("class n0 = {n0:.4?}, min gap {gap:.4}");
 
     let build = |with_norm: bool| {
-        let mut model = handmade(&device, RotationKind::Quaternion4D, Head::Decoder);
-        let MambaLatentNet::Mamba3(net) = &mut model else { unreachable!() };
+        let mut net = handmade(&device, RotationKind::Quaternion4D, Head::Decoder);
         if with_norm {
             net.norm_f = Some(RmsNormConfig::new(D_MODEL).init(&device));
         }
-        let block = &mut net.layers.real_layers[0].block;
+        let MambaBlock::Mamba3(block) = &mut net.layers.real_layers[0].block else { unreachable!() };
         // The C of every head: the QK-normed (1,0,0,0) is (2,0,0,0), and the
         // bias moves it to `c`.
         let c_bias: Vec<f64> = (0..NHEADS)
@@ -1012,7 +1010,7 @@ fn left_isoclinic_with_final_norm() {
         }
         net.out_proj.weight = Param::from_tensor(t1(&w_out, [D_MODEL, NUM_CLASSES], &device));
         net.out_proj.bias = Some(Param::from_tensor(t1(&b_out, [NUM_CLASSES], &device)));
-        model
+        net
     };
 
     let normed = build(true);

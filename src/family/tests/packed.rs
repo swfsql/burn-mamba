@@ -2,8 +2,8 @@
 //! alone.
 //!
 //! Each row holds several sequences, each at a multiple of
-//! [`MambaVocabNet::pack_align`], each with its opening slots (one per class
-//! latent of the stack). Alone, a sequence runs through the plain `forward`,
+//! [`Block::reset_align`], each with its opening slots (one per class latent
+//! of the stack). Alone, a sequence runs through the plain `forward`,
 //! which splices the latents in front of it. The test compares:
 //!
 //! - the logits of every opening slot and every token of each sequence,
@@ -13,7 +13,6 @@
 //! after each one.
 
 use crate::prelude::*;
-use crate::family::network::*;
 use burn::module::{ModuleVisitor, Param};
 use burn::prelude::*;
 use burn::tensor::{Distribution, Gradients};
@@ -82,8 +81,8 @@ fn param_grads<M: Module>(module: &M, grads: &Gradients) -> Vec<Option<Tensor<1>
 
 fn check(net: MambaVocabNet, path: MambaSsdPath) {
     let device = test_device().autodiff();
-    let align = net.pack_align(&path).expect("a family with packed rows");
-    let lead = net.n_class_latents();
+    let align = net.layers.real_layers[0].block.reset_align(&path).expect("a family with packed rows");
+    let lead = net.layers.class_latents.len();
     let (starts, width) = starts(align, lead);
     let batch = ROWS.len();
 

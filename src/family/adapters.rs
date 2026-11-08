@@ -1,6 +1,5 @@
-//! The runtime-tagged cache collection, and the place where each family
-//! connects to the block-generic stack: `impl Block`, `impl BlockConfig`,
-//! `impl CacheStack`.
+//! The place where each family connects to the block-generic stack: `impl
+//! Block`, `impl BlockConfig`, `impl CacheStack`.
 //!
 //! Each family implements `CacheStack::cache_to_inner`/`cache_from_inner` by
 //! hand. `Module::map` does nothing on plain `Tensor` fields, which is all a
@@ -11,53 +10,6 @@
 use burn::prelude::*;
 use burn_stack::modules::{Block, BlockConfig, CacheStack, lift};
 use burn_stack::utils::UntiedParam;
-
-/// Runtime-tagged caches: one variant per family, matching
-/// [`MambaLatentNet`](crate::family::MambaLatentNet).
-///
-/// This is plain runtime state (not a `Module`): `forward`/`step` take and
-/// return caches, and nothing records or optimises them. (`Mamba3Caches` is
-/// itself a non-`Module` enum, so a `Module` derive here would not apply.)
-#[derive(Debug, Clone)]
-pub enum MambaCaches {
-    /// Mamba-1 caches.
-    #[cfg(feature = "mamba1")]
-    Mamba1(crate::mamba1::prelude::Mamba1Caches),
-    /// Mamba-2 caches.
-    #[cfg(feature = "mamba2")]
-    Mamba2(crate::mamba2::prelude::Mamba2Caches),
-    /// Mamba-3 caches.
-    #[cfg(feature = "mamba3")]
-    Mamba3(crate::mamba3::prelude::Mamba3Caches),
-}
-
-impl MambaCaches {
-    /// Round-trip every layer cache of the tagged family through the inner
-    /// backend: same values, no graph.
-    ///
-    /// This is [`CacheStack::detach`], dispatched over the runtime tag. The enum
-    /// cannot implement [`CacheStack`] itself (its `Cache` type would have to be
-    /// a fourth enum). And a caller that carries a cache across a gradient
-    /// boundary (truncated BPTT: the `tiny-stories` window loop) holds the enum,
-    /// not the family type.
-    ///
-    /// Each layer cache keeps its device and checkpointing strategy. On a device
-    /// without autodiff, this does nothing (see [`CacheStack::detach`]).
-    pub fn detach(self) -> Self {
-        match self {
-            #[cfg(feature = "mamba1")]
-            Self::Mamba1(caches) => Self::Mamba1(caches.detach()),
-            #[cfg(feature = "mamba2")]
-            Self::Mamba2(caches) => Self::Mamba2(caches.detach()),
-            #[cfg(feature = "mamba3")]
-            Self::Mamba3(caches) => Self::Mamba3(caches.detach()),
-        }
-    }
-}
-
-// ===========================================================================
-// Per-family impls
-// ===========================================================================
 
 #[cfg(feature = "mamba1")]
 mod impl_mamba1 {
@@ -217,9 +169,13 @@ mod impl_mamba2 {
         ) -> (Tensor<3>, Mamba2Cache) {
             self.forward_packed(x, cache, None, options, None, Some(reset))
         }
-        /// The chunk length of `options`, in tokens.
+        /// The chunk length of `options`, in tokens. `None` for
+        /// [`Mamba2SsdPath::Minimal`], which takes no resets.
         fn reset_align(&self, options: &Mamba2SsdPath) -> Option<usize> {
-            Some(options.chunk_len_or_optimal(self.state_rank, self.per_head_dim()))
+            match options {
+                Mamba2SsdPath::Minimal(_) => None,
+                _ => Some(options.chunk_len_or_optimal(self.state_rank, self.per_head_dim())),
+            }
         }
         fn block_step(&self, x: Tensor<2>, cache: Option<Mamba2Cache>) -> (Tensor<2>, Mamba2Cache) {
             self.step(x, cache)
@@ -412,8 +368,12 @@ mod impl_mamba3 {
             self.forward_packed(x, cache, None, options, None, Some(reset))
         }
         /// The chunk length of `options`, in tokens: `chunk_len / micro_steps`.
+        /// `None` for [`Mamba3SsdPath::Minimal`], which takes no resets.
         fn reset_align(&self, options: &Mamba3SsdPath) -> Option<usize> {
-            Some(Mamba3SsdPath::chunk_tokens(options.chunk_len_or_optimal(self), self.micro_steps))
+            match options {
+                Mamba3SsdPath::Minimal(_) => None,
+                _ => Some(Mamba3SsdPath::chunk_tokens(options.chunk_len_or_optimal(self), self.micro_steps)),
+            }
         }
         fn block_step(&self, x: Tensor<2>, cache: Option<Mamba3Cache>) -> (Tensor<2>, Mamba3Cache) {
             self.step(x, cache)

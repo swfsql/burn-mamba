@@ -1,9 +1,8 @@
 //! Smoke / parity tests for the family-generic abstraction in
-//! [`burn_stack::modules`] — builder wiring, the family enums, and the
+//! [`burn_stack::modules`] — builder wiring, the family enum, and the
 //! class-token / class-latent insertion + step-injection machinery.
 
 use crate::prelude::*;
-use crate::family::network::*;
 use burn::prelude::*;
 use burn_stack::modules::*;
 use burn_stack::utils::class::{class_marker_output_indices, class_prime_plan, class_window_plan};
@@ -224,7 +223,7 @@ fn bidi_layers_mamba1() {
     assert_eq!([2, 5, 16], y.dims());
 }
 
-// --- MambaBidiLayers enum -------------------------------------------
+// --- MambaBidiLayers ------------------------------------------------
 
 #[cfg(feature = "mamba2")]
 #[test]
@@ -729,13 +728,13 @@ fn prime_on_a_network_covers_every_class_level() {
     }
 }
 
-// The runtime enums prime as well, threading the tagged caches straight into
-// the `step` that follows — the seedless loop over the family enums. The vocab
-// LM runs the primed latent through `norm_f` and the head, so what comes back
-// is logits to sample the first token from.
+// The networks over the enum prime as well, threading the tagged caches
+// straight into the `step` that follows — the seedless loop over the enum. The
+// vocab LM runs the primed latent through `norm_f` and the head, so the result
+// is the logits that select the first token.
 #[cfg(feature = "mamba2")]
 #[test]
-fn prime_through_the_runtime_enums() {
+fn prime_through_the_enum() {
     let device = test_device();
     let block = Mamba2Config::new(16)
         .with_expand(2)
@@ -763,15 +762,14 @@ fn prime_through_the_runtime_enums() {
 
     // The vocab counterpart: class latents live on its stack (the LM has no
     // class tokens of its own).
-    let lm = MambaVocabNet::Mamba2(
-        VocabNetworkBuilder {
-            vocab_size: vocab,
-            pad_vocab_size_multiple: 1,
-            layers: LayersBuilder::new(1, block).with_class_latents(vec![ClassLatent::Start]),
-            missing_lm_head: true,
-        }
-        .init(&device),
-    );
+    let lm: MambaVocabNet = VocabNetworkBuilder {
+        vocab_size: vocab,
+        pad_vocab_size_multiple: 1,
+        layers: LayersBuilder::new(1, MambaBlockConfig::Mamba2(block))
+            .with_class_latents(vec![ClassLatent::Start]),
+        missing_lm_head: true,
+    }
+    .init(&device);
     let mut class = ClassCursors::new(seq);
     // The logits: the vocab, then the flag of the token pair.
     let (logits, caches) = lm.prime(batch, None, Some(&mut class));

@@ -5,7 +5,7 @@
 use crate::prelude::*;
 use burn::prelude::*;
 use burn::tensor::Distribution;
-use burn_stack::modules::hnet::{HNetShape, HNetStageShape, HNetVocabShape, StepMode};
+use burn_stack::modules::hnet::{HNetCaches, HNetShape, HNetStageShape, HNetVocabShape, StepMode};
 use burn_stack::modules::{CacheTensors, NetworkShape, TensorZip};
 use burn_stack::utils::test_helpers::{dtype_tol, max_rel_diff, test_device};
 
@@ -80,7 +80,7 @@ fn step_unrolled(
     net: &MambaHNetVocabNet,
     x: Tensor<3, Int>,
     mode: StepMode,
-) -> (Tensor<3>, MambaHNetCaches) {
+) -> (Tensor<3>, HNetCaches<MambaBlock, MambaBlock>) {
     let [_batch, sequence, _two] = x.dims();
     let mut caches = None;
     let mut ys = Vec::new();
@@ -101,7 +101,7 @@ fn mamba2_stages_mamba3_main_forward_equals_step() {
     let device = test_device();
     let config = config(vec![mamba2(8), mamba2(8)], mamba3(16));
     let net = config.init(&device);
-    assert_eq!(net.n_stages(), 2);
+    assert_eq!(net.hnet.stages.len(), 2);
     let x = tokens(2, 11, &device);
     let (y_fwd, c_fwd, _) = net.forward(x.clone(), None, paths(&config), None);
     for mode in [StepMode::Masked, StepMode::Gathered] {

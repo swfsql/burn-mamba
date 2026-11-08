@@ -13,8 +13,8 @@
 //!   (Minimal / Serial / SerialRecalculated) and the backend extension trait.
 //!
 //! The layers, the networks and the bidirectional stacks are the
-//! family-generic types in [`burn_stack::modules`]. [`crate::family`] wraps
-//! them in runtime-selectable enums.
+//! family-generic types in [`burn_stack::modules`]. [`crate::family`] selects
+//! the block at run time.
 
 pub mod cache;
 pub mod mamba2;

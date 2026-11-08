@@ -314,5 +314,5 @@ pub(crate) fn restart_window<const D: usize>(
     x_all.gather(axis, idx_bw.reshape(shape).expand(dims))
 }
 
-#[cfg(all(test, feature = "_dev-test"))]
+#[cfg(all(test, feature = "_dev-test", any(feature = "mamba2", feature = "mamba3")))]
 mod tests;

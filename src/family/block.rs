@@ -1,29 +1,28 @@
-//! Throwaway spike: the run-time family choice at the block.
+//! The run-time family choice: one enum over the three blocks.
 //!
-//! A blank project, with only the public interface of `burn-mamba` and
-//! `burn-stack`. It holds what candidates 1, 2 and the Q4 decision would add
-//! to `burn-mamba/src/unified/`.
+//! [`MambaBlock`] fills [`Block`](burn_stack::modules::Block). So each generic
+//! container of `burn-stack` takes it with no extra code, and
+//! [`MambaLatentNet`], [`MambaVocabNet`], [`MambaBidiLayers`] and
+//! [`MambaHNetVocabNet`] are only type aliases. A call panics when its cache or
+//! its SSD path is of another family than the block.
+//! `docs/adr/0009-family-choice-at-the-block.md` gives the consequences for the
+//! parameter paths, the caches and a mixed stack.
 
-use burn::module::Module;
+use crate::family::MambaSsdPath;
 use burn::prelude::*;
-use burn_mamba::prelude::MambaSsdPath;
-#[cfg(feature = "mamba1")]
-use burn_mamba::mamba1::prelude::{Mamba1, Mamba1Cache, Mamba1Caches, Mamba1Config};
-#[cfg(feature = "mamba2")]
-use burn_mamba::mamba2::prelude::{Mamba2, Mamba2Cache, Mamba2Caches, Mamba2Config, Mamba2SsdPath};
-#[cfg(feature = "mamba3")]
-use burn_mamba::mamba3::prelude::{Mamba3, Mamba3Cache, Mamba3Caches, Mamba3Config, Mamba3SsdPath};
 use burn_stack::modules::bidi::BidiLayers;
-use burn_stack::modules::hnet::{HNetVocabNetwork, HNetVocabShape};
+use burn_stack::modules::hnet::HNetVocabNetwork;
 use burn_stack::modules::{
-    BidiShape, Block, BlockConfig, CacheStack, CacheTensors, LatentNetwork, LatentShape, ModelConfigExt, TensorZip,
-    VocabNetwork, VocabShape,
+    Block, CacheStack, CacheTensors, LatentNetwork, TensorZip, VocabNetwork,
 };
 use burn_stack::utils::UntiedParam;
 
-// ---------------------------------------------------------------------------
-// The block
-// ---------------------------------------------------------------------------
+#[cfg(feature = "mamba1")]
+use crate::mamba1::prelude::{Mamba1, Mamba1Cache, Mamba1Caches};
+#[cfg(feature = "mamba2")]
+use crate::mamba2::prelude::{Mamba2, Mamba2Cache, Mamba2Caches, Mamba2SsdPath};
+#[cfg(feature = "mamba3")]
+use crate::mamba3::prelude::{Mamba3, Mamba3Cache, Mamba3Caches, Mamba3SsdPath};
 
 /// A Mamba block, tagged with its family.
 #[derive(Module, Debug)]
@@ -53,59 +52,78 @@ pub enum MambaCache {
     Mamba3(Mamba3Cache),
 }
 
-/// The caches of a stack: a flat list of slots. Each slot has its own tag, so
-/// `from_slots` guesses nothing.
+/// The caches of a stack: a flat list of slots. Each slot has its own family
+/// tag.
+///
+/// This is run-time state, and not a `Module`. `forward` and `step` take and
+/// give caches, and no record holds them.
 #[derive(Clone, Debug)]
 pub struct MambaCaches {
     /// One entry for each virtual layer.
     pub slots: Vec<Option<MambaCache>>,
 }
 
+/// A latent network over any family.
+pub type MambaLatentNet = LatentNetwork<MambaBlock>;
+/// A vocab network over any family.
+pub type MambaVocabNet = VocabNetwork<MambaBlock>;
+/// A bidirectional stack over any family.
+pub type MambaBidiLayers = BidiLayers<MambaBlock>;
+/// An H-Net vocab network. Its stages hold one family, and its main stack can
+/// hold another.
+pub type MambaHNetVocabNet = HNetVocabNetwork<MambaBlock, MambaBlock>;
+
 const WRONG_CACHE: &str = "the cache family does not match the block";
-const WRONG_PATH: &str = "ssd_path family does not match the block";
+const WRONG_PATH: &str = "the SSD path family does not match the block";
 
 #[cfg(feature = "mamba1")]
-fn cache1(cache: MambaCache) -> Mamba1Cache {
+fn mamba1_cache(cache: MambaCache) -> Mamba1Cache {
     match cache {
         MambaCache::Mamba1(c) => c,
         #[allow(unreachable_patterns)]
         _ => panic!("{WRONG_CACHE}"),
     }
 }
+
 #[cfg(feature = "mamba2")]
-fn cache2(cache: MambaCache) -> Mamba2Cache {
+fn mamba2_cache(cache: MambaCache) -> Mamba2Cache {
     match cache {
         MambaCache::Mamba2(c) => c,
         #[allow(unreachable_patterns)]
         _ => panic!("{WRONG_CACHE}"),
     }
 }
+
 #[cfg(feature = "mamba3")]
-fn cache3(cache: MambaCache) -> Mamba3Cache {
+fn mamba3_cache(cache: MambaCache) -> Mamba3Cache {
     match cache {
         MambaCache::Mamba3(c) => c,
         #[allow(unreachable_patterns)]
         _ => panic!("{WRONG_CACHE}"),
     }
 }
+
+/// Mamba-1 has no SSD path, so this only checks the family.
 #[cfg(feature = "mamba1")]
-fn path1(path: MambaSsdPath) {
+fn check_mamba1_path(path: MambaSsdPath) {
     match path {
         MambaSsdPath::Mamba1 => (),
         #[allow(unreachable_patterns)]
         _ => panic!("{WRONG_PATH}"),
     }
 }
+
 #[cfg(feature = "mamba2")]
-fn path2(path: MambaSsdPath) -> Mamba2SsdPath {
+fn mamba2_path(path: MambaSsdPath) -> Mamba2SsdPath {
     match path {
         MambaSsdPath::Mamba2(p) => p,
         #[allow(unreachable_patterns)]
         _ => panic!("{WRONG_PATH}"),
     }
 }
+
 #[cfg(feature = "mamba3")]
-fn path3(path: MambaSsdPath) -> Mamba3SsdPath {
+fn mamba3_path(path: MambaSsdPath) -> Mamba3SsdPath {
     match path {
         MambaSsdPath::Mamba3(p) => p,
         #[allow(unreachable_patterns)]
@@ -134,18 +152,18 @@ impl Block for MambaBlock {
         match self {
             #[cfg(feature = "mamba1")]
             Self::Mamba1(b) => {
-                path1(options);
-                let (y, c) = b.block_forward(x, cache.map(cache1), (), pad);
+                check_mamba1_path(options);
+                let (y, c) = b.block_forward(x, cache.map(mamba1_cache), (), pad);
                 (y, MambaCache::Mamba1(c))
             }
             #[cfg(feature = "mamba2")]
             Self::Mamba2(b) => {
-                let (y, c) = b.block_forward(x, cache.map(cache2), path2(options), pad);
+                let (y, c) = b.block_forward(x, cache.map(mamba2_cache), mamba2_path(options), pad);
                 (y, MambaCache::Mamba2(c))
             }
             #[cfg(feature = "mamba3")]
             Self::Mamba3(b) => {
-                let (y, c) = b.block_forward(x, cache.map(cache3), path3(options), pad);
+                let (y, c) = b.block_forward(x, cache.map(mamba3_cache), mamba3_path(options), pad);
                 (y, MambaCache::Mamba3(c))
             }
         }
@@ -161,20 +179,36 @@ impl Block for MambaBlock {
         match self {
             #[cfg(feature = "mamba1")]
             Self::Mamba1(b) => {
-                path1(options);
-                let (y, c) = b.block_forward_packed(x, cache.map(cache1), (), reset);
+                check_mamba1_path(options);
+                let (y, c) = b.block_forward_packed(x, cache.map(mamba1_cache), (), reset);
                 (y, MambaCache::Mamba1(c))
             }
             #[cfg(feature = "mamba2")]
             Self::Mamba2(b) => {
-                let (y, c) = b.block_forward_packed(x, cache.map(cache2), path2(options), reset);
+                let (y, c) =
+                    b.block_forward_packed(x, cache.map(mamba2_cache), mamba2_path(options), reset);
                 (y, MambaCache::Mamba2(c))
             }
             #[cfg(feature = "mamba3")]
             Self::Mamba3(b) => {
-                let (y, c) = b.block_forward_packed(x, cache.map(cache3), path3(options), reset);
+                let (y, c) =
+                    b.block_forward_packed(x, cache.map(mamba3_cache), mamba3_path(options), reset);
                 (y, MambaCache::Mamba3(c))
             }
+        }
+    }
+
+    fn reset_align(&self, options: &MambaSsdPath) -> Option<usize> {
+        match self {
+            #[cfg(feature = "mamba1")]
+            Self::Mamba1(b) => {
+                check_mamba1_path(options.clone());
+                b.reset_align(&())
+            }
+            #[cfg(feature = "mamba2")]
+            Self::Mamba2(b) => b.reset_align(&mamba2_path(options.clone())),
+            #[cfg(feature = "mamba3")]
+            Self::Mamba3(b) => b.reset_align(&mamba3_path(options.clone())),
         }
     }
 
@@ -182,17 +216,17 @@ impl Block for MambaBlock {
         match self {
             #[cfg(feature = "mamba1")]
             Self::Mamba1(b) => {
-                let (y, c) = b.block_step(x, cache.map(cache1));
+                let (y, c) = b.block_step(x, cache.map(mamba1_cache));
                 (y, MambaCache::Mamba1(c))
             }
             #[cfg(feature = "mamba2")]
             Self::Mamba2(b) => {
-                let (y, c) = b.block_step(x, cache.map(cache2));
+                let (y, c) = b.block_step(x, cache.map(mamba2_cache));
                 (y, MambaCache::Mamba2(c))
             }
             #[cfg(feature = "mamba3")]
             Self::Mamba3(b) => {
-                let (y, c) = b.block_step(x, cache.map(cache3));
+                let (y, c) = b.block_step(x, cache.map(mamba3_cache));
                 (y, MambaCache::Mamba3(c))
             }
         }
@@ -238,12 +272,15 @@ impl CacheStack for MambaCaches {
     fn slot_count(&self) -> usize {
         self.slots.len()
     }
+
     fn into_slots(self) -> Vec<Option<MambaCache>> {
         self.slots
     }
+
     fn from_slots(slots: Vec<Option<MambaCache>>) -> Self {
         Self { slots }
     }
+
     fn cache_to_inner(cache: MambaCache) -> MambaCache {
         match cache {
             #[cfg(feature = "mamba1")]
@@ -254,6 +291,7 @@ impl CacheStack for MambaCaches {
             MambaCache::Mamba3(c) => MambaCache::Mamba3(Mamba3Caches::cache_to_inner(c)),
         }
     }
+
     fn cache_from_inner(cache: MambaCache, device: &Device) -> MambaCache {
         match cache {
             #[cfg(feature = "mamba1")]
@@ -264,6 +302,7 @@ impl CacheStack for MambaCaches {
             MambaCache::Mamba3(c) => MambaCache::Mamba3(Mamba3Caches::cache_from_inner(c, device)),
         }
     }
+
     fn cache_device(cache: &MambaCache) -> Device {
         match cache {
             #[cfg(feature = "mamba1")]
@@ -305,145 +344,5 @@ impl CacheTensors for MambaCaches {
             })
             .collect();
         Self { slots }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// The configs
-// ---------------------------------------------------------------------------
-
-/// A Mamba block config, tagged with its family.
-#[derive(Config, Debug)]
-pub enum MambaBlockConfig {
-    /// A Mamba-1 block.
-    #[cfg(feature = "mamba1")]
-    Mamba1(Mamba1Config),
-    /// A Mamba-2 block.
-    #[cfg(feature = "mamba2")]
-    Mamba2(Mamba2Config),
-    /// A Mamba-3 block.
-    #[cfg(feature = "mamba3")]
-    Mamba3(Mamba3Config),
-}
-
-impl BlockConfig for MambaBlockConfig {
-    type Block = MambaBlock;
-
-    fn d_model(&self) -> usize {
-        match self {
-            #[cfg(feature = "mamba1")]
-            Self::Mamba1(c) => BlockConfig::d_model(c),
-            #[cfg(feature = "mamba2")]
-            Self::Mamba2(c) => BlockConfig::d_model(c),
-            #[cfg(feature = "mamba3")]
-            Self::Mamba3(c) => BlockConfig::d_model(c),
-        }
-    }
-    fn init_block(&self, n_applications: usize, device: &Device) -> MambaBlock {
-        match self {
-            #[cfg(feature = "mamba1")]
-            Self::Mamba1(c) => MambaBlock::Mamba1(c.init_block(n_applications, device)),
-            #[cfg(feature = "mamba2")]
-            Self::Mamba2(c) => MambaBlock::Mamba2(c.init_block(n_applications, device)),
-            #[cfg(feature = "mamba3")]
-            Self::Mamba3(c) => MambaBlock::Mamba3(c.init_block(n_applications, device)),
-        }
-    }
-    fn muon_projections(&self) -> Vec<burn_stack::optim::ProjSpec> {
-        match self {
-            #[cfg(feature = "mamba1")]
-            Self::Mamba1(c) => BlockConfig::muon_projections(c),
-            #[cfg(feature = "mamba2")]
-            Self::Mamba2(c) => BlockConfig::muon_projections(c),
-            #[cfg(feature = "mamba3")]
-            Self::Mamba3(c) => BlockConfig::muon_projections(c),
-        }
-    }
-}
-
-/// A latent network over any family.
-pub type MambaLatentNet = LatentNetwork<MambaBlock>;
-/// A vocab network over any family.
-pub type MambaVocabNet = VocabNetwork<MambaBlock>;
-/// A bidirectional stack over any family.
-pub type MambaBidiLayers = BidiLayers<MambaBlock>;
-/// An H-Net vocab network, with a family for its stages and one for its main stack.
-pub type MambaHNetVocabNet = HNetVocabNetwork<MambaBlock, MambaBlock>;
-
-/// The config of a [`MambaLatentNet`].
-#[derive(Config, Debug)]
-pub struct MambaLatentNetConfig {
-    /// Everything about the network except its block.
-    pub shape: LatentShape,
-    /// The block.
-    pub block: MambaBlockConfig,
-}
-
-impl ModelConfigExt for MambaLatentNetConfig {
-    type Model = MambaLatentNet;
-    fn init(&self, device: &Device) -> MambaLatentNet {
-        self.shape.init(self.block.clone(), device)
-    }
-    fn muon_plan(&self) -> burn_stack::optim::MuonPlan {
-        self.shape.stack.muon_plan(&self.block)
-    }
-}
-
-/// The config of a [`MambaVocabNet`].
-#[derive(Config, Debug)]
-pub struct MambaVocabNetConfig {
-    /// Everything about the network except its block.
-    pub shape: VocabShape,
-    /// The block.
-    pub block: MambaBlockConfig,
-}
-
-impl ModelConfigExt for MambaVocabNetConfig {
-    type Model = MambaVocabNet;
-    fn init(&self, device: &Device) -> MambaVocabNet {
-        self.shape.init(self.block.clone(), device)
-    }
-    fn muon_plan(&self) -> burn_stack::optim::MuonPlan {
-        self.shape.stack.muon_plan(&self.block)
-    }
-}
-
-/// The config of a [`MambaBidiLayers`].
-#[derive(Config, Debug)]
-pub struct MambaBidiLayersConfig {
-    /// Everything about the stack except its block.
-    pub shape: BidiShape,
-    /// The block.
-    pub block: MambaBlockConfig,
-}
-
-impl ModelConfigExt for MambaBidiLayersConfig {
-    type Model = MambaBidiLayers;
-    fn init(&self, device: &Device) -> MambaBidiLayers {
-        self.shape.init(self.block.clone(), device)
-    }
-    fn muon_plan(&self) -> burn_stack::optim::MuonPlan {
-        self.shape.muon_plan(&self.block)
-    }
-}
-
-/// The config of a [`MambaHNetVocabNet`].
-#[derive(Config, Debug)]
-pub struct MambaHNetVocabNetConfig {
-    /// Everything about the network except its blocks.
-    pub shape: HNetVocabShape,
-    /// One block config per stage, outermost first.
-    pub stage_blocks: Vec<MambaBlockConfig>,
-    /// The block config of the main stack.
-    pub main_block: MambaBlockConfig,
-}
-
-impl ModelConfigExt for MambaHNetVocabNetConfig {
-    type Model = MambaHNetVocabNet;
-    fn init(&self, device: &Device) -> MambaHNetVocabNet {
-        self.shape.init(&self.stage_blocks, &self.main_block, device)
-    }
-    fn muon_plan(&self) -> burn_stack::optim::MuonPlan {
-        self.shape.muon_plan(&self.stage_blocks, &self.main_block)
     }
 }

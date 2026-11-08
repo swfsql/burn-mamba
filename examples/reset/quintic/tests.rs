@@ -222,7 +222,7 @@ fn identity_out_proj(block: &mut Mamba3, n: usize, device: &Device) {
 /// distinct, and it ignores the scale of the state. The scale drifts, because
 /// every hold decays by `a_floor`.
 fn write_ends(
-    net: &mut burn_stack::modules::LatentNetwork<Mamba3>,
+    net: &mut MambaLatentNet,
     embed: &[Vec<f64>],
     points: &[Vec<f64>],
     head: Head,
@@ -287,15 +287,14 @@ fn handmade_a5(device: &Device, rotation: RotationKind, head: Head) -> MambaLate
     let (d, nheads) = floor_width(group);
     assert_eq!((d, nheads), (H, H), "one head per readout, per_head_dim = 1");
     let cfg = model_config_with(group, rotation, 1, d, 1, H, 1);
-    let mut model = ModelConfigExt::init(&cfg, device);
-    let MambaLatentNet::Mamba3(net) = &mut model else {
-        unreachable!("reset-quintic configures the Mamba-3 family")
-    };
+    let mut net = ModelConfigExt::init(&cfg, device);
     let embed = embeddings(d);
 
     let layer = &mut net.layers.real_layers[0];
     layer.norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([d]), device));
-    let block = &mut layer.block;
+    let MambaBlock::Mamba3(block) = &mut layer.block else {
+        unreachable!("reset-quintic configures the Mamba-3 family")
+    };
 
     // values at (TURN_A = d, TURN_B = t, RESET)
     let mut channels: Vec<Channel> = Vec::new();
@@ -317,8 +316,8 @@ fn handmade_a5(device: &Device, rotation: RotationKind, head: Head) -> MambaLate
         .iter()
         .map(|&g| orbit_point(g)[..H].iter().map(|v| head_gain() * v).collect())
         .collect();
-    write_ends(net, &embed, &decoder, head, device);
-    model
+    write_ends(&mut net, &embed, &decoder, head, device);
+    net
 }
 
 /// The two-layer `S₅` stack, by hand (`Rotor4D`, `d_model = 3`, three heads).
@@ -356,10 +355,7 @@ fn handmade_s5(device: &Device, head: Head) -> MambaLatentNet {
     assert_eq!((d, nheads), (H, H), "one head per readout, per_head_dim = 1");
     let rotation = RotationKind::Rotor4D;
     let cfg = model_config_with(group, rotation, 2, d, 1, H, 1);
-    let mut model = ModelConfigExt::init(&cfg, device);
-    let MambaLatentNet::Mamba3(net) = &mut model else {
-        unreachable!("reset-quintic configures the Mamba-3 family")
-    };
+    let mut net = ModelConfigExt::init(&cfg, device);
     let pi = std::f64::consts::PI;
     let half_turn = [pi, 0.0, 0.0];
     let r3 = 3f64.sqrt();
@@ -377,7 +373,9 @@ fn handmade_s5(device: &Device, head: Head) -> MambaLatentNet {
     {
         let layer = &mut net.layers.real_layers[0];
         layer.norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([d]), device));
-        let block = &mut layer.block;
+        let MambaBlock::Mamba3(block) = &mut layer.block else {
+            unreachable!("reset-quintic configures the Mamba-3 family")
+        };
         // values at (s, c, R, off-plane)
         let v = |s: f64, c: f64, r: f64| -> Channel { vec![s, c, r, 0.0] };
         let mut channels: Vec<Channel> = Vec::new();
@@ -410,7 +408,9 @@ fn handmade_s5(device: &Device, head: Head) -> MambaLatentNet {
     {
         let layer = &mut net.layers.real_layers[1];
         layer.norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([d]), device));
-        let block = &mut layer.block;
+        let MambaBlock::Mamba3(block) = &mut layer.block else {
+            unreachable!("reset-quintic configures the Mamba-3 family")
+        };
         let mut channels: Vec<Channel> = Vec::new();
         channels.extend((0..H).map(|_| vec![Z_ON; 4])); // z
         channels.extend((0..H).map(|_| vec![0.0, 0.0, 0.0, X_WRITE])); // x — only R writes
@@ -448,8 +448,8 @@ fn handmade_s5(device: &Device, head: Head) -> MambaLatentNet {
             vec![o[0], o[1], sign * REF_POINT[2]].iter().map(|v| head_gain() * v).collect()
         })
         .collect();
-    write_ends(net, &embed, &decoder, head, device);
-    model
+    write_ends(&mut net, &embed, &decoder, head, device);
+    net
 }
 
 // ---------------------------------------------------------------------------
@@ -902,15 +902,14 @@ fn learned_rotations() {
     let device = test_device();
     let cfg: MambaLatentNetConfig =
         crate::common::cli::load_model_config(&dir.join("model_config.json")).unwrap();
-    let model: MambaLatentNet = crate::common::cli::load_model(&dir, &cfg, &device).unwrap();
-    let MambaLatentNet::Mamba3(net) = &model else {
-        unreachable!("reset-quintic configures the Mamba-3 family")
-    };
+    let net: MambaLatentNet = crate::common::cli::load_model(&dir, &cfg, &device).unwrap();
     let to_vec = |t: Tensor<1>| -> Vec<f64> {
         t.into_data().try_into_vec_as::<f32>().unwrap().iter().map(|&v| f64::from(v)).collect()
     };
     let layer = &net.layers.real_layers[0];
-    let block = &layer.block;
+    let MambaBlock::Mamba3(block) = &layer.block else {
+        unreachable!("reset-quintic configures the Mamba-3 family")
+    };
     let [d, n_ch] = block.in_proj.weight.dims();
     let nheads = block.d_h.dims()[0];
     let w = to_vec(block.in_proj.weight.val().reshape([d * n_ch]));

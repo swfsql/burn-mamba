@@ -189,7 +189,7 @@ pub fn generate(
     // Decode: one `step` per character, against that same cache. After the
     // first few steps, it replays one recording, unless `--eager` is
     // set (or a class latent is still to come).
-    let capture = model.only_start_latents() && run.capture;
+    let capture = model.layers.only_start_latents() && run.capture;
     // Safety: the step reads only its arguments and `model`, which it borrows
     // for the whole call.
     unsafe {
@@ -235,7 +235,7 @@ fn open(
         Some(tokens) => {
             // In windows after the latents, when they are all `Start`s.
             let prefilled = match prefill {
-                Some(prefill) if model.only_start_latents() => prefill.run(tokens, || {
+                Some(prefill) if model.layers.only_start_latents() => prefill.run(tokens, || {
                     let mut class = ClassCursors::stream();
                     let (_, caches) = model.prime(1, None, Some(&mut class));
                     caches.map(|caches| (caches, class))

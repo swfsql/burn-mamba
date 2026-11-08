@@ -66,14 +66,16 @@ pub fn train(
     let layout = match config.pack {
         None => PackLayout::default(),
         Some(_) => {
-            let chunk =
-                model.0.pack_align(&model.1.ssd_path).expect("this family takes no packed rows");
+            let ssd_path = &model.1.ssd_path;
+            let chunk = model.0.layers.real_layers[0].block.reset_align(ssd_path).unwrap_or_else(|| {
+                panic!("Mamba-1 and a Minimal SSD path take no packed rows: the SSD path is {ssd_path:?}")
+            });
             let align = model.1.pack_align.unwrap_or(chunk);
             assert!(
                 align.is_multiple_of(chunk),
                 "--pack-align {align} is not a multiple of the chunk length ({chunk} tokens)"
             );
-            PackLayout { align, lead: model.0.n_class_latents() }
+            PackLayout { align, lead: model.0.layers.class_latents.len() }
         }
     };
     let (dataloader_train, dataloader_valid) =

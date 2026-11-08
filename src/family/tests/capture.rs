@@ -98,14 +98,22 @@ mod mamba3 {
             assert_fields(&format!("{label} owned"), &owned, &first);
             let assigned = owned.assign_in_place(second.clone());
             assert_fields(&format!("{label} assigned"), &assigned, &second);
-            // The slotted form: the same through `Mamba3Caches` and the enum.
-            let stack = |c: Mamba3Cache| MambaCaches::Mamba3(Mamba3Caches::from_vec(vec![c]));
+            // The slotted form: the same through `Mamba3Caches`.
+            let stack = |c: Mamba3Cache| Mamba3Caches::from_vec(vec![c]);
             let assigned = stack(first.clone())
                 .into_owned_buffers()
                 .assign_in_place(stack(second.clone()));
-            let MambaCaches::Mamba3(assigned) = assigned else { unreachable!() };
             let assigned = assigned.into_options().pop().flatten().unwrap();
             assert_fields(&format!("{label} stacked"), &assigned, &second);
+            // The same through the flat caches of the enum.
+            let flat = |c: Mamba3Cache| MambaCaches::from_slots(vec![Some(MambaCache::Mamba3(c))]);
+            let assigned = flat(first.clone())
+                .into_owned_buffers()
+                .assign_in_place(flat(second.clone()));
+            let [Some(MambaCache::Mamba3(assigned))] = assigned.slots.as_slice() else {
+                panic!("the flat caches must hold one slot of the Mamba-3 family");
+            };
+            assert_fields(&format!("{label} flat"), assigned, &second);
         }
     }
 

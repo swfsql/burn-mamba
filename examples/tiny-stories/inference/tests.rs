@@ -45,11 +45,8 @@ fn assert_close(got: Tensor<2>, want: Tensor<2>, tol: f32, what: &str) {
 /// `net` with other values in its class latents.
 fn shifted_latents(net: &MambaVocabNet) -> MambaVocabNet {
     let mut shifted = net.clone();
-    let MambaVocabNet::Mamba3(inner) = &mut shifted else {
-        panic!("a Mamba-3 network")
-    };
-    let latents = inner.layers.class_latents_emb.take().expect("class latents");
-    inner.layers.class_latents_emb = Some(latents.map(|t| t + 1.0));
+    let latents = shifted.layers.class_latents_emb.take().expect("class latents");
+    shifted.layers.class_latents_emb = Some(latents.map(|t| t + 1.0));
     shifted
 }
 
@@ -173,7 +170,7 @@ fn the_latents_run_before_the_prompt() {
     let net = tiny_net(&device);
     let shifted = shifted_latents(&net);
     let run = eager_run(None);
-    assert!(net.only_start_latents(), "the prefill path needs Start latents only");
+    assert!(net.layers.only_start_latents(), "the prefill path needs Start latents only");
     // One prefill across the prompts, as `infer` holds it.
     let mut windowed = prefill(&net, &run, &device);
     // A cased token: every fourth letter is upper case.

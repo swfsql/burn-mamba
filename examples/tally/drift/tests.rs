@@ -74,10 +74,7 @@ enum Arm {
 
 fn handmade(device: &Device, arm: Arm) -> MambaLatentNet {
     let cfg = model_config(true);
-    let mut model = crate::common::model::ModelConfigExt::init(&cfg, device);
-    let MambaLatentNet::Mamba3(net) = &mut model else {
-        unreachable!("tally-drift configures the Mamba-3 family")
-    };
+    let mut net = crate::common::model::ModelConfigExt::init(&cfg, device);
     let embeddings = embeddings();
     let values: Vec<f64> = (0..NUM_SYMBOLS).map(|s| value(s).unwrap_or(0.0)).collect();
     let per_symbol = |f: &dyn Fn(usize) -> f64| (0..NUM_SYMBOLS).map(f).collect::<Vec<f64>>();
@@ -87,7 +84,9 @@ fn handmade(device: &Device, arm: Arm) -> MambaLatentNet {
 
     let layer = &mut net.layers.real_layers[0];
     layer.norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([3]), device));
-    let block = &mut layer.block;
+    let MambaBlock::Mamba3(block) = &mut layer.block else {
+        unreachable!("tally-drift configures the Mamba-3 family")
+    };
 
     // Channel order: `[z(3) | x(3) | B(1) | C(1) | Δ(3) | A(3) | r(3)]`. The
     // last three are the projected noise of the Kalman gain.
@@ -173,7 +172,7 @@ fn handmade(device: &Device, arm: Arm) -> MambaLatentNet {
         device,
     );
     net.out_proj.bias = Some(param(&[0.0; NUM_CLASSES], [NUM_CLASSES], device));
-    model
+    net
 }
 
 fn worst_family(model: &MambaLatentNet, count: usize, device: &Device) -> (f64, Vec<f64>) {

@@ -114,10 +114,7 @@ const EMBED: [[f64; 2]; NUM_SYMBOLS] = [
 /// vote-to-reference ratio.
 fn handmade(device: &Device, selective: bool, alpha: f64, gain: f64) -> MambaLatentNet {
     let cfg = crate::model::model_config();
-    let mut model = ModelConfigExt::init(&cfg, device);
-    let MambaLatentNet::Mamba3(net) = &mut model else {
-        unreachable!("reset-majority configures the Mamba-3 family")
-    };
+    let mut net = ModelConfigExt::init(&cfg, device);
 
     // ── network in_proj: one-hot → the symbol embedding ──────────────────────
     net.in_proj.weight = Param::from_tensor(t1(&EMBED.concat(), [NUM_SYMBOLS, 2], device));
@@ -125,7 +122,9 @@ fn handmade(device: &Device, selective: bool, alpha: f64, gain: f64) -> MambaLat
 
     let layer = &mut net.layers.real_layers[0];
     layer.norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([2]), device));
-    let block = &mut layer.block;
+    let MambaBlock::Mamba3(block) = &mut layer.block else {
+        unreachable!("reset-majority configures the Mamba-3 family")
+    };
 
     // ── block in_proj: one affine functional per channel ─────────────────────
     // The channel order is `[z(2) | x(2) | B(1) | C(1) | Δ(2) | A(2)]`. There is
@@ -201,7 +200,7 @@ fn handmade(device: &Device, selective: bool, alpha: f64, gain: f64) -> MambaLat
         device,
     )));
 
-    model
+    net
 }
 
 // ---------------------------------------------------------------------------

@@ -11,23 +11,7 @@
 //! the Mamba-3 tap slots come back from `step` as `narrow`s of its own
 //! tensors.
 
-use burn::prelude::*;
 use burn_stack::modules::{CacheTensors, TensorZip};
-
-impl CacheTensors for super::MambaCaches {
-    fn zip_tensors(self, other: Self, z: &mut impl TensorZip) -> Self {
-        match (self, other) {
-            #[cfg(feature = "mamba1")]
-            (Self::Mamba1(a), Self::Mamba1(b)) => Self::Mamba1(a.zip_tensors(b, z)),
-            #[cfg(feature = "mamba2")]
-            (Self::Mamba2(a), Self::Mamba2(b)) => Self::Mamba2(a.zip_tensors(b, z)),
-            #[cfg(feature = "mamba3")]
-            (Self::Mamba3(a), Self::Mamba3(b)) => Self::Mamba3(a.zip_tensors(b, z)),
-            #[allow(unreachable_patterns)]
-            _ => panic!("the two caches differ in family"),
-        }
-    }
-}
 
 #[cfg(feature = "mamba1")]
 mod impl_mamba1 {
@@ -78,6 +62,7 @@ mod impl_mamba2 {
 #[cfg(feature = "mamba3")]
 mod impl_mamba3 {
     use super::*;
+    use burn::prelude::*;
     use crate::mamba3::double_ssd::prelude::{Mamba3DoubleSsdCache, Mamba3DoubleSsdCaches};
     use crate::mamba3::prelude::{Mamba3Cache, Mamba3Caches, RotationState};
     use crate::mamba3::single_ssd::prelude::{Mamba3SingleSsdCache, Mamba3SingleSsdCaches};

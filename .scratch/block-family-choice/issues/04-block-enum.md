@@ -1,6 +1,6 @@
 # 04: `MambaBlock`, the one run-time family choice
 
-Status: ready-for-agent
+Status: resolved
 
 Blocked by: `03-family-reset-alignments.md`
 
@@ -77,3 +77,13 @@ The implementation of ticket 02 found this:
 - `init` and `muon_plan` stay inherent methods, and the `ModelConfigExt` impls
   forward to them. The prelude of burn-stack does not export the trait, and each
   `.init(&device)` of the tests and examples needs one of the two.
+
+The review of ticket 03 found a gap, and this ticket closes it:
+
+- `reset_align` of Mamba-2 and Mamba-3 must give `None` for a `Minimal` path. A
+  packed forward on `Minimal` panics, and `None` means that the block takes no
+  packed rows.
+- Add a `Minimal` case for each of the two families to
+  `src/family/tests/reset_align.rs`.
+- The caller at `examples/tiny-stories/training.rs:70` then also gets `None` for
+  `Minimal`. Its `expect` text must name the family and the SSD path.

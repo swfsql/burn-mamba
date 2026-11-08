@@ -211,10 +211,7 @@ enum Head {
 /// tells why the abelian twin gets a different (and better) one.
 fn handmade(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentNet {
     let cfg = crate::model::model_config(rotation);
-    let mut model = ModelConfigExt::init(&cfg, device);
-    let MambaLatentNet::Mamba3(net) = &mut model else {
-        unreachable!("reset-spinor configures the Mamba-3 family")
-    };
+    let mut net = ModelConfigExt::init(&cfg, device);
 
     // ── network in_proj: one-hot → the symbol embedding ──────────────────────
     net.in_proj.weight = Param::from_tensor(t1(&EMBED.concat(), [NUM_SYMBOLS, D_MODEL], device));
@@ -225,7 +222,9 @@ fn handmade(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentN
 
     let layer = &mut net.layers.real_layers[0];
     layer.norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([D_MODEL]), device));
-    let block = &mut layer.block;
+    let MambaBlock::Mamba3(block) = &mut layer.block else {
+        unreachable!("reset-spinor configures the Mamba-3 family")
+    };
 
     // ── block in_proj: one affine functional per channel ─────────────────────
     // Channel order: [z(2) | x(2) | B_raw(4) | C_raw(4) | Δ(2) | A(2) | ϑ(2, 6 or 12)].
@@ -358,7 +357,7 @@ fn handmade(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentN
         device,
     )));
 
-    model
+    net
 }
 
 /// The four `C` channels, carrying the identity quaternion `(1, 0, 0, 0)` for

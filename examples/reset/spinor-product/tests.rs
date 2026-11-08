@@ -356,12 +356,8 @@ fn handmade(device: &Device, micro_steps: usize, head: Head, gen_scale: f64) -> 
         unreachable!("spinor-product configures the Mamba-3 family")
     };
     let mamba_block = mamba_block.clone();
-    let mut model = ModelConfigExt::init(&cfg, device);
+    let mut net = ModelConfigExt::init(&cfg, device);
     {
-        let MambaLatentNet::Mamba3(net) = &mut model else {
-            unreachable!("spinor-product configures the Mamba-3 family")
-        };
-
         // ── network in_proj: two one-hot slots → the token embedding ─────────
         net.in_proj.weight = Param::from_tensor(embedding(device));
         net.in_proj.bias = Some(Param::from_tensor(Tensor::zeros(
@@ -371,7 +367,9 @@ fn handmade(device: &Device, micro_steps: usize, head: Head, gen_scale: f64) -> 
 
         let layer = &mut net.layers.real_layers[0];
         layer.norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([D_MODEL]), device));
-        let block = &mut layer.block;
+        let MambaBlock::Mamba3(block) = &mut layer.block else {
+            unreachable!("spinor-product configures the Mamba-3 family")
+        };
 
         // ── block in_proj: one affine functional per channel ─────────────────
         // Channel order: [z | x·u | B·u | C | Δ·u | A·u | λ·u | ϑ·u], with the
@@ -404,18 +402,17 @@ fn handmade(device: &Device, micro_steps: usize, head: Head, gen_scale: f64) -> 
         block.in_proj.weight = Param::from_tensor(t1(&w, [D_MODEL, n_ch], device));
         block.in_proj.bias = Some(Param::from_tensor(t1(&bias, [n_ch], device)));
     }
-    finish(&mut model, head, device);
-    model
+    finish(&mut net, head, device);
+    net
 }
 
 /// Everything in the construction that does not depend on how a token is
 /// encoded: the per-head Δ/`D`/QK-norm weights, the readout selector and the
 /// class head. Shared by [`handmade`] and [`handmade_composed`].
-fn finish(model: &mut MambaLatentNet, head: Head, device: &Device) {
-    let MambaLatentNet::Mamba3(net) = model else {
+fn finish(net: &mut MambaLatentNet, head: Head, device: &Device) {
+    let MambaBlock::Mamba3(block) = &mut net.layers.real_layers.last_mut().expect("one layer").block else {
         unreachable!("spinor-product configures the Mamba-3 family")
     };
-    let block = &mut net.layers.real_layers.last_mut().expect("one layer").block;
 
     // ── Δ bias, D, QK-norm scales, B/C biases ────────────────────────────────
     // Δ and A are entirely data-dependent here, so the bias is zero.
@@ -1084,12 +1081,8 @@ fn handmade_composed(device: &Device, head: Head) -> MambaLatentNet {
         unreachable!("spinor-product configures the Mamba-3 family")
     };
     let mamba_block = mamba_block.clone();
-    let mut model = ModelConfigExt::init(&cfg, device);
+    let mut net = ModelConfigExt::init(&cfg, device);
     {
-        let MambaLatentNet::Mamba3(net) = &mut model else {
-            unreachable!("spinor-product configures the Mamba-3 family")
-        };
-
         // ── network in_proj: the feature, verbatim ───────────────────────────
         let mut w = vec![0.0f64; INPUT_SIZE * D_MODEL];
         for d in 0..D_MODEL {
@@ -1103,7 +1096,9 @@ fn handmade_composed(device: &Device, head: Head) -> MambaLatentNet {
 
         let layer = &mut net.layers.real_layers[0];
         layer.norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([D_MODEL]), device));
-        let block = &mut layer.block;
+        let MambaBlock::Mamba3(block) = &mut layer.block else {
+            unreachable!("spinor-product configures the Mamba-3 family")
+        };
 
         // ── block in_proj: one affine functional per channel ─────────────────
         let channels = channels_composed();
@@ -1129,8 +1124,8 @@ fn handmade_composed(device: &Device, head: Head) -> MambaLatentNet {
         block.in_proj.weight = Param::from_tensor(t1(&w, [D_MODEL, n_ch], device));
         block.in_proj.bias = Some(Param::from_tensor(t1(&bias, [n_ch], device)));
     }
-    finish(&mut model, head, device);
-    model
+    finish(&mut net, head, device);
+    net
 }
 
 /// The `u = 1` block solves the task **exactly** when its input names the

@@ -4,15 +4,22 @@
 //! cache it reads is not fresh — and a row with no real token at all must hand
 //! that cache back untouched.
 
+#[cfg(feature = "mamba1")]
 use crate::mamba1::prelude::*;
+#[cfg(feature = "mamba2")]
 use crate::mamba2::prelude::*;
+#[cfg(feature = "mamba3")]
 use crate::mamba3::double_ssd::prelude::Mamba3DoubleSsdCache;
+#[cfg(feature = "mamba3")]
 use crate::mamba3::prelude::*;
+#[cfg(feature = "mamba3")]
 use crate::mamba3::single_ssd::prelude::Mamba3SingleSsdCache;
 use burn::module::{ModuleVisitor, Param};
 use burn::prelude::*;
 use burn::tensor::{Distribution, Gradients};
+#[cfg(feature = "mamba3")]
 use burn_stack::modules::{LatentNetworkBuilder, LayersBuilder};
+#[cfg(feature = "mamba3")]
 use burn_stack::utils::ClassLatent;
 use burn_stack::utils::test_helpers::{dtype_tol, max_abs_diff};
 use burn_stack::utils::test_helpers::test_device;
@@ -146,6 +153,7 @@ fn check_each_row_alone<C, M: Module>(
     );
 }
 
+#[cfg(feature = "mamba1")]
 #[test]
 fn padded_mamba1_is_each_row_alone() {
     let device = test_device().autodiff();
@@ -160,6 +168,7 @@ fn padded_mamba1_is_each_row_alone() {
     );
 }
 
+#[cfg(feature = "mamba2")]
 #[test]
 fn padded_mamba2_is_each_row_alone() {
     let device = test_device().autodiff();
@@ -178,6 +187,7 @@ fn padded_mamba2_is_each_row_alone() {
 
 /// Every Mamba-3 cache field, whichever pathway it comes from (the two are
 /// field-identical).
+#[cfg(feature = "mamba3")]
 macro_rules! mamba3_fields {
     ($c:expr) => {{
         let c = $c;
@@ -197,6 +207,7 @@ macro_rules! mamba3_fields {
     }};
 }
 
+#[cfg(feature = "mamba3")]
 fn mamba3(
     rotation: RotationKind,
     tap_pattern: TapPattern,
@@ -221,6 +232,7 @@ fn mamba3(
 /// boundaries), every rotation kind,
 /// `u > 1`, MIMO, both positive systems, and chunks short enough that the real
 /// tokens span several.
+#[cfg(feature = "mamba3")]
 #[test]
 fn padded_mamba3_is_each_row_alone() {
     use {Gain as G, RotationKind as R, TapPattern as T, Tropical as Tr};
@@ -257,6 +269,7 @@ fn padded_mamba3_is_each_row_alone() {
 /// real block, run on each row's positions gathered into that row's order,
 /// sees the `End` right after the row's own last token — its tap reading that
 /// token, not the padding the batch-wide `End` follows.
+#[cfg(feature = "mamba3")]
 #[test]
 fn padded_mamba3_network_closes_each_row_at_its_own_end() {
     let device = test_device().autodiff();

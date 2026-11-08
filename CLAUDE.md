@@ -235,9 +235,10 @@ src/
 │  ├─ product/           MambaProduct (micro-steps)
 │  ├─ positive/          positive systems: `scan.rs`, `kalman.rs` (gain), `tropical.rs`
 │  └─ quat_scan/         quaternion cumulative product, recompute backward
-└─ family/               runtime-selectable enums
+└─ family/               the run-time family choice (ADR-0009)
    ├─ mod.rs             `MambaSsdPath`, why the MIMO tensors are not Muon matrices
-   ├─ adapters.rs        `MambaCaches`, `impl Block`/`BlockConfig`/`CacheStack`
+   ├─ block.rs           `MambaBlock`, `MambaCache`, `MambaCaches`, the network aliases
+   ├─ adapters.rs        `impl Block`/`BlockConfig`/`CacheStack` of each family
    ├─ config.rs          `MambaBlockConfig`, the `{ shape, block }` configs
    ├─ capture.rs         `CacheTensors` of each family (captured steps)
    └─ tests/             the burn-stack containers with real blocks

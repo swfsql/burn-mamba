@@ -161,7 +161,8 @@ fn main() {
 `Mamba1` and `Mamba3` have the same API (`Mamba1::forward` has no SSD-path
 argument). The generic containers of `burn-stack` (`Layer<M>`, `Layers<M>`,
 `LatentNetwork<M>`, `VocabNetwork<M>`, `BidiLayers<M>`) compose any of them.
-The runtime-selectable `MambaLatentNet`, `MambaVocabNet` and `MambaBidiLayers`
+`MambaBlock` is one enum over the three blocks, and `MambaLatentNet`,
+`MambaVocabNet` and `MambaBidiLayers` are those containers over it. So they
 select the family at run time. See the [examples](#examples) for complete
 training and inference programs.
 

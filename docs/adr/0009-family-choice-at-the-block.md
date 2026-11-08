@@ -1,7 +1,5 @@
 # All three families stay selectable, and the choice sits at the block
 
-The code follows this decision in `.scratch/block-family-choice/issues/04-block-enum.md`.
-
 Third-party projects select Mamba-1 and Mamba-2 at run time, although the
 examples of this repo use only Mamba-3. So all three families stay equally
 selectable, and low use in this repo is no reason to cut one. The run-time
@@ -30,5 +28,8 @@ bidirectional stack or an H-Net varies per family.
   panics at a `step` with no cache, because the first block sizes each zero
   cache.
 - The stages of an H-Net hold one family, and its main stack can hold another.
+  `init` does not check this. `forward` panics on mixed stages, because `Options`
+  is one value for all stages. `step` and `prime` take no `Options`, and each
+  stage sizes its own zero caches. So they do not enforce the rule.
 - `MambaCaches` is a flat list of slots, and each slot has its family tag. So
   `CacheStack::from_slots` guesses nothing.

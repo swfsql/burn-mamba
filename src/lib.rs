@@ -27,7 +27,8 @@
 //! [`Layers`](burn_stack::modules::Layers) stack, bidirectional pairs,
 //! latent/vocab networks, multi-gate residuals, class tokens, LR and
 //! virtual-layer schedules, and the Muon parameter groups. The [`family`]
-//! module holds the enums that select a family at run time.
+//! module holds `MambaBlock`, one enum over the three blocks, which selects a
+//! family at run time.
 //!
 //! ## Two execution modes
 //!
@@ -77,11 +78,11 @@ pub mod prelude {
     // The run-time family choice (this crate).
     #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
     pub use crate::family::{
-        MambaBidiLayers, MambaBidiLayersConfig, MambaBlockConfig, MambaHNetCaches,
-        MambaHNetVocabNet, MambaHNetVocabNetConfig, MambaLatentNet, MambaLatentNetConfig,
-        MambaVocabNet, MambaVocabNetConfig,
+        MambaBidiLayers, MambaBidiLayersConfig, MambaBlock, MambaBlockConfig, MambaCache,
+        MambaCaches, MambaHNetVocabNet, MambaHNetVocabNetConfig, MambaLatentNet,
+        MambaLatentNetConfig, MambaVocabNet, MambaVocabNetConfig,
     };
-    pub use crate::family::{MambaCaches, MambaSsdPath};
+    pub use crate::family::MambaSsdPath;
 
     // The block-generic composition layer (`burn-stack`).
     pub use burn_stack::modules::{BidiShape, LatentShape, NetworkShape, VocabShape};

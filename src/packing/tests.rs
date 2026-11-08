@@ -23,9 +23,13 @@
 //! - A scan over a packed row runs more rounds than a scan over one sequence.
 //! - The quaternion rotation divides out the rotation at each segment start.
 
+#[cfg(feature = "mamba2")]
 use crate::mamba2::prelude::*;
+#[cfg(feature = "mamba3")]
 use crate::mamba3::double_ssd::prelude::Mamba3DoubleSsdCache;
+#[cfg(feature = "mamba3")]
 use crate::mamba3::prelude::*;
+#[cfg(feature = "mamba3")]
 use crate::mamba3::single_ssd::prelude::Mamba3SingleSsdCache;
 use burn::module::{ModuleVisitor, Param};
 use burn::prelude::*;
@@ -56,7 +60,9 @@ type Schedule = (usize, Option<usize>);
 
 /// A Mamba-2 conv tap reads `conv_kernel − 1 = 3` positions back, so its chunks
 /// hold at least 3 tokens.
+#[cfg(feature = "mamba2")]
 const MAMBA2_SCHEDULES: [Schedule; 4] = [(3, Some(6)), (4, Some(6)), (3, Some(5)), (4, None)];
+#[cfg(feature = "mamba3")]
 const MAMBA3_SCHEDULES: [Schedule; 4] = [(2, Some(6)), (3, Some(6)), (3, Some(5)), (2, None)];
 
 // ---------------------------------------------------------------------------
@@ -201,6 +207,7 @@ trait TestCache: Clone {
     fn visit(&self, v: &mut impl FieldVisit);
 }
 
+#[cfg(feature = "mamba2")]
 impl TestCache for Mamba2Cache {
     fn map(self, f: &impl FieldMap) -> Self {
         Mamba2Cache {
@@ -216,6 +223,7 @@ impl TestCache for Mamba2Cache {
 }
 
 /// The two Mamba-3 caches have the same fields.
+#[cfg(feature = "mamba3")]
 macro_rules! impl_mamba3_cache {
     ($cache:ty) => {
         impl TestCache for $cache {
@@ -250,7 +258,9 @@ macro_rules! impl_mamba3_cache {
         }
     };
 }
+#[cfg(feature = "mamba3")]
 impl_mamba3_cache!(Mamba3DoubleSsdCache);
+#[cfg(feature = "mamba3")]
 impl_mamba3_cache!(Mamba3SingleSsdCache);
 
 /// A leaf that takes gradients: the origin cache of the test.
@@ -524,6 +534,7 @@ fn check_streams<C: TestCache, M: Module>(
     }
 }
 
+#[cfg(feature = "mamba2")]
 #[test]
 fn packed_mamba2_streams_are_the_batch_of_their_sequences() {
     let device = test_device().autodiff();
@@ -540,6 +551,7 @@ fn packed_mamba2_streams_are_the_batch_of_their_sequences() {
     }
 }
 
+#[cfg(feature = "mamba3")]
 fn mamba3(
     rotation: RotationKind,
     tap_pattern: TapPattern,
@@ -564,6 +576,7 @@ fn mamba3(
 /// - every tap pattern family (none, lag 1, lag `u`, two taps, a lag-1 tap that
 ///   closes at token boundaries),
 /// - every rotation kind, `u > 1`, MIMO, and both positive systems.
+#[cfg(feature = "mamba3")]
 #[test]
 fn packed_mamba3_streams_are_the_batch_of_their_sequences() {
     use {Gain as G, RotationKind as R, TapPattern as T, Tropical as Tr};
@@ -621,6 +634,7 @@ fn restart_heads_gradient_sums_over_the_chunks() {
 
 /// `Minimal` builds its inter-chunk decay as one `nchunks × nchunks` matrix
 /// and takes no resets.
+#[cfg(feature = "mamba2")]
 #[test]
 #[should_panic(expected = "Minimal does not take resets")]
 fn packed_minimal_panics() {
@@ -636,6 +650,7 @@ fn packed_minimal_panics() {
 
 /// A reset inside a chunk would need the masks of the official kernels inside
 /// the chunk. So the block refuses it.
+#[cfg(feature = "mamba2")]
 #[test]
 #[cfg(debug_assertions)]
 #[should_panic(expected = "a reset must be at the first token of a chunk")]
@@ -655,6 +670,7 @@ fn reset_inside_a_chunk_panics() {
 /// A Mamba-2 conv tap reads `conv_kernel − 1` positions back, and only the
 /// first chunk of a segment checks for a restart. So a packed call refuses a
 /// chunk that holds fewer positions.
+#[cfg(feature = "mamba2")]
 #[test]
 #[should_panic(expected = "a packed call needs chunk_len")]
 fn packed_mamba2_chunk_shorter_than_the_conv_panics() {
