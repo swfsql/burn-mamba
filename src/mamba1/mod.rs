@@ -8,7 +8,7 @@
 //!   the block carries between calls.
 //!
 //! The layers, the networks and the bidirectional stacks are the
-//! family-generic types in [`burn_stack::modules`]. [`crate::unified`] wraps
+//! family-generic types in [`burn_stack::modules`]. [`crate::family`] wraps
 //! them in runtime-selectable enums.
 
 pub mod cache;

@@ -26,7 +26,7 @@
 //! the Pre-LN [`Layer`](burn_stack::modules::Layer), the (virtual-)layer
 //! [`Layers`](burn_stack::modules::Layers) stack, bidirectional pairs,
 //! latent/vocab networks, multi-gate residuals, class tokens, LR and
-//! virtual-layer schedules, and the Muon parameter groups. The [`unified`]
+//! virtual-layer schedules, and the Muon parameter groups. The [`family`]
 //! module holds the enums that select a family at run time.
 //!
 //! ## Two execution modes
@@ -74,20 +74,20 @@ pub mod prelude {
     #[cfg(feature = "mamba3")]
     pub use crate::mamba3::{self, prelude::*};
 
-    // The runtime-selectable unified API (this crate).
+    // The run-time family choice (this crate).
     #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
-    pub use crate::unified::{
+    pub use crate::family::{
         MambaBidiLayers, MambaBidiLayersConfig, MambaBlockConfig, MambaHNetCaches,
         MambaHNetVocabNet, MambaHNetVocabNetConfig, MambaLatentNet, MambaLatentNetConfig,
         MambaVocabNet, MambaVocabNetConfig,
     };
-    pub use crate::unified::{MambaCaches, MambaSsdPath};
+    pub use crate::family::{MambaCaches, MambaSsdPath};
 
     // The block-generic composition layer (`burn-stack`).
     pub use burn_stack::prelude::*;
 }
 
-pub mod unified;
+pub mod family;
 
 pub mod packing;
 mod padding;

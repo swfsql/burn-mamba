@@ -1,4 +1,4 @@
-//! Tests for the unified enums, and for the block-generic `burn_stack`
+//! Tests for the family enums, and for the block-generic `burn_stack`
 //! containers as exercised through the Mamba families.
 //!
 //! The containers themselves live in `burn-stack` and are tested there against

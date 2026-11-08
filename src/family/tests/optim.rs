@@ -240,7 +240,7 @@ fn mamba1_plan_fits_the_model() {
 #[cfg(feature = "mamba3")]
 #[test]
 fn bidi_plan_fits_the_model() {
-    use crate::unified::MambaBidiLayersConfig;
+    use crate::family::MambaBidiLayersConfig;
     use burn_stack::modules::bidi::OutputMergeConfig;
     use crate::prelude::*;
     let device = test_device();

@@ -1,4 +1,4 @@
-//! # The unified, runtime-selectable API
+//! # The run-time family choice
 //!
 //! [`burn_stack`] composes any [`Block`](burn_stack::modules::Block) into
 //! layers and networks, but `M` is fixed at the type level. This module lets a
@@ -10,7 +10,7 @@
 //!
 //! This is also where the three families meet the generic stack: the
 //! `impl Block for Mamba{1,2,3}`, `impl BlockConfig for Mamba{1,2,3}Config` and
-//! `impl CacheStack for Mamba{1,2,3}Caches` blocks are in [`cache`].
+//! `impl CacheStack for Mamba{1,2,3}Caches` blocks are in [`adapters`].
 //!
 //! ## Muon: why the 3-D tensors are not "stacked matrices"
 //!
@@ -51,7 +51,7 @@
 
 /// A runtime-tagged cache collection + the per-family `Block` / `BlockConfig` /
 /// `CacheStack` impls.
-pub mod cache;
+pub mod adapters;
 /// Each family's `CacheTensors` traversal: a captured `step` writing its new
 /// cache in place.
 pub mod capture;
@@ -66,7 +66,7 @@ pub mod bidi;
 #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
 pub mod hnet;
 
-pub use cache::MambaCaches;
+pub use adapters::MambaCaches;
 #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
 pub use bidi::{MambaBidiLayers, MambaBidiLayersConfig};
 #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
@@ -77,7 +77,7 @@ pub use network::{MambaLatentNet, MambaLatentNetConfig, MambaVocabNet, MambaVoca
 #[cfg(all(test, feature = "_dev-test"))]
 mod tests;
 
-/// An explicit, family-tagged SSD-path selector for the unified API.
+/// An explicit, family-tagged SSD-path selector.
 ///
 /// Each variant carries the concrete per-family path, so callers can choose
 /// the SSD path and the chunk length explicitly. The `*_default`

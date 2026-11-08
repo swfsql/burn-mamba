@@ -6,7 +6,7 @@
 //! takes another family `M` (`HNetVocabNetwork<E, M>`). This module wraps each
 //! enabled pair `(E, M)` of Mamba families in one enum variant. So a caller
 //! can choose both at runtime and serialize the choice. A cache or an SSD path
-//! of the wrong family panics, as in the other enums of [`crate::unified`].
+//! of the wrong family panics, as in the other enums of [`crate::family`].
 
 use crate::prelude::*;
 use burn::config::Config;

@@ -1,9 +1,9 @@
 //! Smoke / parity tests for the family-generic abstraction in
-//! [`burn_stack::modules`] — builder wiring, the unifying enums, and the
+//! [`burn_stack::modules`] — builder wiring, the family enums, and the
 //! class-token / class-latent insertion + step-injection machinery.
 
 use crate::prelude::*;
-use crate::unified::{bidi::*, network::*};
+use crate::family::{bidi::*, network::*};
 use burn::prelude::*;
 use burn_stack::modules::*;
 use burn_stack::utils::class::{class_marker_output_indices, class_prime_plan, class_window_plan};
@@ -260,7 +260,7 @@ fn bidi_layers_mamba1() {
     assert_eq!([2, 5, 16], y.dims());
 }
 
-// --- unifying MambaBidiLayers enum ----------------------------------
+// --- MambaBidiLayers enum -------------------------------------------
 
 #[cfg(feature = "mamba2")]
 #[test]
@@ -773,7 +773,7 @@ fn prime_on_a_network_covers_every_class_level() {
 }
 
 // The runtime enums prime as well, threading the tagged caches straight into
-// the `step` that follows — the seedless loop over the unified API. The vocab
+// the `step` that follows — the seedless loop over the family enums. The vocab
 // LM runs the primed latent through `norm_f` and the head, so what comes back
 // is logits to sample the first token from.
 #[cfg(feature = "mamba2")]

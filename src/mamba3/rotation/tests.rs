@@ -1565,7 +1565,7 @@ fn quaternion_bidi_forward_runs() {
     use crate::mamba3::mamba3::Mamba3Config;
     use crate::mamba3::ssd_path::Mamba3SsdPath;
     use burn_stack::modules::bidi::OutputMergeConfig;
-    use crate::unified::{MambaBidiLayersConfig, MambaSsdPath};
+    use crate::family::{MambaBidiLayersConfig, MambaSsdPath};
     let device = test_device();
     let block = Mamba3Config::new(32)
         .with_state_rank(16)

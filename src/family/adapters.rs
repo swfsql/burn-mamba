@@ -13,7 +13,7 @@ use burn_stack::modules::{Block, BlockConfig, CacheStack, lift};
 use burn_stack::utils::UntiedParam;
 
 /// Runtime-tagged caches: one variant per family, matching
-/// [`MambaLatentNet`](crate::unified::MambaLatentNet).
+/// [`MambaLatentNet`](crate::family::MambaLatentNet).
 ///
 /// This is plain runtime state (not a `Module`): `forward`/`step` take and
 /// return caches, and nothing records or optimises them. (`Mamba3Caches` is

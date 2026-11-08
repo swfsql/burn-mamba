@@ -13,7 +13,7 @@
 //! after each one.
 
 use crate::prelude::*;
-use crate::unified::network::*;
+use crate::family::network::*;
 use burn::module::{ModuleVisitor, Param};
 use burn::prelude::*;
 use burn::tensor::{Distribution, Gradients};

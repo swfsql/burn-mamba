@@ -114,11 +114,11 @@ adds:
 ##### Model Definition
 
 Most examples use the lib-generic `MambaLatentNet` (configured by
-`MambaLatentNetConfig`, in `src/unified/network.rs`). It is a continuous-I/O
+`MambaLatentNetConfig`, in `src/family/network.rs`). It is a continuous-I/O
 network: input and output projections (linear layers) around a generic
 `Layers<M>` stack, where `M` is the block (`Mamba1`/`Mamba2`/`Mamba3`). The
 token-based example (`tiny-stories`) uses `MambaVocabNet` (embedding →
-`Layers<M>` → LM head). `src/unified/network.rs` implements `ModelConfigExt`
+`Layers<M>` → LM head). `src/family/network.rs` implements `ModelConfigExt`
 (config enum → `Module`, plus the Muon plan) on those configs. Examples do not
 define their own network types.
 
