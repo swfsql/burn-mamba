@@ -217,224 +217,232 @@
 <a href=#217 id=217 data-nosnippet>217</a>        ) -&gt; (Tensor&lt;<span class="number">3</span>&gt;, Mamba2Cache) {
 <a href=#218 id=218 data-nosnippet>218</a>            <span class="self">self</span>.forward_packed(x, cache, <span class="prelude-val">None</span>, options, <span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(reset))
 <a href=#219 id=219 data-nosnippet>219</a>        }
-<a href=#220 id=220 data-nosnippet>220</a>        <span class="kw">fn </span>block_step(<span class="kw-2">&amp;</span><span class="self">self</span>, x: Tensor&lt;<span class="number">2</span>&gt;, cache: <span class="prelude-ty">Option</span>&lt;Mamba2Cache&gt;) -&gt; (Tensor&lt;<span class="number">2</span>&gt;, Mamba2Cache) {
-<a href=#221 id=221 data-nosnippet>221</a>            <span class="self">self</span>.step(x, cache)
-<a href=#222 id=222 data-nosnippet>222</a>        }
-<a href=#223 id=223 data-nosnippet>223</a>        <span class="kw">fn </span>zero_caches_3d(<span class="kw-2">&amp;</span><span class="self">self</span>, x: <span class="kw-2">&amp;</span>Tensor&lt;<span class="number">3</span>&gt;, n_virtual: usize) -&gt; Mamba2Caches {
-<a href=#224 id=224 data-nosnippet>224</a>            <span class="kw">let </span>[batch, _seq, _d] = x.dims();
-<a href=#225 id=225 data-nosnippet>225</a>            <span class="self">self</span>.make_zero(batch, n_virtual, <span class="kw-2">&amp;</span>x.device())
+<a href=#220 id=220 data-nosnippet>220</a>        <span class="doccomment">/// The chunk length of `options`, in tokens.
+<a href=#221 id=221 data-nosnippet>221</a>        </span><span class="kw">fn </span>reset_align(<span class="kw-2">&amp;</span><span class="self">self</span>, options: <span class="kw-2">&amp;</span>Mamba2SsdPath) -&gt; <span class="prelude-ty">Option</span>&lt;usize&gt; {
+<a href=#222 id=222 data-nosnippet>222</a>            <span class="prelude-val">Some</span>(options.chunk_len_or_optimal(<span class="self">self</span>.state_rank, <span class="self">self</span>.per_head_dim()))
+<a href=#223 id=223 data-nosnippet>223</a>        }
+<a href=#224 id=224 data-nosnippet>224</a>        <span class="kw">fn </span>block_step(<span class="kw-2">&amp;</span><span class="self">self</span>, x: Tensor&lt;<span class="number">2</span>&gt;, cache: <span class="prelude-ty">Option</span>&lt;Mamba2Cache&gt;) -&gt; (Tensor&lt;<span class="number">2</span>&gt;, Mamba2Cache) {
+<a href=#225 id=225 data-nosnippet>225</a>            <span class="self">self</span>.step(x, cache)
 <a href=#226 id=226 data-nosnippet>226</a>        }
-<a href=#227 id=227 data-nosnippet>227</a>        <span class="kw">fn </span>zero_caches_2d(<span class="kw-2">&amp;</span><span class="self">self</span>, x: <span class="kw-2">&amp;</span>Tensor&lt;<span class="number">2</span>&gt;, n_virtual: usize) -&gt; Mamba2Caches {
-<a href=#228 id=228 data-nosnippet>228</a>            <span class="kw">let </span>[batch, _d] = x.dims();
+<a href=#227 id=227 data-nosnippet>227</a>        <span class="kw">fn </span>zero_caches_3d(<span class="kw-2">&amp;</span><span class="self">self</span>, x: <span class="kw-2">&amp;</span>Tensor&lt;<span class="number">3</span>&gt;, n_virtual: usize) -&gt; Mamba2Caches {
+<a href=#228 id=228 data-nosnippet>228</a>            <span class="kw">let </span>[batch, _seq, _d] = x.dims();
 <a href=#229 id=229 data-nosnippet>229</a>            <span class="self">self</span>.make_zero(batch, n_virtual, <span class="kw-2">&amp;</span>x.device())
 <a href=#230 id=230 data-nosnippet>230</a>        }
-<a href=#231 id=231 data-nosnippet>231</a>        <span class="kw">fn </span>untied_params(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;UntiedParam&gt; {
-<a href=#232 id=232 data-nosnippet>232</a>            <span class="self">self</span>.untied_params()
-<a href=#233 id=233 data-nosnippet>233</a>        }
-<a href=#234 id=234 data-nosnippet>234</a>    }
-<a href=#235 id=235 data-nosnippet>235</a>
-<a href=#236 id=236 data-nosnippet>236</a>    <span class="kw">impl </span>Mamba2 {
-<a href=#237 id=237 data-nosnippet>237</a>        <span class="kw">fn </span>make_zero(<span class="kw-2">&amp;</span><span class="self">self</span>, batch: usize, n_virtual: usize, device: <span class="kw-2">&amp;</span>Device) -&gt; Mamba2Caches {
-<a href=#238 id=238 data-nosnippet>238</a>            <span class="kw">let </span>[conv_dim, <span class="kw">_</span>, conv_kernel] = <span class="self">self</span>.conv1d.weight.dims();
-<a href=#239 id=239 data-nosnippet>239</a>            Mamba2CachesConfig::new(
-<a href=#240 id=240 data-nosnippet>240</a>                n_virtual,
-<a href=#241 id=241 data-nosnippet>241</a>                Mamba2CacheConfig {
-<a href=#242 id=242 data-nosnippet>242</a>                    batch,
-<a href=#243 id=243 data-nosnippet>243</a>                    state_rank: <span class="self">self</span>.state_rank,
-<a href=#244 id=244 data-nosnippet>244</a>                    conv_kernel,
-<a href=#245 id=245 data-nosnippet>245</a>                    conv_dim,
-<a href=#246 id=246 data-nosnippet>246</a>                    per_head_dim: <span class="self">self</span>.per_head_dim(),
-<a href=#247 id=247 data-nosnippet>247</a>                    nheads: <span class="self">self</span>.nheads(),
-<a href=#248 id=248 data-nosnippet>248</a>                },
-<a href=#249 id=249 data-nosnippet>249</a>            )
-<a href=#250 id=250 data-nosnippet>250</a>            .init(device)
-<a href=#251 id=251 data-nosnippet>251</a>        }
-<a href=#252 id=252 data-nosnippet>252</a>    }
-<a href=#253 id=253 data-nosnippet>253</a>
-<a href=#254 id=254 data-nosnippet>254</a>    <span class="kw">impl </span>BlockConfig <span class="kw">for </span>Mamba2Config {
-<a href=#255 id=255 data-nosnippet>255</a>        <span class="kw">type </span>Block = Mamba2;
-<a href=#256 id=256 data-nosnippet>256</a>        <span class="kw">fn </span>d_model(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
-<a href=#257 id=257 data-nosnippet>257</a>            <span class="self">self</span>.d_model
-<a href=#258 id=258 data-nosnippet>258</a>        }
-<a href=#259 id=259 data-nosnippet>259</a>        <span class="kw">fn </span>init_block(<span class="kw-2">&amp;</span><span class="self">self</span>, n_applications: usize, device: <span class="kw-2">&amp;</span>Device) -&gt; Mamba2 {
-<a href=#260 id=260 data-nosnippet>260</a>            <span class="self">self</span>.init_applications(n_applications, device)
-<a href=#261 id=261 data-nosnippet>261</a>        }
-<a href=#262 id=262 data-nosnippet>262</a>        <span class="attr">#[cfg(feature = <span class="string">"optim"</span>)]
-<a href=#263 id=263 data-nosnippet>263</a>        </span><span class="kw">fn </span>muon_projections(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;burn_stack::optim::ProjSpec&gt; {
-<a href=#264 id=264 data-nosnippet>264</a>            <span class="self">self</span>.muon_projections()
+<a href=#231 id=231 data-nosnippet>231</a>        <span class="kw">fn </span>zero_caches_2d(<span class="kw-2">&amp;</span><span class="self">self</span>, x: <span class="kw-2">&amp;</span>Tensor&lt;<span class="number">2</span>&gt;, n_virtual: usize) -&gt; Mamba2Caches {
+<a href=#232 id=232 data-nosnippet>232</a>            <span class="kw">let </span>[batch, _d] = x.dims();
+<a href=#233 id=233 data-nosnippet>233</a>            <span class="self">self</span>.make_zero(batch, n_virtual, <span class="kw-2">&amp;</span>x.device())
+<a href=#234 id=234 data-nosnippet>234</a>        }
+<a href=#235 id=235 data-nosnippet>235</a>        <span class="kw">fn </span>untied_params(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;UntiedParam&gt; {
+<a href=#236 id=236 data-nosnippet>236</a>            <span class="self">self</span>.untied_params()
+<a href=#237 id=237 data-nosnippet>237</a>        }
+<a href=#238 id=238 data-nosnippet>238</a>    }
+<a href=#239 id=239 data-nosnippet>239</a>
+<a href=#240 id=240 data-nosnippet>240</a>    <span class="kw">impl </span>Mamba2 {
+<a href=#241 id=241 data-nosnippet>241</a>        <span class="kw">fn </span>make_zero(<span class="kw-2">&amp;</span><span class="self">self</span>, batch: usize, n_virtual: usize, device: <span class="kw-2">&amp;</span>Device) -&gt; Mamba2Caches {
+<a href=#242 id=242 data-nosnippet>242</a>            <span class="kw">let </span>[conv_dim, <span class="kw">_</span>, conv_kernel] = <span class="self">self</span>.conv1d.weight.dims();
+<a href=#243 id=243 data-nosnippet>243</a>            Mamba2CachesConfig::new(
+<a href=#244 id=244 data-nosnippet>244</a>                n_virtual,
+<a href=#245 id=245 data-nosnippet>245</a>                Mamba2CacheConfig {
+<a href=#246 id=246 data-nosnippet>246</a>                    batch,
+<a href=#247 id=247 data-nosnippet>247</a>                    state_rank: <span class="self">self</span>.state_rank,
+<a href=#248 id=248 data-nosnippet>248</a>                    conv_kernel,
+<a href=#249 id=249 data-nosnippet>249</a>                    conv_dim,
+<a href=#250 id=250 data-nosnippet>250</a>                    per_head_dim: <span class="self">self</span>.per_head_dim(),
+<a href=#251 id=251 data-nosnippet>251</a>                    nheads: <span class="self">self</span>.nheads(),
+<a href=#252 id=252 data-nosnippet>252</a>                },
+<a href=#253 id=253 data-nosnippet>253</a>            )
+<a href=#254 id=254 data-nosnippet>254</a>            .init(device)
+<a href=#255 id=255 data-nosnippet>255</a>        }
+<a href=#256 id=256 data-nosnippet>256</a>    }
+<a href=#257 id=257 data-nosnippet>257</a>
+<a href=#258 id=258 data-nosnippet>258</a>    <span class="kw">impl </span>BlockConfig <span class="kw">for </span>Mamba2Config {
+<a href=#259 id=259 data-nosnippet>259</a>        <span class="kw">type </span>Block = Mamba2;
+<a href=#260 id=260 data-nosnippet>260</a>        <span class="kw">fn </span>d_model(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+<a href=#261 id=261 data-nosnippet>261</a>            <span class="self">self</span>.d_model
+<a href=#262 id=262 data-nosnippet>262</a>        }
+<a href=#263 id=263 data-nosnippet>263</a>        <span class="kw">fn </span>init_block(<span class="kw-2">&amp;</span><span class="self">self</span>, n_applications: usize, device: <span class="kw-2">&amp;</span>Device) -&gt; Mamba2 {
+<a href=#264 id=264 data-nosnippet>264</a>            <span class="self">self</span>.init_applications(n_applications, device)
 <a href=#265 id=265 data-nosnippet>265</a>        }
-<a href=#266 id=266 data-nosnippet>266</a>    }
-<a href=#267 id=267 data-nosnippet>267</a>}
-<a href=#268 id=268 data-nosnippet>268</a>
-<a href=#269 id=269 data-nosnippet>269</a><span class="attr">#[cfg(feature = <span class="string">"mamba3"</span>)]
-<a href=#270 id=270 data-nosnippet>270</a></span><span class="kw">mod </span>impl_mamba3 {
-<a href=#271 id=271 data-nosnippet>271</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
-<a href=#272 id=272 data-nosnippet>272</a>    <span class="kw">use </span><span class="kw">crate</span>::mamba3::double_ssd::prelude::Mamba3DoubleSsdCache;
-<a href=#273 id=273 data-nosnippet>273</a>    <span class="kw">use </span><span class="kw">crate</span>::mamba3::prelude::{Mamba3, Mamba3Cache, Mamba3Caches, Mamba3Config, Mamba3SsdPath};
-<a href=#274 id=274 data-nosnippet>274</a>    <span class="kw">use </span><span class="kw">crate</span>::mamba3::single_ssd::prelude::{
-<a href=#275 id=275 data-nosnippet>275</a>        Mamba3SingleSsdCache, Mamba3SingleSsdCacheConfig, Mamba3SingleSsdCaches,
-<a href=#276 id=276 data-nosnippet>276</a>        Mamba3SingleSsdCachesConfig,
-<a href=#277 id=277 data-nosnippet>277</a>    };
-<a href=#278 id=278 data-nosnippet>278</a>
-<a href=#279 id=279 data-nosnippet>279</a>    <span class="doccomment">/// Zero single-ssd caches for a batch of `batch`. (A missing cache selects
-<a href=#280 id=280 data-nosnippet>280</a>    /// the single-ssd pathway, with ≈½ the SSD memory of double-ssd, for every
-<a href=#281 id=281 data-nosnippet>281</a>    /// rotation kind.)
-<a href=#282 id=282 data-nosnippet>282</a>    </span><span class="kw">fn </span>zero_single_ssd_caches(
-<a href=#283 id=283 data-nosnippet>283</a>        mamba_block: <span class="kw-2">&amp;</span>Mamba3,
-<a href=#284 id=284 data-nosnippet>284</a>        batch: usize,
-<a href=#285 id=285 data-nosnippet>285</a>        n_virtual: usize,
-<a href=#286 id=286 data-nosnippet>286</a>        device: <span class="kw-2">&amp;</span>Device,
-<a href=#287 id=287 data-nosnippet>287</a>    ) -&gt; Mamba3SingleSsdCaches {
-<a href=#288 id=288 data-nosnippet>288</a>        Mamba3SingleSsdCachesConfig::new(
-<a href=#289 id=289 data-nosnippet>289</a>            n_virtual,
-<a href=#290 id=290 data-nosnippet>290</a>            Mamba3SingleSsdCacheConfig {
-<a href=#291 id=291 data-nosnippet>291</a>                batch,
-<a href=#292 id=292 data-nosnippet>292</a>                state_rank: mamba_block.state_rank,
-<a href=#293 id=293 data-nosnippet>293</a>                num_rotation_angles: mamba_block.num_rotation_angles,
-<a href=#294 id=294 data-nosnippet>294</a>                per_head_dim: mamba_block.per_head_dim(),
-<a href=#295 id=295 data-nosnippet>295</a>                nheads: mamba_block.nheads(),
-<a href=#296 id=296 data-nosnippet>296</a>                mimo_rank: mamba_block.mimo_rank,
-<a href=#297 id=297 data-nosnippet>297</a>                rotation: mamba_block.rotation,
-<a href=#298 id=298 data-nosnippet>298</a>                num_quat_blocks: mamba_block.num_quat_blocks,
-<a href=#299 id=299 data-nosnippet>299</a>                tap_pattern: mamba_block.tap_pattern,
-<a href=#300 id=300 data-nosnippet>300</a>                micro_steps: mamba_block.micro_steps,
-<a href=#301 id=301 data-nosnippet>301</a>                gain: mamba_block.gain,
-<a href=#302 id=302 data-nosnippet>302</a>                tropical: mamba_block.tropical,
-<a href=#303 id=303 data-nosnippet>303</a>            },
-<a href=#304 id=304 data-nosnippet>304</a>        )
-<a href=#305 id=305 data-nosnippet>305</a>        .init(device)
-<a href=#306 id=306 data-nosnippet>306</a>    }
-<a href=#307 id=307 data-nosnippet>307</a>
-<a href=#308 id=308 data-nosnippet>308</a>    <span class="kw">impl </span>CacheStack <span class="kw">for </span>Mamba3Caches {
-<a href=#309 id=309 data-nosnippet>309</a>        <span class="kw">type </span>Cache = Mamba3Cache;
-<a href=#310 id=310 data-nosnippet>310</a>        <span class="kw">fn </span>slot_count(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
-<a href=#311 id=311 data-nosnippet>311</a>            <span class="self">self</span>.caches_len()
-<a href=#312 id=312 data-nosnippet>312</a>        }
-<a href=#313 id=313 data-nosnippet>313</a>        <span class="kw">fn </span>into_slots(<span class="self">self</span>) -&gt; Vec&lt;<span class="prelude-ty">Option</span>&lt;Mamba3Cache&gt;&gt; {
-<a href=#314 id=314 data-nosnippet>314</a>            <span class="self">self</span>.into_options()
-<a href=#315 id=315 data-nosnippet>315</a>        }
-<a href=#316 id=316 data-nosnippet>316</a>        <span class="kw">fn </span>from_slots(slots: Vec&lt;<span class="prelude-ty">Option</span>&lt;Mamba3Cache&gt;&gt;) -&gt; <span class="self">Self </span>{
-<a href=#317 id=317 data-nosnippet>317</a>            <span class="self">Self</span>::from_options(slots)
-<a href=#318 id=318 data-nosnippet>318</a>        }
-<a href=#319 id=319 data-nosnippet>319</a>        <span class="kw">fn </span>cache_to_inner(c: Mamba3Cache) -&gt; Mamba3Cache {
-<a href=#320 id=320 data-nosnippet>320</a>            <span class="kw">use </span><span class="kw">crate</span>::mamba3::prelude::RotationState;
-<a href=#321 id=321 data-nosnippet>321</a>            <span class="kw">fn </span>rot(r: RotationState) -&gt; RotationState {
-<a href=#322 id=322 data-nosnippet>322</a>                <span class="kw">match </span>r {
-<a href=#323 id=323 data-nosnippet>323</a>                    RotationState::Real(u) =&gt; RotationState::Real(u),
-<a href=#324 id=324 data-nosnippet>324</a>                    RotationState::Angle(t) =&gt; RotationState::Angle(t.inner()),
-<a href=#325 id=325 data-nosnippet>325</a>                    RotationState::Quaternion(t) =&gt; RotationState::Quaternion(t.inner()),
-<a href=#326 id=326 data-nosnippet>326</a>                    RotationState::Rotor(t) =&gt; RotationState::Rotor(t.inner()),
-<a href=#327 id=327 data-nosnippet>327</a>                }
-<a href=#328 id=328 data-nosnippet>328</a>            }
-<a href=#329 id=329 data-nosnippet>329</a>            <span class="kw">match </span>c {
-<a href=#330 id=330 data-nosnippet>330</a>                Mamba3Cache::DoubleSsd(c) =&gt; Mamba3Cache::DoubleSsd(Mamba3DoubleSsdCache {
-<a href=#331 id=331 data-nosnippet>331</a>                    ssm_bhpr: c.ssm_bhpr.inner(),
-<a href=#332 id=332 data-nosnippet>332</a>                    k_state_bumhr: c.k_state_bumhr.map(|t| t.inner()),
-<a href=#333 id=333 data-nosnippet>333</a>                    v_state_buhp: c.v_state_buhp.map(|t| t.inner()),
-<a href=#334 id=334 data-nosnippet>334</a>                    rotation: rot(c.rotation),
-<a href=#335 id=335 data-nosnippet>335</a>                    log_precision_bh: c.log_precision_bh.map(|t| t.inner()),
-<a href=#336 id=336 data-nosnippet>336</a>                    tropical_bh: c.tropical_bh.map(|t| t.inner()),
-<a href=#337 id=337 data-nosnippet>337</a>                }),
-<a href=#338 id=338 data-nosnippet>338</a>                Mamba3Cache::SingleSsd(c) =&gt; Mamba3Cache::SingleSsd(Mamba3SingleSsdCache {
-<a href=#339 id=339 data-nosnippet>339</a>                    ssm_bhpr: c.ssm_bhpr.inner(),
-<a href=#340 id=340 data-nosnippet>340</a>                    k_state_bumhr: c.k_state_bumhr.map(|t| t.inner()),
-<a href=#341 id=341 data-nosnippet>341</a>                    v_state_buhp: c.v_state_buhp.map(|t| t.inner()),
-<a href=#342 id=342 data-nosnippet>342</a>                    rotation: rot(c.rotation),
-<a href=#343 id=343 data-nosnippet>343</a>                    log_precision_bh: c.log_precision_bh.map(|t| t.inner()),
-<a href=#344 id=344 data-nosnippet>344</a>                    tropical_bh: c.tropical_bh.map(|t| t.inner()),
-<a href=#345 id=345 data-nosnippet>345</a>                }),
-<a href=#346 id=346 data-nosnippet>346</a>            }
-<a href=#347 id=347 data-nosnippet>347</a>        }
-<a href=#348 id=348 data-nosnippet>348</a>        <span class="kw">fn </span>cache_from_inner(c: Mamba3Cache, device: <span class="kw-2">&amp;</span>Device) -&gt; Mamba3Cache {
-<a href=#349 id=349 data-nosnippet>349</a>            <span class="kw">use </span><span class="kw">crate</span>::mamba3::prelude::RotationState;
-<a href=#350 id=350 data-nosnippet>350</a>            <span class="kw">fn </span>rot(r: RotationState, device: <span class="kw-2">&amp;</span>Device) -&gt; RotationState {
-<a href=#351 id=351 data-nosnippet>351</a>                <span class="kw">match </span>r {
-<a href=#352 id=352 data-nosnippet>352</a>                    RotationState::Real(u) =&gt; RotationState::Real(u),
-<a href=#353 id=353 data-nosnippet>353</a>                    RotationState::Angle(t) =&gt; RotationState::Angle(lift(t, device)),
-<a href=#354 id=354 data-nosnippet>354</a>                    RotationState::Quaternion(t) =&gt; RotationState::Quaternion(lift(t, device)),
-<a href=#355 id=355 data-nosnippet>355</a>                    RotationState::Rotor(t) =&gt; RotationState::Rotor(lift(t, device)),
-<a href=#356 id=356 data-nosnippet>356</a>                }
-<a href=#357 id=357 data-nosnippet>357</a>            }
-<a href=#358 id=358 data-nosnippet>358</a>            <span class="kw">match </span>c {
-<a href=#359 id=359 data-nosnippet>359</a>                Mamba3Cache::DoubleSsd(c) =&gt; Mamba3Cache::DoubleSsd(Mamba3DoubleSsdCache {
-<a href=#360 id=360 data-nosnippet>360</a>                    ssm_bhpr: lift(c.ssm_bhpr, device),
-<a href=#361 id=361 data-nosnippet>361</a>                    k_state_bumhr: c.k_state_bumhr.map(|t| lift(t, device)),
-<a href=#362 id=362 data-nosnippet>362</a>                    v_state_buhp: c.v_state_buhp.map(|t| lift(t, device)),
-<a href=#363 id=363 data-nosnippet>363</a>                    rotation: rot(c.rotation, device),
-<a href=#364 id=364 data-nosnippet>364</a>                    log_precision_bh: c.log_precision_bh.map(|t| lift(t, device)),
-<a href=#365 id=365 data-nosnippet>365</a>                    tropical_bh: c.tropical_bh.map(|t| lift(t, device)),
-<a href=#366 id=366 data-nosnippet>366</a>                }),
-<a href=#367 id=367 data-nosnippet>367</a>                Mamba3Cache::SingleSsd(c) =&gt; Mamba3Cache::SingleSsd(Mamba3SingleSsdCache {
-<a href=#368 id=368 data-nosnippet>368</a>                    ssm_bhpr: lift(c.ssm_bhpr, device),
-<a href=#369 id=369 data-nosnippet>369</a>                    k_state_bumhr: c.k_state_bumhr.map(|t| lift(t, device)),
-<a href=#370 id=370 data-nosnippet>370</a>                    v_state_buhp: c.v_state_buhp.map(|t| lift(t, device)),
-<a href=#371 id=371 data-nosnippet>371</a>                    rotation: rot(c.rotation, device),
-<a href=#372 id=372 data-nosnippet>372</a>                    log_precision_bh: c.log_precision_bh.map(|t| lift(t, device)),
-<a href=#373 id=373 data-nosnippet>373</a>                    tropical_bh: c.tropical_bh.map(|t| lift(t, device)),
-<a href=#374 id=374 data-nosnippet>374</a>                }),
-<a href=#375 id=375 data-nosnippet>375</a>            }
-<a href=#376 id=376 data-nosnippet>376</a>        }
-<a href=#377 id=377 data-nosnippet>377</a>        <span class="kw">fn </span>cache_device(c: <span class="kw-2">&amp;</span>Mamba3Cache) -&gt; Device {
-<a href=#378 id=378 data-nosnippet>378</a>            <span class="kw">match </span>c {
-<a href=#379 id=379 data-nosnippet>379</a>                Mamba3Cache::DoubleSsd(c) =&gt; c.ssm_bhpr.device(),
-<a href=#380 id=380 data-nosnippet>380</a>                Mamba3Cache::SingleSsd(c) =&gt; c.ssm_bhpr.device(),
-<a href=#381 id=381 data-nosnippet>381</a>            }
-<a href=#382 id=382 data-nosnippet>382</a>        }
-<a href=#383 id=383 data-nosnippet>383</a>    }
-<a href=#384 id=384 data-nosnippet>384</a>
-<a href=#385 id=385 data-nosnippet>385</a>    <span class="kw">impl </span>Block <span class="kw">for </span>Mamba3 {
-<a href=#386 id=386 data-nosnippet>386</a>        <span class="kw">type </span>Cache = Mamba3Cache;
-<a href=#387 id=387 data-nosnippet>387</a>        <span class="kw">type </span>Caches = Mamba3Caches;
-<a href=#388 id=388 data-nosnippet>388</a>        <span class="kw">type </span>Options = Mamba3SsdPath;
-<a href=#389 id=389 data-nosnippet>389</a>
-<a href=#390 id=390 data-nosnippet>390</a>        <span class="kw">fn </span>block_forward(
-<a href=#391 id=391 data-nosnippet>391</a>            <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#392 id=392 data-nosnippet>392</a>            x: Tensor&lt;<span class="number">3</span>&gt;,
-<a href=#393 id=393 data-nosnippet>393</a>            cache: <span class="prelude-ty">Option</span>&lt;Mamba3Cache&gt;,
-<a href=#394 id=394 data-nosnippet>394</a>            options: Mamba3SsdPath,
-<a href=#395 id=395 data-nosnippet>395</a>            pad: <span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">2</span>, Bool&gt;&gt;,
-<a href=#396 id=396 data-nosnippet>396</a>        ) -&gt; (Tensor&lt;<span class="number">3</span>&gt;, Mamba3Cache) {
-<a href=#397 id=397 data-nosnippet>397</a>            <span class="self">self</span>.forward(x, cache, options, pad)
-<a href=#398 id=398 data-nosnippet>398</a>        }
-<a href=#399 id=399 data-nosnippet>399</a>        <span class="doccomment">/// A reset only at a chunk start: every `chunk_len / micro_steps`
-<a href=#400 id=400 data-nosnippet>400</a>        /// tokens (see [`crate::packing`]).
-<a href=#401 id=401 data-nosnippet>401</a>        </span><span class="kw">fn </span>block_forward_packed(
-<a href=#402 id=402 data-nosnippet>402</a>            <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#403 id=403 data-nosnippet>403</a>            x: Tensor&lt;<span class="number">3</span>&gt;,
-<a href=#404 id=404 data-nosnippet>404</a>            cache: <span class="prelude-ty">Option</span>&lt;Mamba3Cache&gt;,
-<a href=#405 id=405 data-nosnippet>405</a>            options: Mamba3SsdPath,
-<a href=#406 id=406 data-nosnippet>406</a>            reset: Tensor&lt;<span class="number">2</span>, Bool&gt;,
-<a href=#407 id=407 data-nosnippet>407</a>        ) -&gt; (Tensor&lt;<span class="number">3</span>&gt;, Mamba3Cache) {
-<a href=#408 id=408 data-nosnippet>408</a>            <span class="self">self</span>.forward_packed(x, cache, <span class="prelude-val">None</span>, options, <span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(reset))
-<a href=#409 id=409 data-nosnippet>409</a>        }
-<a href=#410 id=410 data-nosnippet>410</a>        <span class="kw">fn </span>block_step(<span class="kw-2">&amp;</span><span class="self">self</span>, x: Tensor&lt;<span class="number">2</span>&gt;, cache: <span class="prelude-ty">Option</span>&lt;Mamba3Cache&gt;) -&gt; (Tensor&lt;<span class="number">2</span>&gt;, Mamba3Cache) {
-<a href=#411 id=411 data-nosnippet>411</a>            <span class="self">self</span>.step(x, cache)
-<a href=#412 id=412 data-nosnippet>412</a>        }
-<a href=#413 id=413 data-nosnippet>413</a>        <span class="kw">fn </span>zero_caches_3d(<span class="kw-2">&amp;</span><span class="self">self</span>, x: <span class="kw-2">&amp;</span>Tensor&lt;<span class="number">3</span>&gt;, n_virtual: usize) -&gt; Mamba3Caches {
-<a href=#414 id=414 data-nosnippet>414</a>            <span class="kw">let </span>[batch, _seq, _d] = x.dims();
-<a href=#415 id=415 data-nosnippet>415</a>            zero_single_ssd_caches(<span class="self">self</span>, batch, n_virtual, <span class="kw-2">&amp;</span>x.device()).into()
-<a href=#416 id=416 data-nosnippet>416</a>        }
-<a href=#417 id=417 data-nosnippet>417</a>        <span class="kw">fn </span>zero_caches_2d(<span class="kw-2">&amp;</span><span class="self">self</span>, x: <span class="kw-2">&amp;</span>Tensor&lt;<span class="number">2</span>&gt;, n_virtual: usize) -&gt; Mamba3Caches {
-<a href=#418 id=418 data-nosnippet>418</a>            <span class="kw">let </span>[batch, _d] = x.dims();
-<a href=#419 id=419 data-nosnippet>419</a>            zero_single_ssd_caches(<span class="self">self</span>, batch, n_virtual, <span class="kw-2">&amp;</span>x.device()).into()
+<a href=#266 id=266 data-nosnippet>266</a>        <span class="attr">#[cfg(feature = <span class="string">"optim"</span>)]
+<a href=#267 id=267 data-nosnippet>267</a>        </span><span class="kw">fn </span>muon_projections(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;burn_stack::optim::ProjSpec&gt; {
+<a href=#268 id=268 data-nosnippet>268</a>            <span class="self">self</span>.muon_projections()
+<a href=#269 id=269 data-nosnippet>269</a>        }
+<a href=#270 id=270 data-nosnippet>270</a>    }
+<a href=#271 id=271 data-nosnippet>271</a>}
+<a href=#272 id=272 data-nosnippet>272</a>
+<a href=#273 id=273 data-nosnippet>273</a><span class="attr">#[cfg(feature = <span class="string">"mamba3"</span>)]
+<a href=#274 id=274 data-nosnippet>274</a></span><span class="kw">mod </span>impl_mamba3 {
+<a href=#275 id=275 data-nosnippet>275</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+<a href=#276 id=276 data-nosnippet>276</a>    <span class="kw">use </span><span class="kw">crate</span>::mamba3::double_ssd::prelude::Mamba3DoubleSsdCache;
+<a href=#277 id=277 data-nosnippet>277</a>    <span class="kw">use </span><span class="kw">crate</span>::mamba3::prelude::{Mamba3, Mamba3Cache, Mamba3Caches, Mamba3Config, Mamba3SsdPath};
+<a href=#278 id=278 data-nosnippet>278</a>    <span class="kw">use </span><span class="kw">crate</span>::mamba3::single_ssd::prelude::{
+<a href=#279 id=279 data-nosnippet>279</a>        Mamba3SingleSsdCache, Mamba3SingleSsdCacheConfig, Mamba3SingleSsdCaches,
+<a href=#280 id=280 data-nosnippet>280</a>        Mamba3SingleSsdCachesConfig,
+<a href=#281 id=281 data-nosnippet>281</a>    };
+<a href=#282 id=282 data-nosnippet>282</a>
+<a href=#283 id=283 data-nosnippet>283</a>    <span class="doccomment">/// Zero single-ssd caches for a batch of `batch`. (A missing cache selects
+<a href=#284 id=284 data-nosnippet>284</a>    /// the single-ssd pathway, with ≈½ the SSD memory of double-ssd, for every
+<a href=#285 id=285 data-nosnippet>285</a>    /// rotation kind.)
+<a href=#286 id=286 data-nosnippet>286</a>    </span><span class="kw">fn </span>zero_single_ssd_caches(
+<a href=#287 id=287 data-nosnippet>287</a>        mamba_block: <span class="kw-2">&amp;</span>Mamba3,
+<a href=#288 id=288 data-nosnippet>288</a>        batch: usize,
+<a href=#289 id=289 data-nosnippet>289</a>        n_virtual: usize,
+<a href=#290 id=290 data-nosnippet>290</a>        device: <span class="kw-2">&amp;</span>Device,
+<a href=#291 id=291 data-nosnippet>291</a>    ) -&gt; Mamba3SingleSsdCaches {
+<a href=#292 id=292 data-nosnippet>292</a>        Mamba3SingleSsdCachesConfig::new(
+<a href=#293 id=293 data-nosnippet>293</a>            n_virtual,
+<a href=#294 id=294 data-nosnippet>294</a>            Mamba3SingleSsdCacheConfig {
+<a href=#295 id=295 data-nosnippet>295</a>                batch,
+<a href=#296 id=296 data-nosnippet>296</a>                state_rank: mamba_block.state_rank,
+<a href=#297 id=297 data-nosnippet>297</a>                num_rotation_angles: mamba_block.num_rotation_angles,
+<a href=#298 id=298 data-nosnippet>298</a>                per_head_dim: mamba_block.per_head_dim(),
+<a href=#299 id=299 data-nosnippet>299</a>                nheads: mamba_block.nheads(),
+<a href=#300 id=300 data-nosnippet>300</a>                mimo_rank: mamba_block.mimo_rank,
+<a href=#301 id=301 data-nosnippet>301</a>                rotation: mamba_block.rotation,
+<a href=#302 id=302 data-nosnippet>302</a>                num_quat_blocks: mamba_block.num_quat_blocks,
+<a href=#303 id=303 data-nosnippet>303</a>                tap_pattern: mamba_block.tap_pattern,
+<a href=#304 id=304 data-nosnippet>304</a>                micro_steps: mamba_block.micro_steps,
+<a href=#305 id=305 data-nosnippet>305</a>                gain: mamba_block.gain,
+<a href=#306 id=306 data-nosnippet>306</a>                tropical: mamba_block.tropical,
+<a href=#307 id=307 data-nosnippet>307</a>            },
+<a href=#308 id=308 data-nosnippet>308</a>        )
+<a href=#309 id=309 data-nosnippet>309</a>        .init(device)
+<a href=#310 id=310 data-nosnippet>310</a>    }
+<a href=#311 id=311 data-nosnippet>311</a>
+<a href=#312 id=312 data-nosnippet>312</a>    <span class="kw">impl </span>CacheStack <span class="kw">for </span>Mamba3Caches {
+<a href=#313 id=313 data-nosnippet>313</a>        <span class="kw">type </span>Cache = Mamba3Cache;
+<a href=#314 id=314 data-nosnippet>314</a>        <span class="kw">fn </span>slot_count(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+<a href=#315 id=315 data-nosnippet>315</a>            <span class="self">self</span>.caches_len()
+<a href=#316 id=316 data-nosnippet>316</a>        }
+<a href=#317 id=317 data-nosnippet>317</a>        <span class="kw">fn </span>into_slots(<span class="self">self</span>) -&gt; Vec&lt;<span class="prelude-ty">Option</span>&lt;Mamba3Cache&gt;&gt; {
+<a href=#318 id=318 data-nosnippet>318</a>            <span class="self">self</span>.into_options()
+<a href=#319 id=319 data-nosnippet>319</a>        }
+<a href=#320 id=320 data-nosnippet>320</a>        <span class="kw">fn </span>from_slots(slots: Vec&lt;<span class="prelude-ty">Option</span>&lt;Mamba3Cache&gt;&gt;) -&gt; <span class="self">Self </span>{
+<a href=#321 id=321 data-nosnippet>321</a>            <span class="self">Self</span>::from_options(slots)
+<a href=#322 id=322 data-nosnippet>322</a>        }
+<a href=#323 id=323 data-nosnippet>323</a>        <span class="kw">fn </span>cache_to_inner(c: Mamba3Cache) -&gt; Mamba3Cache {
+<a href=#324 id=324 data-nosnippet>324</a>            <span class="kw">use </span><span class="kw">crate</span>::mamba3::prelude::RotationState;
+<a href=#325 id=325 data-nosnippet>325</a>            <span class="kw">fn </span>rot(r: RotationState) -&gt; RotationState {
+<a href=#326 id=326 data-nosnippet>326</a>                <span class="kw">match </span>r {
+<a href=#327 id=327 data-nosnippet>327</a>                    RotationState::Real(u) =&gt; RotationState::Real(u),
+<a href=#328 id=328 data-nosnippet>328</a>                    RotationState::Angle(t) =&gt; RotationState::Angle(t.inner()),
+<a href=#329 id=329 data-nosnippet>329</a>                    RotationState::Quaternion(t) =&gt; RotationState::Quaternion(t.inner()),
+<a href=#330 id=330 data-nosnippet>330</a>                    RotationState::Rotor(t) =&gt; RotationState::Rotor(t.inner()),
+<a href=#331 id=331 data-nosnippet>331</a>                }
+<a href=#332 id=332 data-nosnippet>332</a>            }
+<a href=#333 id=333 data-nosnippet>333</a>            <span class="kw">match </span>c {
+<a href=#334 id=334 data-nosnippet>334</a>                Mamba3Cache::DoubleSsd(c) =&gt; Mamba3Cache::DoubleSsd(Mamba3DoubleSsdCache {
+<a href=#335 id=335 data-nosnippet>335</a>                    ssm_bhpr: c.ssm_bhpr.inner(),
+<a href=#336 id=336 data-nosnippet>336</a>                    k_state_bumhr: c.k_state_bumhr.map(|t| t.inner()),
+<a href=#337 id=337 data-nosnippet>337</a>                    v_state_buhp: c.v_state_buhp.map(|t| t.inner()),
+<a href=#338 id=338 data-nosnippet>338</a>                    rotation: rot(c.rotation),
+<a href=#339 id=339 data-nosnippet>339</a>                    log_precision_bh: c.log_precision_bh.map(|t| t.inner()),
+<a href=#340 id=340 data-nosnippet>340</a>                    tropical_bh: c.tropical_bh.map(|t| t.inner()),
+<a href=#341 id=341 data-nosnippet>341</a>                }),
+<a href=#342 id=342 data-nosnippet>342</a>                Mamba3Cache::SingleSsd(c) =&gt; Mamba3Cache::SingleSsd(Mamba3SingleSsdCache {
+<a href=#343 id=343 data-nosnippet>343</a>                    ssm_bhpr: c.ssm_bhpr.inner(),
+<a href=#344 id=344 data-nosnippet>344</a>                    k_state_bumhr: c.k_state_bumhr.map(|t| t.inner()),
+<a href=#345 id=345 data-nosnippet>345</a>                    v_state_buhp: c.v_state_buhp.map(|t| t.inner()),
+<a href=#346 id=346 data-nosnippet>346</a>                    rotation: rot(c.rotation),
+<a href=#347 id=347 data-nosnippet>347</a>                    log_precision_bh: c.log_precision_bh.map(|t| t.inner()),
+<a href=#348 id=348 data-nosnippet>348</a>                    tropical_bh: c.tropical_bh.map(|t| t.inner()),
+<a href=#349 id=349 data-nosnippet>349</a>                }),
+<a href=#350 id=350 data-nosnippet>350</a>            }
+<a href=#351 id=351 data-nosnippet>351</a>        }
+<a href=#352 id=352 data-nosnippet>352</a>        <span class="kw">fn </span>cache_from_inner(c: Mamba3Cache, device: <span class="kw-2">&amp;</span>Device) -&gt; Mamba3Cache {
+<a href=#353 id=353 data-nosnippet>353</a>            <span class="kw">use </span><span class="kw">crate</span>::mamba3::prelude::RotationState;
+<a href=#354 id=354 data-nosnippet>354</a>            <span class="kw">fn </span>rot(r: RotationState, device: <span class="kw-2">&amp;</span>Device) -&gt; RotationState {
+<a href=#355 id=355 data-nosnippet>355</a>                <span class="kw">match </span>r {
+<a href=#356 id=356 data-nosnippet>356</a>                    RotationState::Real(u) =&gt; RotationState::Real(u),
+<a href=#357 id=357 data-nosnippet>357</a>                    RotationState::Angle(t) =&gt; RotationState::Angle(lift(t, device)),
+<a href=#358 id=358 data-nosnippet>358</a>                    RotationState::Quaternion(t) =&gt; RotationState::Quaternion(lift(t, device)),
+<a href=#359 id=359 data-nosnippet>359</a>                    RotationState::Rotor(t) =&gt; RotationState::Rotor(lift(t, device)),
+<a href=#360 id=360 data-nosnippet>360</a>                }
+<a href=#361 id=361 data-nosnippet>361</a>            }
+<a href=#362 id=362 data-nosnippet>362</a>            <span class="kw">match </span>c {
+<a href=#363 id=363 data-nosnippet>363</a>                Mamba3Cache::DoubleSsd(c) =&gt; Mamba3Cache::DoubleSsd(Mamba3DoubleSsdCache {
+<a href=#364 id=364 data-nosnippet>364</a>                    ssm_bhpr: lift(c.ssm_bhpr, device),
+<a href=#365 id=365 data-nosnippet>365</a>                    k_state_bumhr: c.k_state_bumhr.map(|t| lift(t, device)),
+<a href=#366 id=366 data-nosnippet>366</a>                    v_state_buhp: c.v_state_buhp.map(|t| lift(t, device)),
+<a href=#367 id=367 data-nosnippet>367</a>                    rotation: rot(c.rotation, device),
+<a href=#368 id=368 data-nosnippet>368</a>                    log_precision_bh: c.log_precision_bh.map(|t| lift(t, device)),
+<a href=#369 id=369 data-nosnippet>369</a>                    tropical_bh: c.tropical_bh.map(|t| lift(t, device)),
+<a href=#370 id=370 data-nosnippet>370</a>                }),
+<a href=#371 id=371 data-nosnippet>371</a>                Mamba3Cache::SingleSsd(c) =&gt; Mamba3Cache::SingleSsd(Mamba3SingleSsdCache {
+<a href=#372 id=372 data-nosnippet>372</a>                    ssm_bhpr: lift(c.ssm_bhpr, device),
+<a href=#373 id=373 data-nosnippet>373</a>                    k_state_bumhr: c.k_state_bumhr.map(|t| lift(t, device)),
+<a href=#374 id=374 data-nosnippet>374</a>                    v_state_buhp: c.v_state_buhp.map(|t| lift(t, device)),
+<a href=#375 id=375 data-nosnippet>375</a>                    rotation: rot(c.rotation, device),
+<a href=#376 id=376 data-nosnippet>376</a>                    log_precision_bh: c.log_precision_bh.map(|t| lift(t, device)),
+<a href=#377 id=377 data-nosnippet>377</a>                    tropical_bh: c.tropical_bh.map(|t| lift(t, device)),
+<a href=#378 id=378 data-nosnippet>378</a>                }),
+<a href=#379 id=379 data-nosnippet>379</a>            }
+<a href=#380 id=380 data-nosnippet>380</a>        }
+<a href=#381 id=381 data-nosnippet>381</a>        <span class="kw">fn </span>cache_device(c: <span class="kw-2">&amp;</span>Mamba3Cache) -&gt; Device {
+<a href=#382 id=382 data-nosnippet>382</a>            <span class="kw">match </span>c {
+<a href=#383 id=383 data-nosnippet>383</a>                Mamba3Cache::DoubleSsd(c) =&gt; c.ssm_bhpr.device(),
+<a href=#384 id=384 data-nosnippet>384</a>                Mamba3Cache::SingleSsd(c) =&gt; c.ssm_bhpr.device(),
+<a href=#385 id=385 data-nosnippet>385</a>            }
+<a href=#386 id=386 data-nosnippet>386</a>        }
+<a href=#387 id=387 data-nosnippet>387</a>    }
+<a href=#388 id=388 data-nosnippet>388</a>
+<a href=#389 id=389 data-nosnippet>389</a>    <span class="kw">impl </span>Block <span class="kw">for </span>Mamba3 {
+<a href=#390 id=390 data-nosnippet>390</a>        <span class="kw">type </span>Cache = Mamba3Cache;
+<a href=#391 id=391 data-nosnippet>391</a>        <span class="kw">type </span>Caches = Mamba3Caches;
+<a href=#392 id=392 data-nosnippet>392</a>        <span class="kw">type </span>Options = Mamba3SsdPath;
+<a href=#393 id=393 data-nosnippet>393</a>
+<a href=#394 id=394 data-nosnippet>394</a>        <span class="kw">fn </span>block_forward(
+<a href=#395 id=395 data-nosnippet>395</a>            <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#396 id=396 data-nosnippet>396</a>            x: Tensor&lt;<span class="number">3</span>&gt;,
+<a href=#397 id=397 data-nosnippet>397</a>            cache: <span class="prelude-ty">Option</span>&lt;Mamba3Cache&gt;,
+<a href=#398 id=398 data-nosnippet>398</a>            options: Mamba3SsdPath,
+<a href=#399 id=399 data-nosnippet>399</a>            pad: <span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">2</span>, Bool&gt;&gt;,
+<a href=#400 id=400 data-nosnippet>400</a>        ) -&gt; (Tensor&lt;<span class="number">3</span>&gt;, Mamba3Cache) {
+<a href=#401 id=401 data-nosnippet>401</a>            <span class="self">self</span>.forward(x, cache, options, pad)
+<a href=#402 id=402 data-nosnippet>402</a>        }
+<a href=#403 id=403 data-nosnippet>403</a>        <span class="doccomment">/// A reset only at a chunk start: every `chunk_len / micro_steps`
+<a href=#404 id=404 data-nosnippet>404</a>        /// tokens (see [`crate::packing`]).
+<a href=#405 id=405 data-nosnippet>405</a>        </span><span class="kw">fn </span>block_forward_packed(
+<a href=#406 id=406 data-nosnippet>406</a>            <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#407 id=407 data-nosnippet>407</a>            x: Tensor&lt;<span class="number">3</span>&gt;,
+<a href=#408 id=408 data-nosnippet>408</a>            cache: <span class="prelude-ty">Option</span>&lt;Mamba3Cache&gt;,
+<a href=#409 id=409 data-nosnippet>409</a>            options: Mamba3SsdPath,
+<a href=#410 id=410 data-nosnippet>410</a>            reset: Tensor&lt;<span class="number">2</span>, Bool&gt;,
+<a href=#411 id=411 data-nosnippet>411</a>        ) -&gt; (Tensor&lt;<span class="number">3</span>&gt;, Mamba3Cache) {
+<a href=#412 id=412 data-nosnippet>412</a>            <span class="self">self</span>.forward_packed(x, cache, <span class="prelude-val">None</span>, options, <span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(reset))
+<a href=#413 id=413 data-nosnippet>413</a>        }
+<a href=#414 id=414 data-nosnippet>414</a>        <span class="doccomment">/// The chunk length of `options`, in tokens: `chunk_len / micro_steps`.
+<a href=#415 id=415 data-nosnippet>415</a>        </span><span class="kw">fn </span>reset_align(<span class="kw-2">&amp;</span><span class="self">self</span>, options: <span class="kw-2">&amp;</span>Mamba3SsdPath) -&gt; <span class="prelude-ty">Option</span>&lt;usize&gt; {
+<a href=#416 id=416 data-nosnippet>416</a>            <span class="prelude-val">Some</span>(Mamba3SsdPath::chunk_tokens(options.chunk_len_or_optimal(<span class="self">self</span>), <span class="self">self</span>.micro_steps))
+<a href=#417 id=417 data-nosnippet>417</a>        }
+<a href=#418 id=418 data-nosnippet>418</a>        <span class="kw">fn </span>block_step(<span class="kw-2">&amp;</span><span class="self">self</span>, x: Tensor&lt;<span class="number">2</span>&gt;, cache: <span class="prelude-ty">Option</span>&lt;Mamba3Cache&gt;) -&gt; (Tensor&lt;<span class="number">2</span>&gt;, Mamba3Cache) {
+<a href=#419 id=419 data-nosnippet>419</a>            <span class="self">self</span>.step(x, cache)
 <a href=#420 id=420 data-nosnippet>420</a>        }
-<a href=#421 id=421 data-nosnippet>421</a>        <span class="kw">fn </span>untied_params(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;UntiedParam&gt; {
-<a href=#422 id=422 data-nosnippet>422</a>            <span class="self">self</span>.untied_params()
-<a href=#423 id=423 data-nosnippet>423</a>        }
-<a href=#424 id=424 data-nosnippet>424</a>    }
-<a href=#425 id=425 data-nosnippet>425</a>
-<a href=#426 id=426 data-nosnippet>426</a>    <span class="kw">impl </span>BlockConfig <span class="kw">for </span>Mamba3Config {
-<a href=#427 id=427 data-nosnippet>427</a>        <span class="kw">type </span>Block = Mamba3;
-<a href=#428 id=428 data-nosnippet>428</a>        <span class="kw">fn </span>d_model(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
-<a href=#429 id=429 data-nosnippet>429</a>            <span class="self">self</span>.d_model
-<a href=#430 id=430 data-nosnippet>430</a>        }
-<a href=#431 id=431 data-nosnippet>431</a>        <span class="kw">fn </span>init_block(<span class="kw-2">&amp;</span><span class="self">self</span>, n_applications: usize, device: <span class="kw-2">&amp;</span>Device) -&gt; Mamba3 {
-<a href=#432 id=432 data-nosnippet>432</a>            <span class="self">self</span>.init_applications(n_applications, device)
-<a href=#433 id=433 data-nosnippet>433</a>        }
-<a href=#434 id=434 data-nosnippet>434</a>        <span class="attr">#[cfg(feature = <span class="string">"optim"</span>)]
-<a href=#435 id=435 data-nosnippet>435</a>        </span><span class="kw">fn </span>muon_projections(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;burn_stack::optim::ProjSpec&gt; {
-<a href=#436 id=436 data-nosnippet>436</a>            <span class="self">self</span>.muon_projections()
-<a href=#437 id=437 data-nosnippet>437</a>        }
-<a href=#438 id=438 data-nosnippet>438</a>    }
-<a href=#439 id=439 data-nosnippet>439</a>}
+<a href=#421 id=421 data-nosnippet>421</a>        <span class="kw">fn </span>zero_caches_3d(<span class="kw-2">&amp;</span><span class="self">self</span>, x: <span class="kw-2">&amp;</span>Tensor&lt;<span class="number">3</span>&gt;, n_virtual: usize) -&gt; Mamba3Caches {
+<a href=#422 id=422 data-nosnippet>422</a>            <span class="kw">let </span>[batch, _seq, _d] = x.dims();
+<a href=#423 id=423 data-nosnippet>423</a>            zero_single_ssd_caches(<span class="self">self</span>, batch, n_virtual, <span class="kw-2">&amp;</span>x.device()).into()
+<a href=#424 id=424 data-nosnippet>424</a>        }
+<a href=#425 id=425 data-nosnippet>425</a>        <span class="kw">fn </span>zero_caches_2d(<span class="kw-2">&amp;</span><span class="self">self</span>, x: <span class="kw-2">&amp;</span>Tensor&lt;<span class="number">2</span>&gt;, n_virtual: usize) -&gt; Mamba3Caches {
+<a href=#426 id=426 data-nosnippet>426</a>            <span class="kw">let </span>[batch, _d] = x.dims();
+<a href=#427 id=427 data-nosnippet>427</a>            zero_single_ssd_caches(<span class="self">self</span>, batch, n_virtual, <span class="kw-2">&amp;</span>x.device()).into()
+<a href=#428 id=428 data-nosnippet>428</a>        }
+<a href=#429 id=429 data-nosnippet>429</a>        <span class="kw">fn </span>untied_params(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;UntiedParam&gt; {
+<a href=#430 id=430 data-nosnippet>430</a>            <span class="self">self</span>.untied_params()
+<a href=#431 id=431 data-nosnippet>431</a>        }
+<a href=#432 id=432 data-nosnippet>432</a>    }
+<a href=#433 id=433 data-nosnippet>433</a>
+<a href=#434 id=434 data-nosnippet>434</a>    <span class="kw">impl </span>BlockConfig <span class="kw">for </span>Mamba3Config {
+<a href=#435 id=435 data-nosnippet>435</a>        <span class="kw">type </span>Block = Mamba3;
+<a href=#436 id=436 data-nosnippet>436</a>        <span class="kw">fn </span>d_model(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+<a href=#437 id=437 data-nosnippet>437</a>            <span class="self">self</span>.d_model
+<a href=#438 id=438 data-nosnippet>438</a>        }
+<a href=#439 id=439 data-nosnippet>439</a>        <span class="kw">fn </span>init_block(<span class="kw-2">&amp;</span><span class="self">self</span>, n_applications: usize, device: <span class="kw-2">&amp;</span>Device) -&gt; Mamba3 {
+<a href=#440 id=440 data-nosnippet>440</a>            <span class="self">self</span>.init_applications(n_applications, device)
+<a href=#441 id=441 data-nosnippet>441</a>        }
+<a href=#442 id=442 data-nosnippet>442</a>        <span class="attr">#[cfg(feature = <span class="string">"optim"</span>)]
+<a href=#443 id=443 data-nosnippet>443</a>        </span><span class="kw">fn </span>muon_projections(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;burn_stack::optim::ProjSpec&gt; {
+<a href=#444 id=444 data-nosnippet>444</a>            <span class="self">self</span>.muon_projections()
+<a href=#445 id=445 data-nosnippet>445</a>        }
+<a href=#446 id=446 data-nosnippet>446</a>    }
+<a href=#447 id=447 data-nosnippet>447</a>}
 </code></pre></div></section></main></body></html>

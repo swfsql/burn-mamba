@@ -162,7 +162,8 @@ each reset of <code>packed</code>, every layer starts again from a zero cache. T
 positions before the first reset of a row continue from <code>caches</code>.</p>
 <p>The stack puts its class latents into the opening slots of each
 segment, in place of the input tokens. So the output has the shape of
-<code>x</code>. Every class latent of the stack must be a <code>Start</code>. The returned
+<code>x</code>. Every class latent of the stack must be a <code>Start</code>, and <code>packed</code>
+must give each segment one opening slot per class latent. The returned
 caches are those of the last segment of each row.</p>
 </div></details><details class="toggle method-toggle" open><summary><section id="method.step" class="method"><h4 class="code-header">pub fn <a href="#method.step" class="fn">step</a>(
     &amp;self,
