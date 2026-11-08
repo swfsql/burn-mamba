@@ -46,3 +46,27 @@ work for this ticket:
   - `latent_network_multi_gate_class_markers_prime_step_matches_forward`
   - `layers_multi_gate_class_latents_split_forward_matches_single`
   - `layers_multi_gate_prime_then_step_matches_step`
+
+The implementation of burn-stack ticket `02-remove-per-layer-class-latents.md`
+adds this work:
+
+- `class_prime_plan` has no `window_len` parameter now. In
+  `src/unified/tests/class.rs`, delete the second argument (`0`) of each call.
+  In `class_prime_plan_emits_only_what_waits_for_the_next_token`, delete the
+  block that passes `1`. It tests the tokens that a lower level handed up, and
+  only the per-layer latents did that.
+- `the_carry_tracks_class_latents_spliced_below_the_cut` in
+  `src/unified/tests/layers.rs` tests only per-layer latents. Delete it. The
+  burn-stack test `grad_horizon_keeps_a_class_latent_of_the_stack_training`
+  covers a class latent of a stack below a cut.
+- The tests over `run_prime_cut` in `src/unified/tests/layers.rs` use only
+  per-layer latents. They are the only tests that run `prime` under a cut. Port
+  the `run_prime_cut(0)` case to a class latent of the stack. The
+  `run_prime_cut(3)` case has no port: the stream of a prime now always crosses
+  the cut.
+- `latent_network_multi_gate_class_markers_prime_step_matches_forward` and the
+  matching test of `src/unified/tests/class.rs` need more than the deletion of
+  their per-layer lines. Without the layer latent, the sequence is `S N u0 …`.
+  So `seq + 3` becomes `seq + 2`, `row(2)` becomes `row(1)` and `row(t + 3)`
+  becomes `row(t + 2)`. Change their comments and their "three markers" message
+  too.
