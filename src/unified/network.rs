@@ -93,7 +93,7 @@ impl MambaLatentNet {
 
     /// Single-token step. It has no path argument (decoding is recurrent for
     /// all families). The cache family must match the network. `class` (the
-    /// cursors of all three marker levels) goes to the wrapped network (see
+    /// cursors of both marker levels) goes to the wrapped network (see
     /// [`LatentNetwork::step`]).
     pub fn step(
         &self,

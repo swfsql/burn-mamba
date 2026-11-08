@@ -618,133 +618,6 @@ fn layers_multi_gate_stack_class_latents_step_matches_forward() {
     assert_eq!(class.stack, seq + 2);
 }
 
-/// MGR + **per-layer** class latents — the case that needs the streams to grow
-/// with the sequence: layer A splices `Custom(2)`, layer C splices `Start`, so
-/// each lengthens what the layers above it see. `forward` must equal `step`
-/// unrolled (which only the cascade can deliver) on outputs *and* gradients,
-/// the MGR queries and the class embeddings included.
-#[cfg(feature = "mamba2")]
-#[test]
-fn layers_multi_gate_per_layer_class_latents_step_matches_forward() {
-    use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
-    use burn_stack::modules::{LayersBuilder, Residuals, ResidualsConfig};
-    use burn_stack::utils::class::init_class_emb;
-    use burn_stack::utils::{ClassCursors, ClassLatent};
-    use burn::module::Param;
-
-    let device = test_device();
-    let adev = device.clone().autodiff();
-    let d_model = 16;
-    let block = Mamba2Config::new(d_model)
-        .with_expand(2)
-        .with_per_head_dim(4)
-        .with_state_rank(8)
-        .with_ngroups(1)
-        .with_conv_kernel(4);
-    // Two streams over three layers: layer 0 accumulates, layers 1–2 mix, so
-    // both phases run and every MGR query carries a gradient.
-    let mut layers = LayersBuilder::new(3, block)
-        .with_residuals(ResidualsConfig::MultiGate {
-            n_stream: 2,
-            init_bias: -1.0,
-            init_bias_offset: -0.5,
-            per_virtual_layer: false,
-        })
-        .init(&adev);
-    // Per-layer latents aren't builder-configurable; set them on the layers.
-    layers.real_layers[0].class_latents = vec![ClassLatent::Custom(2)];
-    layers.real_layers[0].class_latents_emb = init_class_emb(1, d_model, &adev);
-    layers.real_layers[2].class_latents = vec![ClassLatent::Start];
-    layers.real_layers[2].class_latents_emb = init_class_emb(1, d_model, &adev);
-
-    let (batch, seq) = (2usize, 3usize);
-    let dist = Distribution::Normal(0.0, 1.0);
-    let x_inner = Tensor::<3>::random([batch, seq, d_model], dist, &device);
-    let head_inner = Tensor::<3>::random([batch, seq, d_model], dist, &device);
-    // C_cls@0, u0@1, u1@2, A_cls@3, u2@4.
-    let user_pos = [1usize, 2, 4];
-    let path = Mamba2SsdPath::Minimal(None);
-    let Residuals::MultiGate(mg) = &layers.residuals else {
-        unreachable!("built with MultiGate")
-    };
-
-    // (user output, d input, d layer-0 in_proj, d both class embs, d w_beta/w_alpha)
-    type Run = (
-        Tensor<3>,
-        Tensor<3>,
-        Tensor<2>,
-        Tensor<2>,
-        Tensor<2>,
-        Tensor<1>,
-        Tensor<1>,
-    );
-    let run = |stepwise: bool| -> Run {
-        let x = Param::from_tensor(Tensor::from_inner(x_inner.clone()));
-        let out_user = if stepwise {
-            let mut cursors = ClassCursors::new(seq);
-            let mut caches = None;
-            let mut outs = Vec::new();
-            for t in 0..seq {
-                let xt = x.val().narrow(1, t, 1).squeeze_dim::<2>(1);
-                let (yt, c) = layers.step(xt, caches, Some(&mut cursors));
-                caches = Some(c);
-                outs.push(yt.unsqueeze_dim::<3>(1));
-            }
-            Tensor::cat(outs, 1)
-        } else {
-            let (out_full, _c) = layers.forward(x.val(), None, path.clone(), None, None);
-            assert_eq!(out_full.dims(), [batch, seq + 2, d_model]);
-            let parts: Vec<_> = user_pos
-                .iter()
-                .map(|&p| out_full.clone().narrow(1, p, 1))
-                .collect();
-            Tensor::cat(parts, 1)
-        };
-
-        let grads = (out_user.clone() * Tensor::from_inner(head_inner.clone()))
-            .sum()
-            .backward();
-        let d_emb = |i: usize| {
-            layers.real_layers[i]
-                .class_latents_emb
-                .as_ref()
-                .unwrap()
-                .val()
-                .grad(&grads)
-                .expect("class emb grad")
-        };
-        (
-            out_user.inner(),
-            x.val().grad(&grads).expect("input grad"),
-            layers.real_layers[0]
-                .block
-                .in_proj
-                .weight
-                .val()
-                .grad(&grads)
-                .expect("in_proj grad"),
-            d_emb(0),
-            d_emb(2),
-            mg.layers[1].w_beta.val().grad(&grads).expect("w_beta grad"),
-            mg.layers[1]
-                .w_alpha
-                .val()
-                .grad(&grads)
-                .expect("w_alpha grad"),
-        )
-    };
-
-    let f = run(false);
-    let s = run(true);
-    assert!(max_rel_diff(s.0, f.0) < dtype_tol(1e-4), "user outputs disagree");
-    assert!(max_rel_diff(s.1, f.1) < dtype_tol(1e-3), "input grads disagree");
-    assert!(max_rel_diff(s.2, f.2) < dtype_tol(1e-3), "in_proj grads disagree");
-    assert!(max_rel_diff(s.3, f.3) < dtype_tol(1e-3), "Custom class-emb grads disagree");
-    assert!(max_rel_diff(s.4, f.4) < dtype_tol(1e-3), "Start class-emb grads disagree");
-    assert!(max_rel_diff(s.5, f.5) < dtype_tol(1e-3), "w_beta grads disagree");
-    assert!(max_rel_diff(s.6, f.6) < dtype_tol(1e-3), "w_alpha grads disagree");
-}
-
 /// MGR + class latents under a **chunked** `forward`: the same cursors carried
 /// across two chunks must place every latent exactly where the single-call
 /// `forward` does, streams included.
@@ -753,7 +626,6 @@ fn layers_multi_gate_per_layer_class_latents_step_matches_forward() {
 fn layers_multi_gate_class_latents_split_forward_matches_single() {
     use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
     use burn_stack::modules::{LayersBuilder, ResidualsConfig};
-    use burn_stack::utils::class::init_class_emb;
     use burn_stack::utils::{ClassCursors, ClassLatent};
 
     let device = test_device();
@@ -764,7 +636,7 @@ fn layers_multi_gate_class_latents_split_forward_matches_single() {
         .with_state_rank(8)
         .with_ngroups(1)
         .with_conv_kernel(4);
-    let mut layers = LayersBuilder::new(3, block)
+    let layers = LayersBuilder::new(3, block)
         .with_class_latents(vec![ClassLatent::Start])
         .with_residuals(ResidualsConfig::MultiGate {
             n_stream: 3,
@@ -773,8 +645,6 @@ fn layers_multi_gate_class_latents_split_forward_matches_single() {
             per_virtual_layer: false,
         })
         .init(&device);
-    layers.real_layers[1].class_latents = vec![ClassLatent::Custom(3)];
-    layers.real_layers[1].class_latents_emb = init_class_emb(1, d_model, &device);
 
     let (batch, seq) = (2usize, 6usize);
     let x = Tensor::<3>::random(
@@ -805,7 +675,6 @@ fn layers_multi_gate_class_latents_split_forward_matches_single() {
 fn layers_multi_gate_prime_then_step_matches_step() {
     use crate::mamba2::prelude::Mamba2Config;
     use burn_stack::modules::{LayersBuilder, ResidualsConfig};
-    use burn_stack::utils::class::init_class_emb;
     use burn_stack::utils::{ClassCursors, ClassLatent};
 
     let device = test_device();
@@ -816,7 +685,7 @@ fn layers_multi_gate_prime_then_step_matches_step() {
         .with_state_rank(8)
         .with_ngroups(1)
         .with_conv_kernel(4);
-    let mut layers = LayersBuilder::new(3, block)
+    let layers = LayersBuilder::new(3, block)
         .with_class_latents(vec![ClassLatent::Start])
         .with_residuals(ResidualsConfig::MultiGate {
             n_stream: 3,
@@ -825,8 +694,6 @@ fn layers_multi_gate_prime_then_step_matches_step() {
             per_virtual_layer: false,
         })
         .init(&device);
-    layers.real_layers[2].class_latents = vec![ClassLatent::Start];
-    layers.real_layers[2].class_latents_emb = init_class_emb(1, d_model, &device);
 
     let (batch, seq) = (2usize, 3usize);
     let x = Tensor::<3>::random(
@@ -852,8 +719,8 @@ fn layers_multi_gate_prime_then_step_matches_step() {
     for (t, want) in plain.iter().enumerate() {
         let (primed, c) = layers.prime(batch, caches2, Some(&mut class2));
         caches2 = c;
-        // The stack's `Start` (t == 0) and layer 2's own `Start` are due before
-        // the very first token; nothing waits for the later ones.
+        // The stack's `Start` is due before the very first token. Nothing waits
+        // for the later ones.
         assert_eq!(primed.is_some(), t == 0, "primed latents at t={t}");
         let (y, c) = layers.step(token(t), caches2, Some(&mut class2));
         caches2 = Some(c);
@@ -912,10 +779,10 @@ fn bidi_multi_gate_class_latents_forward() {
     assert_eq!(y.dims(), [batch, seq + 2, d_model]);
 }
 
-/// The whole class-marker stack — a network's [`ClassToken`], the stack's own
-/// [`ClassLatent`] and a per-layer one — on top of MGR, driven through the
-/// config surface a user actually reaches. `prime` then `step` must reproduce
-/// the single `forward`, marker for marker, and the final state with it.
+/// Both marker levels (a network's [`ClassToken`] and the stack's own
+/// [`ClassLatent`]) on top of MGR, driven through the config surface a user
+/// actually reaches. `prime` then `step` must reproduce the single `forward`,
+/// marker for marker, and the final state with it.
 ///
 /// [`ClassToken`]: burn_stack::utils::ClassToken
 /// [`ClassLatent`]: burn_stack::utils::ClassLatent
@@ -925,7 +792,6 @@ fn latent_network_multi_gate_class_markers_prime_step_matches_forward() {
     use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
     use burn_stack::modules::network::LatentNetworkBuilder;
     use burn_stack::modules::{LayersBuilder, ResidualsConfig};
-    use burn_stack::utils::class::init_class_emb;
     use burn_stack::utils::{ClassCursors, ClassLatent, ClassToken};
 
     let device = test_device();
@@ -936,7 +802,7 @@ fn latent_network_multi_gate_class_markers_prime_step_matches_forward() {
         .with_state_rank(8)
         .with_ngroups(1)
         .with_conv_kernel(4);
-    let mut net = LatentNetworkBuilder {
+    let net = LatentNetworkBuilder {
         input_size: 3,
         layers: LayersBuilder::new(2, block)
             .with_class_latents(vec![ClassLatent::Start])
@@ -952,34 +818,31 @@ fn latent_network_multi_gate_class_markers_prime_step_matches_forward() {
         class_tokens: vec![ClassToken::Start],
     }
     .init(&device);
-    net.layers.real_layers[1].class_latents = vec![ClassLatent::Start];
-    net.layers.real_layers[1].class_latents_emb = init_class_emb(1, d_model, &device);
 
     let (batch, seq) = (2usize, 3usize);
     let x = Tensor::<3>::random([batch, seq, 3], Distribution::Normal(0.0, 1.0), &device);
 
-    // forward ⇒ L S N u0 u1 u2 (each level opens the one above it).
+    // forward ⇒ S N u0 u1 u2 (each level opens the one above it).
     let (y_fwd, c_fwd) = net.forward(x.clone(), None, Mamba2SsdPath::default(), None, None);
-    assert_eq!(y_fwd.dims(), [batch, seq + 3, 2]);
+    assert_eq!(y_fwd.dims(), [batch, seq + 2, 2]);
     let row = |p: usize| y_fwd.clone().narrow(1, p, 1).squeeze_dim::<2>(1);
 
-    // One prime emits all three markers; the network's class token is the last.
+    // One prime emits both markers. The network's class token is the last.
     let mut class = ClassCursors::new(seq);
     let (y_prime, mut caches) = net.prime(batch, None, Some(&mut class));
     assert!(
-        max_rel_diff(y_prime.expect("three markers were waiting"), row(2)) < dtype_tol(1e-4),
+        max_rel_diff(y_prime.expect("two markers wait"), row(1)) < dtype_tol(1e-4),
         "prime did not return the network's class token"
     );
     assert_eq!(class.network, 1);
     assert_eq!(class.stack, 2);
-    assert_eq!(class.per_layer, vec![2, 3]);
 
     for t in 0..seq {
         let xt = x.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
         let (yt, c) = net.step(xt, caches, Some(&mut class));
         caches = Some(c);
         assert!(
-            max_rel_diff(yt, row(t + 3)) < dtype_tol(1e-4),
+            max_rel_diff(yt, row(t + 2)) < dtype_tol(1e-4),
             "MGR step {t} disagrees with forward after the prime"
         );
     }
@@ -992,78 +855,5 @@ fn latent_network_multi_gate_class_markers_prime_step_matches_forward() {
             max_rel_diff(s.ssm_bhpr.clone(), f.ssm_bhpr.clone()) < dtype_tol(1e-4),
             "layer {i} state disagrees"
         );
-    }
-}
-
-
-/// Every marker kind on a **per-layer** latent, under both residual schemes.
-///
-/// `Middle`/`End` resolve only against the whole sequence, so the cascade —
-/// which places a layer's latents from the stack-wide cursors — must step its
-/// tokens past [`Layer::step`]'s cursorless guard. Both schemes must match
-/// their own `forward`, MGR additionally threading the rows into its streams.
-///
-/// [`Layer::step`]: burn_stack::modules::Layer::step
-#[cfg(feature = "mamba2")]
-#[test]
-fn layers_per_layer_middle_and_end_latents_step_matches_forward() {
-    use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
-    use burn_stack::modules::{LayersBuilder, ResidualsConfig};
-    use burn_stack::utils::class::init_class_emb;
-    use burn_stack::utils::{ClassCursors, ClassLatent};
-
-    let device = test_device();
-    let d_model = 16;
-    let block = Mamba2Config::new(d_model)
-        .with_expand(2)
-        .with_per_head_dim(4)
-        .with_state_rank(8)
-        .with_ngroups(1)
-        .with_conv_kernel(4);
-    let (batch, seq) = (2usize, 4usize);
-    let x = Tensor::<3>::random(
-        [batch, seq, d_model],
-        Distribution::Normal(0.0, 1.0),
-        &device,
-    );
-
-    for residuals in [
-        ResidualsConfig::Standard,
-        ResidualsConfig::MultiGate {
-            n_stream: 2,
-            init_bias: -1.0,
-            init_bias_offset: -0.5,
-            per_virtual_layer: false,
-        },
-    ] {
-        let multi_gate = matches!(residuals, ResidualsConfig::MultiGate { .. });
-        let mut layers = LayersBuilder::new(3, block.clone())
-            .with_residuals(residuals)
-            .init(&device);
-        layers.real_layers[1].class_latents = vec![ClassLatent::Middle, ClassLatent::End];
-        layers.real_layers[1].class_latents_emb = init_class_emb(2, d_model, &device);
-
-        // Layer 1 sees the 4 user tokens and splices M@2 and E@4:
-        // u0 u1 M u2 u3 E ⇒ the user tokens keep positions 0,1,3,4.
-        let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None, None);
-        assert_eq!(y_fwd.dims(), [batch, seq + 2, d_model]);
-        let user_pos = [0usize, 1, 3, 4];
-
-        let mut class = ClassCursors::new(seq);
-        let mut caches = None;
-        for (t, &pos) in user_pos.iter().enumerate() {
-            let xt = x.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
-            let (yt, c) = layers.step(xt, caches, Some(&mut class));
-            caches = Some(c);
-            // The last step carries the closing `End`, so it returns *that*
-            // token — the sequence's true last one.
-            let want = if t + 1 == seq { seq + 1 } else { pos };
-            let expected = y_fwd.clone().narrow(1, want, 1).squeeze_dim::<2>(1);
-            assert!(
-                max_rel_diff(yt, expected) < dtype_tol(1e-4),
-                "multi_gate={multi_gate}: step disagrees with forward at t={t}"
-            );
-        }
-        assert_eq!(class.per_layer, vec![seq, seq + 2, seq + 2]);
     }
 }

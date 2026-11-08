@@ -235,8 +235,8 @@ fn mamba1_plan_fits_the_model() {
     assert_plan_excludes_boundaries(&plan, &rows);
 }
 
-/// A bidirectional stack stores its blocks under `straight_block`/`reverse_block`
-/// rather than `block`; the plan must still find them (both of them).
+/// Each bidirectional pair holds one block per direction, each under
+/// `real_layers.N.block`. The plan must find the blocks of both directions.
 #[cfg(feature = "mamba3")]
 #[test]
 fn bidi_plan_fits_the_model() {

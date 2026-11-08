@@ -6,10 +6,7 @@ use crate::prelude::*;
 use crate::unified::{bidi::*, network::*};
 use burn::prelude::*;
 use burn_stack::modules::*;
-use burn::module::Param;
-use burn_stack::utils::class::{
-    class_marker_output_indices, class_prime_plan, class_window_plan, init_class_emb,
-};
+use burn_stack::utils::class::{class_marker_output_indices, class_prime_plan, class_window_plan};
 use burn_stack::utils::{ClassCursor, ClassCursors};
 use burn_stack::utils::test_helpers::{dtype_tol, test_device};
 
@@ -548,147 +545,6 @@ fn class_latents_step_matches_forward() {
     assert_eq!(class.stack, 6);
 }
 
-// Per-layer class latents in a 3-layer stack — A: `Custom(2)`, B: none, C:
-// `Start` — with NO stack-level latents. A class latent grows the sequence the
-// *next* layer sees, so `step` can only match `forward` via the cascade (each
-// token a layer emits, its class latents included, must flow into the next
-// layer in order). Checks results, final state, AND gradients all agree between
-// a length-3 `forward` and 3 `step`s.
-#[cfg(feature = "mamba2")]
-#[test]
-fn per_layer_class_latents_step_matches_forward() {
-    use burn_stack::utils::test_helpers::max_rel_diff;
-    use burn::tensor::Distribution;
-
-    let device = test_device();
-    let adev = device.clone().autodiff();
-    let d_model = 16;
-    let block = Mamba2Config::new(d_model)
-        .with_expand(2)
-        .with_per_head_dim(4)
-        .with_state_rank(8)
-        .with_ngroups(1)
-        .with_conv_kernel(4);
-
-    // A,B,C; A=Custom(2), C=Start, B none. (Per-layer latents aren't builder-
-    // configurable, so set them directly on the real layers.)
-    let mut layers = LayersBuilder::new(3, block).init(&adev);
-    layers.real_layers[0].class_latents = vec![ClassLatent::Custom(2)];
-    layers.real_layers[0].class_latents_emb = init_class_emb(1, d_model, &adev);
-    layers.real_layers[2].class_latents = vec![ClassLatent::Start];
-    layers.real_layers[2].class_latents_emb = init_class_emb(1, d_model, &adev);
-
-    let (batch, seq) = (2usize, 3usize);
-    let dist = Distribution::Normal(0.0, 1.0);
-    // Stable values reused (as fresh autodiff leaves) by both runs.
-    let x_inner = Tensor::<3>::random([batch, seq, d_model], dist, &device);
-    let out_head_inner = Tensor::<3>::random([batch, seq, d_model], dist, &device);
-
-    // forward output is length seq + 2 (A adds one, C adds one); the user tokens
-    // land at [1, 2, 4]: C_cls@0, u0@1, u1@2, A_cls@3, u2@4.
-    let user_pos = [1usize, 2, 4];
-    let path = Mamba2SsdPath::Minimal(None);
-
-    // One run (forward or stepwise). Returns the user output + final per-layer
-    // state (inner tensors) and the gradients of the input and a few params.
-    type Run = (
-        Tensor<3>,                   // user output
-        Vec<(Tensor<3>, Tensor<4>)>, // per-layer (conv, ssm) final state
-        Tensor<3>,                   // d input
-        Tensor<2>,                   // d layer-0 in_proj weight
-        Tensor<2>,                   // d layer-A (Custom) class emb
-        Tensor<2>,                   // d layer-C (Start) class emb
-    );
-    let run = |stepwise: bool| -> Run {
-        let x = Param::from_tensor(Tensor::from_inner(x_inner.clone()));
-        let (out_user, caches) = if stepwise {
-            let mut cursors = ClassCursors::new(seq);
-            let mut caches = None;
-            let mut outs = Vec::new();
-            for t in 0..seq {
-                let xt = x.val().narrow(1, t, 1).squeeze_dim::<2>(1);
-                let (yt, c) = layers.step(xt, caches, Some(&mut cursors));
-                caches = Some(c);
-                outs.push(yt.unsqueeze_dim::<3>(1));
-            }
-            (Tensor::cat(outs, 1), caches.unwrap())
-        } else {
-            let (out_full, caches) = layers.forward(x.val(), None, path.clone(), None, None);
-            let parts: Vec<_> = user_pos
-                .iter()
-                .map(|&p| out_full.clone().narrow(1, p, 1))
-                .collect();
-            (Tensor::cat(parts, 1), caches)
-        };
-
-        // Loss couples the user output (via a fixed head) with the final state
-        // (sum of squares), so gradients run through both the output and state.
-        let out_head = Tensor::from_inner(out_head_inner.clone());
-        let mut loss = (out_user.clone() * out_head).sum();
-        for c in &caches.caches {
-            loss = loss + (c.conv_bvk.clone() * c.conv_bvk.clone()).sum();
-            loss = loss + (c.ssm_bhpr.clone() * c.ssm_bhpr.clone()).sum();
-        }
-        let grads = loss.backward();
-
-        let state: Vec<(Tensor<3>, Tensor<4>)> = caches
-            .caches
-            .iter()
-            .map(|c| (c.conv_bvk.clone().inner(), c.ssm_bhpr.clone().inner()))
-            .collect();
-        let d_emb = |i: usize| {
-            layers.real_layers[i]
-                .class_latents_emb
-                .as_ref()
-                .unwrap()
-                .val()
-                .grad(&grads)
-                .expect("class emb grad")
-        };
-        (
-            out_user.inner(),
-            state,
-            x.val().grad(&grads).expect("input grad"),
-            layers.real_layers[0]
-                .block
-                .in_proj
-                .weight
-                .val()
-                .grad(&grads)
-                .expect("in_proj grad"),
-            d_emb(0),
-            d_emb(2),
-        )
-    };
-
-    let f = run(false);
-    let s = run(true);
-
-    // Results + final state.
-    assert!(max_rel_diff(f.0, s.0) < dtype_tol(1e-4), "user outputs disagree");
-    for (i, ((cf, sf), (cs, ss))) in f.1.iter().zip(&s.1).enumerate() {
-        assert!(
-            max_rel_diff(cf.clone(), cs.clone()) < dtype_tol(1e-4),
-            "layer {i} conv state disagrees"
-        );
-        assert!(
-            max_rel_diff(sf.clone(), ss.clone()) < dtype_tol(1e-4),
-            "layer {i} state disagrees"
-        );
-    }
-    // Gradients (input, a block weight, and both class-latent embeddings).
-    assert!(max_rel_diff(f.2, s.2) < dtype_tol(1e-3), "input grads disagree");
-    assert!(max_rel_diff(f.3, s.3) < dtype_tol(1e-3), "in_proj grads disagree");
-    assert!(
-        max_rel_diff(f.4, s.4) < dtype_tol(1e-3),
-        "Custom class-emb grads disagree"
-    );
-    assert!(
-        max_rel_diff(f.5, s.5) < dtype_tol(1e-3),
-        "Start class-emb grads disagree"
-    );
-}
-
 // --- prime (class-only steps, no user token) -------------------------------
 
 // The prime planner, checked directly against the window planner it splits off
@@ -703,13 +559,10 @@ fn class_prime_plan_emits_only_what_waits_for_the_next_token() {
 
     // A prime at the start emits `Start` alone — the others wait for a token.
     let mut cursor = ClassCursor::whole(3);
-    assert_eq!(
-        class_prime_plan(&markers, 0, &mut cursor, "test"),
-        vec![(0, 0)]
-    );
+    assert_eq!(class_prime_plan(&markers, &mut cursor, "test"), vec![(0, 0)]);
     assert_eq!(cursor.offset, 1);
     // Priming again finds nothing…
-    assert_eq!(class_prime_plan(&markers, 0, &mut cursor, "test"), vec![]);
+    assert_eq!(class_prime_plan(&markers, &mut cursor, "test"), vec![]);
     assert_eq!(cursor.offset, 1);
     // …and the two steps that follow carry their user token alone (`Start` is
     // behind the cursor, the `Custom` still waits for u2).
@@ -717,10 +570,7 @@ fn class_prime_plan_emits_only_what_waits_for_the_next_token() {
     assert_eq!(class_window_plan(&markers, 1, &mut cursor, "test"), vec![]);
     assert_eq!(cursor.offset, 3);
     // Now the `Custom` is what u2 would have been preceded by, so it primes.
-    assert_eq!(
-        class_prime_plan(&markers, 0, &mut cursor, "test"),
-        vec![(0, 1)]
-    );
+    assert_eq!(class_prime_plan(&markers, &mut cursor, "test"), vec![(0, 1)]);
     assert_eq!(cursor.offset, 4);
     // The last user token closes the sequence and `End` trails it there — never
     // on a prime, and the prime that follows has no next token to serve.
@@ -729,38 +579,18 @@ fn class_prime_plan_emits_only_what_waits_for_the_next_token() {
         vec![(1, 2)]
     );
     assert_eq!(cursor.offset, 6);
-    assert_eq!(class_prime_plan(&markers, 0, &mut cursor, "test"), vec![]);
+    assert_eq!(class_prime_plan(&markers, &mut cursor, "test"), vec![]);
     assert_eq!(cursor.offset, 6);
-
-    // A prime reaching an upper level carries the tokens the level below just
-    // emitted, and flushes what the *next* one is due to be preceded by — the
-    // one difference from `class_window_plan` on the same tokens.
-    let markers = vec![ClassLatent::Custom(1)];
-    let mut cursor = ClassCursor::whole(4);
-    assert_eq!(class_window_plan(&markers, 1, &mut cursor, "test"), vec![]);
-    assert_eq!(cursor.offset, 1);
-    let mut cursor = ClassCursor::whole(4);
-    assert_eq!(
-        class_prime_plan(&markers, 1, &mut cursor, "test"),
-        vec![(1, 0)]
-    );
-    assert_eq!(cursor.offset, 2);
 
     // An open-ended stream — the seedless case with no announced length: a
     // further token is always still to come, so `Start`/`Custom` prime exactly.
     let markers = vec![ClassLatent::Start, ClassLatent::Custom(1)];
     let mut cursor = ClassCursor::default();
-    assert_eq!(
-        class_prime_plan(&markers, 0, &mut cursor, "test"),
-        vec![(0, 0)]
-    );
+    assert_eq!(class_prime_plan(&markers, &mut cursor, "test"), vec![(0, 0)]);
     assert_eq!(cursor.offset, 1);
     assert_eq!(class_window_plan(&markers, 1, &mut cursor, "test"), vec![]);
     assert_eq!(cursor.offset, 2);
-    assert_eq!(
-        class_prime_plan(&markers, 0, &mut cursor, "test"),
-        vec![(0, 1)]
-    );
+    assert_eq!(class_prime_plan(&markers, &mut cursor, "test"), vec![(0, 1)]);
     assert_eq!(cursor.offset, 3);
 }
 
@@ -875,133 +705,9 @@ fn prime_emits_the_class_markers_a_step_would_drop() {
     }
 }
 
-// Seedless start: with a class latent on the *upper* layer only, a prime has no
-// bottom stream at all — layer 0 runs nothing and layer 1 still emits its own
-// waiting latent, exactly as the cascade does in `forward`. The caches come back
-// complete (layer 0 holding the zero state it never left), so the steps that
-// follow can be threaded straight on.
-#[cfg(feature = "mamba2")]
-#[test]
-fn prime_runs_a_per_layer_latent_with_an_empty_stream() {
-    use burn_stack::utils::test_helpers::max_rel_diff;
-    use burn::tensor::Distribution;
-
-    let device = test_device();
-    let d_model = 16;
-    let block = Mamba2Config::new(d_model)
-        .with_expand(2)
-        .with_per_head_dim(4)
-        .with_state_rank(8)
-        .with_ngroups(1)
-        .with_conv_kernel(4);
-    let mut layers = LayersBuilder::new(2, block).init(&device);
-    // Only the second layer carries a latent (not builder-configurable).
-    layers.real_layers[1].class_latents = vec![ClassLatent::Start];
-    layers.real_layers[1].class_latents_emb = init_class_emb(1, d_model, &device);
-
-    let (batch, seq) = (2usize, 3usize);
-    let x = Tensor::<3>::random(
-        [batch, seq, d_model],
-        Distribution::Normal(0.0, 1.0),
-        &device,
-    );
-
-    // forward ⇒ the latent opens the sequence layer 1 sees, so the output is
-    // [latent, u0, u1, u2].
-    let (y_fwd, c_fwd) = layers.forward(x.clone(), None, Mamba2SsdPath::default(), None, None);
-    assert_eq!(y_fwd.dims(), [batch, seq + 1, d_model]);
-
-    let mut class = ClassCursors::new(seq);
-    let (y_prime, mut caches) = layers.prime(batch, None, Some(&mut class));
-    let row = |p: usize| y_fwd.clone().narrow(1, p, 1).squeeze_dim::<2>(1);
-    assert!(
-        max_rel_diff(
-            y_prime.expect("the upper layer's latent was waiting"),
-            row(0)
-        ) < dtype_tol(1e-4),
-        "prime did not return the per-layer latent"
-    );
-    // The bottom layer ran nothing, the top one one token.
-    assert_eq!(class.stack, 0);
-    assert_eq!(class.per_layer, vec![0, 1]);
-
-    for t in 0..seq {
-        let xt = x.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
-        let (yt, c) = layers.step(xt, caches, Some(&mut class));
-        caches = Some(c);
-        assert!(
-            max_rel_diff(yt, row(t + 1)) < dtype_tol(1e-4),
-            "step {t} disagrees with forward after the prime"
-        );
-    }
-    for (i, (f, s)) in c_fwd.caches.iter().zip(&caches.unwrap().caches).enumerate() {
-        assert!(
-            max_rel_diff(f.conv_bvk.clone(), s.conv_bvk.clone()) < dtype_tol(1e-4),
-            "layer {i} conv state disagrees"
-        );
-        assert!(
-            max_rel_diff(f.ssm_bhpr.clone(), s.ssm_bhpr.clone()) < dtype_tol(1e-4),
-            "layer {i} state disagrees"
-        );
-    }
-}
-
-// The same, for Mamba-3: `prime` is family-generic, and the caches it completes
-// for the layers that ran nothing must stay pathway-compatible with the ones a
-// cacheless `step` builds (both single-ssd).
-#[cfg(feature = "mamba3")]
-#[test]
-fn prime_runs_a_per_layer_latent_mamba3() {
-    use burn_stack::utils::test_helpers::max_rel_diff;
-    use burn::tensor::Distribution;
-
-    let device = test_device();
-    let d_model = 16;
-    let block = Mamba3Config::new(d_model)
-        .with_expand(2)
-        .with_per_head_dim(4)
-        .with_state_rank(8)
-        .with_ngroups(1)
-        .with_mimo_rank(1)
-        .with_rotation_fraction(0.5);
-    let mut layers = LayersBuilder::new(2, block).init(&device);
-    layers.real_layers[1].class_latents = vec![ClassLatent::Start];
-    layers.real_layers[1].class_latents_emb = init_class_emb(1, d_model, &device);
-
-    let (batch, seq) = (2usize, 3usize);
-    let x = Tensor::<3>::random(
-        [batch, seq, d_model],
-        Distribution::Normal(0.0, 1.0),
-        &device,
-    );
-    let (y_fwd, _c) = layers.forward(x.clone(), None, Mamba3SsdPath::default(), None, None);
-    assert_eq!(y_fwd.dims(), [batch, seq + 1, d_model]);
-    let row = |p: usize| y_fwd.clone().narrow(1, p, 1).squeeze_dim::<2>(1);
-
-    let mut class = ClassCursors::new(seq);
-    let (y_prime, mut caches) = layers.prime(batch, None, Some(&mut class));
-    assert!(
-        max_rel_diff(
-            y_prime.expect("the upper layer's latent was waiting"),
-            row(0)
-        ) < dtype_tol(1e-4),
-        "prime did not return the per-layer latent"
-    );
-    for t in 0..seq {
-        let xt = x.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
-        let (yt, c) = layers.step(xt, caches, Some(&mut class));
-        caches = Some(c);
-        assert!(
-            max_rel_diff(yt, row(t + 1)) < dtype_tol(1e-4),
-            "step {t} disagrees with forward after the prime"
-        );
-    }
-}
-
-// A network primes all three marker levels at once: its own class token runs a
-// full pass (the stack splicing its latents around it, per-layer ones included),
-// and the layers flush whatever is still waiting above it. What comes back is
-// the last marker's output — the seedless generation seed.
+// A network primes both marker levels at once. Its own class token runs a full
+// pass, and the stack splices its latents around that pass. The prime returns
+// the output of the last marker: the seedless generation seed.
 #[cfg(feature = "mamba2")]
 #[test]
 fn prime_on_a_network_covers_every_class_level() {
@@ -1016,7 +722,7 @@ fn prime_on_a_network_covers_every_class_level() {
         .with_state_rank(8)
         .with_ngroups(1)
         .with_conv_kernel(4);
-    let mut net = LatentNetworkBuilder {
+    let net = LatentNetworkBuilder {
         input_size: 3,
         layers: LayersBuilder::new(2, block).with_class_latents(vec![ClassLatent::Start]),
         output_size: 2,
@@ -1024,36 +730,33 @@ fn prime_on_a_network_covers_every_class_level() {
         class_tokens: vec![ClassToken::Start],
     }
     .init(&device);
-    net.layers.real_layers[1].class_latents = vec![ClassLatent::Start];
-    net.layers.real_layers[1].class_latents_emb = init_class_emb(1, d_model, &device);
 
     let (batch, seq) = (2usize, 3usize);
     let x = Tensor::<3>::random([batch, seq, 3], Distribution::Normal(0.0, 1.0), &device);
 
-    // forward ⇒ L S N u0 u1 u2: the layer-1 latent below the stack latent, both
-    // below the network's class token (each level opens the one above it).
+    // forward ⇒ S N u0 u1 u2: the stack latent is below the network's class
+    // token (each level opens the one above it).
     let (y_fwd, c_fwd) = net.forward(x.clone(), None, Mamba2SsdPath::default(), None, None);
-    assert_eq!(y_fwd.dims(), [batch, seq + 3, 2]);
+    assert_eq!(y_fwd.dims(), [batch, seq + 2, 2]);
     let row = |p: usize| y_fwd.clone().narrow(1, p, 1).squeeze_dim::<2>(1);
 
-    // One prime emits all three markers; the network's class token is the last
-    // of them, so its output is what comes back.
+    // One prime emits both markers. The network's class token is the last of
+    // them, so the prime returns its output.
     let mut class = ClassCursors::new(seq);
     let (y_prime, mut caches) = net.prime(batch, None, Some(&mut class));
     assert!(
-        max_rel_diff(y_prime.expect("three markers were waiting"), row(2)) < dtype_tol(1e-4),
+        max_rel_diff(y_prime.expect("two markers wait"), row(1)) < dtype_tol(1e-4),
         "prime did not return the network's class token"
     );
     assert_eq!(class.network, 1);
     assert_eq!(class.stack, 2);
-    assert_eq!(class.per_layer, vec![2, 3]);
 
     for t in 0..seq {
         let xt = x.clone().narrow(1, t, 1).squeeze_dim::<2>(1);
         let (yt, c) = net.step(xt, caches, Some(&mut class));
         caches = Some(c);
         assert!(
-            max_rel_diff(yt, row(t + 3)) < dtype_tol(1e-4),
+            max_rel_diff(yt, row(t + 2)) < dtype_tol(1e-4),
             "step {t} disagrees with forward after the prime"
         );
     }
@@ -1067,74 +770,6 @@ fn prime_on_a_network_covers_every_class_level() {
             "layer {i} state disagrees"
         );
     }
-}
-
-// A bare `Layer` primes too, handing back the latent's delta *and* the latent
-// itself so the caller can close the residual it owns. Priming then stepping
-// must equal the single cursored step that would have emitted both.
-#[cfg(feature = "mamba2")]
-#[test]
-fn layer_prime_returns_the_latent_and_its_delta() {
-    use burn_stack::utils::test_helpers::max_rel_diff;
-    use burn::tensor::Distribution;
-
-    let device = test_device();
-    let d_model = 16;
-    let block = Mamba2Config::new(d_model)
-        .with_expand(2)
-        .with_per_head_dim(4)
-        .with_state_rank(8)
-        .with_ngroups(1)
-        .with_conv_kernel(4);
-    let mut layers = LayersBuilder::new(1, block).init(&device);
-    layers.real_layers[0].class_latents = vec![ClassLatent::Start];
-    layers.real_layers[0].class_latents_emb = init_class_emb(1, d_model, &device);
-    let layer = &layers.real_layers[0];
-
-    let (batch, seq) = (2usize, 2usize);
-    let x = Tensor::<3>::random(
-        [batch, seq, d_model],
-        Distribution::Normal(0.0, 1.0),
-        &device,
-    );
-    let x0 = x.clone().narrow(1, 0, 1).squeeze_dim::<2>(1);
-
-    // One cursored step emits the latent and then the token, returning the
-    // token's delta.
-    let mut c_step = ClassCursor::whole(seq);
-    let (y_step, cache_step) = layer.step(x0.clone(), None, Some(&mut c_step));
-
-    // The same, split: prime the latent, then step the token.
-    let mut c_prime = ClassCursor::whole(seq);
-    let (primed, cache) = layer.prime(batch, None, Some(&mut c_prime));
-    let (delta, latent) = primed.expect("the Start latent was waiting");
-    let (y_prime, cache_prime) = layer.step(x0, cache, Some(&mut c_prime));
-    assert_eq!(c_prime, c_step);
-    assert!(
-        max_rel_diff(y_step, y_prime.clone()) < dtype_tol(1e-4),
-        "priming the latent changed the step that followed"
-    );
-    assert!(
-        max_rel_diff(cache_step.ssm_bhpr, cache_prime.ssm_bhpr.clone()) < dtype_tol(1e-4),
-        "priming the latent changed the state"
-    );
-
-    // `(delta, latent)` is the layer's own row and what it produced from it: the
-    // sequence `[latent, x0]` run through `forward` gives both deltas.
-    let reference = Tensor::cat(
-        vec![latent.unsqueeze_dim::<3>(1), x.clone().narrow(1, 0, 1)],
-        1,
-    );
-    let (y_ref, c_ref) = layer.forward(reference, None, Mamba2SsdPath::default(), None);
-    assert!(
-        max_rel_diff(delta, y_ref.clone().narrow(1, 0, 1).squeeze_dim::<2>(1)) < dtype_tol(1e-4),
-        "the primed delta is not the latent's"
-    );
-    assert!(
-        max_rel_diff(y_prime, y_ref.narrow(1, 1, 1).squeeze_dim::<2>(1)) < dtype_tol(1e-4),
-        "the stepped delta is not the token's"
-    );
-    assert!(max_rel_diff(c_ref.ssm_bhpr, cache_prime.ssm_bhpr) < dtype_tol(1e-4));
 }
 
 // The runtime enums prime as well, threading the tagged caches straight into
@@ -1285,10 +920,10 @@ fn class_window_plan_splits_a_sequence() {
 
 // Splitting one `forward` in two must place every class marker exactly where a
 // single call over the whole sequence does — the shared cursors decide, not the
-// window length. Stack latents at all four kinds of position plus a per-layer
-// latent, so `Start` (behind the second window's cursor), `Custom`/`Middle`
-// (interior) and `End` (only on the window that closes the sequence) are all
-// exercised, at both marker levels. Outputs **and** final caches must agree.
+// window length. The test puts stack latents at all four kinds of position. It
+// covers `Start` (behind the second window's cursor), `Custom`/`Middle`
+// (interior) and `End` (only on the window that closes the sequence). Outputs
+// **and** final caches must agree.
 #[cfg(feature = "mamba2")]
 #[test]
 fn class_markers_split_forward_matches_single_forward() {
@@ -1303,7 +938,7 @@ fn class_markers_split_forward_matches_single_forward() {
         .with_state_rank(8)
         .with_ngroups(1)
         .with_conv_kernel(4);
-    let mut layers = LayersBuilder::new(2, block)
+    let layers = LayersBuilder::new(2, block)
         .with_class_latents(vec![
             ClassLatent::Start,
             ClassLatent::Middle,
@@ -1311,9 +946,6 @@ fn class_markers_split_forward_matches_single_forward() {
             ClassLatent::Custom(1),
         ])
         .init(&device);
-    // A per-layer latent as well (those aren't builder-configurable).
-    layers.real_layers[0].class_latents = vec![ClassLatent::Custom(2)];
-    layers.real_layers[0].class_latents_emb = init_class_emb(1, d_model, &device);
 
     let (batch, seq, split) = (2usize, 6usize, 4usize);
     let x = Tensor::<3>::random(
@@ -1325,7 +957,7 @@ fn class_markers_split_forward_matches_single_forward() {
 
     // One call over the whole sequence (what `None` cursors mean).
     let (y_full, c_full) = layers.forward(x.clone(), None, path.clone(), None, None);
-    assert_eq!(y_full.dims(), [batch, seq + 5, d_model]);
+    assert_eq!(y_full.dims(), [batch, seq + 4, d_model]);
 
     // The same sequence in two windows, sharing one cursor set.
     let mut class = ClassCursors::new(seq);
@@ -1345,7 +977,7 @@ fn class_markers_split_forward_matches_single_forward() {
     );
     // Window 1 carries Start, Custom and Middle. Window 2 carries the trailing
     // End.
-    assert_eq!(y_a.dims(), [batch, split + 4, d_model]);
+    assert_eq!(y_a.dims(), [batch, split + 3, d_model]);
     assert_eq!(y_b.dims(), [batch, seq - split + 1, d_model]);
 
     let y_split = Tensor::cat(vec![y_a, y_b], 1);
@@ -1364,9 +996,8 @@ fn class_markers_split_forward_matches_single_forward() {
             "layer {i} state disagrees"
         );
     }
-    // Every marker landed exactly once: 4 stack latents, then 1 per-layer one.
+    // Every marker landed exactly once: 4 stack latents.
     assert_eq!(class.stack, seq + 4);
-    assert_eq!(class.per_layer, vec![seq + 5, seq + 5]);
 }
 
 // With a full-length hint `step` places `Middle`/`End` too: the interior latent

@@ -38,7 +38,6 @@ backend-metal = ["burn/metal", "burn/std", "cubecl", "_dev-test", "burn-stack/ba
 backend-vulkan = ["burn/vulkan", "burn/std", "cubecl", "_dev-test", "burn-stack/backend-vulkan"]
 backend-cuda = ["burn/cuda", "burn/std", "cubecl", "_dev-test", "burn-stack/backend-cuda"]
 backend-rocm = ["burn/rocm", "burn/std", "cubecl", "_dev-test", "burn-stack/backend-rocm"]
-backend-remote = ["burn/remote", "burn/std", "cubecl", "_dev-test", "burn-stack/backend-remote"]
 # misc features for tests or examples
 # `_dev-test` (internal): enabled by every `backend-*` so the tensor test suite
 # compiles whenever a backend is present. Not meant to be enabled directly.
@@ -48,7 +47,7 @@ dev-simd = ["burn/simd", "burn/std", "burn-stack/dev-simd"]
 dev-autotune = ["burn/autotune", "burn-stack/dev-autotune"]
 
 [dependencies]
-burn-stack = { git = "https://github.com/swfsql/burn-stack.git", rev = "9f5e0578f745d811d61de3c53a52991fcf8f638d", default-features = false }
+burn-stack = { git = "https://github.com/swfsql/burn-stack.git", rev = "8e743e49bdce75224489afc384298e3007519bea", default-features = false }
 serde = { version = "1.0.0", features = ["derive"] }
 burn-flex = { version = "0.22.1", default-features = false, optional = true }
 # burn-flex = { git = "https://github.com/tracel-ai/burn.git", rev = "a6de085337c847ee13188d6d3085955709cccf38", default-features = false, optional = true }
@@ -69,7 +68,7 @@ burn-fusion = { version = "0.22.1", default-features = false, optional = true}
 # burn-fusion = { path = "../burn/crates/burn-fusion", default-features = false, optional = true }
 
 [dev-dependencies]
-burn-stack = { git = "https://github.com/swfsql/burn-stack.git", rev = "9f5e0578f745d811d61de3c53a52991fcf8f638d", default-features = false, features = ["test-helpers", "examples-common"] }
+burn-stack = { git = "https://github.com/swfsql/burn-stack.git", rev = "8e743e49bdce75224489afc384298e3007519bea", default-features = false, features = ["test-helpers", "examples-common"] }
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 rand = "0.10.3"
 rand_chacha = "0.10.0"

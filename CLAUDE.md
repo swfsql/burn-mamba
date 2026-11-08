@@ -21,7 +21,7 @@ cargo run --example reset-majority -- --training --inference
 ```
 
 - **Feature flags select the backend**: `backend-{flex,flex-rayon,cpu,wgpu,
-  webgpu,metal,vulkan,cuda,rocm,tch-cpu,tch-gpu,remote,ndarray}` and
+  webgpu,metal,vulkan,cuda,rocm,tch-cpu,tch-gpu,ndarray}` and
   `backend-ndarray-blas-*`. Each one enables `burn/<backend>`. Use `flex` (the
   default) for checks and tests. Several backends can be compiled in at once.
   Then `Device::default()` reads `BURN_DEVICE` to select one.

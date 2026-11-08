@@ -286,7 +286,7 @@ impl AeConfig {
 impl ModelConfigExt for AeConfig {
     type Model = AeModel;
     /// Both stacks share `mamba_block`, so one set of block specs covers the
-    /// encoder and the decoder (matched under `straight_block`/`reverse_block`),
+    /// encoder and the decoder (matched under `real_layers.N.block`),
     /// plus each pair's `CatLinear` merge. The patch/latent/FiLM projections at
     /// the model boundary stay on AdamW.
     fn muon_plan(&self) -> burn_stack::optim::MuonPlan {

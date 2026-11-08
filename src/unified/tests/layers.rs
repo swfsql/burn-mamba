@@ -668,88 +668,58 @@ fn stepped_prefix_parameters_get_no_gradient() {
     }
 }
 
-/// `prime` under a cut, in both directions across the boundary.
+/// `prime` under a cut, with a class latent of the stack.
 ///
-/// `prime` opens with no user token at all, so the two interesting shapes are a
-/// latent **above** the cut (every layer below it runs on an empty stream and is
-/// skipped entirely) and one **below** it (the emitted latent is created on the
-/// inner backend and has to be lifted at the boundary before any tracked layer
-/// touches it — without that lift the tracked half meets an inner tensor and
-/// Burn panics on a backend mismatch).
+/// `prime` opens with no user token, so the latent is the whole stream. The stack
+/// splices the latent below the first layer, so the stream crosses the cut. The
+/// cut must lift it before any tracked layer reads it. Without that lift, the
+/// tracked half meets an inner tensor and Burn panics on a backend mismatch.
 ///
-/// Either way the primed output is produced by tracked layers, so it must carry
-/// a gradient to those and to nothing below the cut.
-fn run_prime_cut(latent_layer: usize) {
-    use burn_stack::utils::class::init_class_emb;
+/// The primed output comes from tracked layers, so it must have a gradient to
+/// those layers and to no layer below the cut.
+#[test]
+fn prime_under_a_cut_with_a_latent_below_it() {
     use burn_stack::utils::{ClassCursors, ClassLatent};
 
     let device = test_device().autodiff();
     let (n, k) = (4, 2);
     let cut = n - k;
 
-    let mut layers = LayersBuilder::new(n, block_config(D_MODEL)).init(&device);
+    let mut layers = LayersBuilder::new(n, block_config(D_MODEL))
+        .with_class_latents(vec![ClassLatent::Start])
+        .init(&device);
     layers.grad_horizon = Some(GradHorizon::last(k, n));
-    layers.real_layers[latent_layer].class_latents = vec![ClassLatent::Start];
-    layers.real_layers[latent_layer].class_latents_emb = init_class_emb(1, D_MODEL, &device);
 
     let mut class = ClassCursors::new(SEQ);
     let (primed, _caches) = layers.prime(BATCH, None, Some(&mut class));
     let primed = primed.expect("a latent was waiting");
 
-    // It came out of a tracked layer, so it must still carry a gradient back to
-    // that layer's parameters — and to nothing below the cut.
     let grads = primed.sum().backward();
-    for i in 0..n {
-        let has = layers.real_layers[i]
+    let has_grad = |i: usize| {
+        layers.real_layers[i]
             .block
             .in_proj
             .weight
             .val()
             .grad(&grads)
-            .is_some();
-        if i < cut {
-            assert!(
-                !has,
-                "primed layer {i} (below the cut) got a gradient \
-                 (latent on layer {latent_layer})",
-            );
-        }
+            .is_some()
+    };
+    for i in 0..cut {
+        assert!(!has_grad(i), "primed layer {i} (below the cut) got a gradient");
     }
+    assert!(has_grad(n - 1), "the top layer lost its gradient");
+    // The latent is a learnable input position. It trains through the
+    // straight-through carry.
     assert!(
-        layers.real_layers[n - 1]
-            .block
-            .in_proj
-            .weight
-            .val()
-            .grad(&grads)
-            .is_some(),
-        "the top layer lost its gradient (latent on layer {latent_layer})",
-    );
-    // The latent itself trains from either side of the cut — below it that is
-    // the ghost latent of the cascade doing the work.
-    assert!(
-        layers.real_layers[latent_layer]
+        layers
             .class_latents_emb
             .as_ref()
             .unwrap()
             .val()
             .grad(&grads)
             .is_some(),
-        "the class latent on layer {latent_layer} never trains",
+        "the class latent of the stack never trains",
     );
-}
-
-/// Latent above the cut: every layer below it is skipped on an empty stream.
-#[test]
-fn prime_under_a_cut_with_a_latent_above_it() {
-    run_prime_cut(3);
-}
-
-/// Latent below the cut: its position is created on the inner backend and has to
-/// cross the boundary before any tracked layer sees it.
-#[test]
-fn prime_under_a_cut_with_a_latent_below_it() {
-    run_prime_cut(0);
 }
 
 // ===========================================================================
@@ -854,61 +824,6 @@ fn a_cut_changes_gradients_only() {
                 "horizon {horizon:?} changed final cache tensor {i}",
             );
         }
-    }
-}
-
-/// Class latents on a layer **below** the cut lengthen the sequence, so the
-/// straight-through carry has to grow with it — taking a **ghost** row (value
-/// zero, but tracked) at each latent position.
-///
-/// Two things ride on that. The lengths must agree or the boundary add fails
-/// outright; and the ghost is what keeps the latent itself trainable, since it is
-/// a learnable *input position* rather than part of the layer's transform. The layer's
-/// actual weights stay undifferentiated, which is what the last assertion
-/// separates.
-#[test]
-fn the_carry_tracks_class_latents_spliced_below_the_cut() {
-    use burn_stack::utils::class::init_class_emb;
-    use burn_stack::utils::{ClassCursors, ClassLatent};
-
-    let device = test_device().autodiff();
-    let (n, k) = (4, 2);
-
-    let mut layers = LayersBuilder::new(n, block_config(D_MODEL)).init(&device);
-    layers.grad_horizon = Some(GradHorizon::last(k, n));
-    // Two prefix layers each splice a position, so the boundary sequence is longer
-    // than the input by two.
-    for i in 0..(n - k) {
-        layers.real_layers[i].class_latents = vec![ClassLatent::Start];
-        layers.real_layers[i].class_latents_emb = init_class_emb(1, D_MODEL, &device);
-    }
-
-    let x = input(&device).require_grad();
-    let mut class = ClassCursors::new(SEQ);
-    let (y, _) = layers.forward(x.clone(), None, path(), Some(&mut class), None);
-    assert_eq!(y.dims()[1], SEQ + (n - k), "each prefix layer splices one position");
-
-    let grads = y.sum().backward();
-    assert!(
-        x.grad(&grads).is_some(),
-        "the input lost its gradient with latents spliced below the cut",
-    );
-    for i in 0..(n - k) {
-        let l = &layers.real_layers[i];
-        assert!(
-            l.class_latents_emb
-                .as_ref()
-                .unwrap()
-                .val()
-                .grad(&grads)
-                .is_some(),
-            "prefix layer {i}'s class latent is a learnable input position and must \
-             train — a dead parameter here would be silent",
-        );
-        assert!(
-            l.block.in_proj.weight.val().grad(&grads).is_none(),
-            "prefix layer {i}'s transform must stay undifferentiated",
-        );
     }
 }
 

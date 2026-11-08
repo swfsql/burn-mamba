@@ -1,6 +1,6 @@
 # 01: Follow the removals of burn-stack
 
-Status: ready-for-agent
+Status: resolved
 
 Blocked by: `../burn-stack/.scratch/block-family-choice/issues/01-remove-remote-backend.md`, `../burn-stack/.scratch/block-family-choice/issues/02-remove-per-layer-class-latents.md`
 
