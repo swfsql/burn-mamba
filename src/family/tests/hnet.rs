@@ -51,20 +51,9 @@ fn config(stage_blocks: Vec<MambaBlockConfig>, main_block: MambaBlockConfig) -> 
     )
 }
 
-fn default_path(block: &MambaBlockConfig) -> MambaSsdPath {
-    match block {
-        #[cfg(feature = "mamba1")]
-        MambaBlockConfig::Mamba1(_) => MambaSsdPath::Mamba1,
-        #[cfg(feature = "mamba2")]
-        MambaBlockConfig::Mamba2(_) => MambaSsdPath::mamba2_default(),
-        #[cfg(feature = "mamba3")]
-        MambaBlockConfig::Mamba3(_) => MambaSsdPath::mamba3_default(),
-    }
-}
-
 fn paths(config: &MambaHNetVocabNetConfig) -> (MambaSsdPath, MambaSsdPath) {
     let stage = config.stage_blocks.first().unwrap_or(&config.main_block);
-    (default_path(stage), default_path(&config.main_block))
+    (stage.default_ssd_path(), config.main_block.default_ssd_path())
 }
 
 fn tokens(batch: usize, sequence: usize, device: &Device) -> Tensor<3, Int> {

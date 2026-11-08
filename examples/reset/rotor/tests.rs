@@ -143,7 +143,7 @@ enum Head {
 /// `in_proj` of the rotating model.
 fn config_without_rotation() -> MambaLatentNetConfig {
     let mut cfg = crate::model::model_config();
-    let MambaLatentNetConfig::Mamba3 { mamba_block, .. } = &mut cfg else {
+    let MambaBlockConfig::Mamba3(mamba_block) = &mut cfg.block else {
         unreachable!("reset-rotor configures the Mamba-3 family")
     };
     *mamba_block = mamba_block

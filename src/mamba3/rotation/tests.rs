@@ -1564,8 +1564,9 @@ fn rotation_state_wrong_unwrap_panics() {
 fn quaternion_bidi_forward_runs() {
     use crate::mamba3::mamba3::Mamba3Config;
     use crate::mamba3::ssd_path::Mamba3SsdPath;
+    use burn_stack::modules::BidiShape;
     use burn_stack::modules::bidi::OutputMergeConfig;
-    use crate::family::{MambaBidiLayersConfig, MambaSsdPath};
+    use crate::family::{MambaBidiLayersConfig, MambaBlockConfig, MambaSsdPath};
     let device = test_device();
     let block = Mamba3Config::new(32)
         .with_state_rank(16)
@@ -1574,17 +1575,10 @@ fn quaternion_bidi_forward_runs() {
         .with_rotation_fraction(1.0)
         .with_rotation(RotationKind::Quaternion4D);
     let n_real = 2; // one bidirectional pair
-    let layers = MambaBidiLayersConfig::Mamba3 {
-        n_real_layers: n_real,
-        n_virtual_layers: None,
-        mamba_block: block,
-        ignore_first_residual: false,
-        ignore_last_residual: false,
-        outputs_merge: OutputMergeConfig::mean(n_real),
-        class_latents: Vec::new(),
-        residuals: burn_stack::modules::ResidualsConfig::Standard,
-        untied: Vec::new(),
-    }
+    let layers = MambaBidiLayersConfig::new(
+        BidiShape::new(n_real, OutputMergeConfig::mean(n_real)),
+        MambaBlockConfig::Mamba3(block),
+    )
     .init(&device);
 
     let (batch, seq) = (2, 5);

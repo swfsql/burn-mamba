@@ -55,6 +55,9 @@ pub mod adapters;
 /// Each family's `CacheTensors` traversal: a captured `step` writing its new
 /// cache in place.
 pub mod capture;
+/// The serializable `{ shape, block }` configs, and [`MambaBlockConfig`].
+#[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
+pub mod config;
 /// Runtime-selectable networks ([`MambaLatentNet`] / [`MambaVocabNet`]).
 #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
 pub mod network;
@@ -68,11 +71,13 @@ pub mod hnet;
 
 pub use adapters::MambaCaches;
 #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
-pub use bidi::{MambaBidiLayers, MambaBidiLayersConfig};
+pub use bidi::MambaBidiLayers;
 #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
-pub use hnet::{MambaBlockConfig, MambaHNetCaches, MambaHNetVocabNet, MambaHNetVocabNetConfig};
+pub use config::{MambaBidiLayersConfig, MambaBlockConfig, MambaLatentNetConfig, MambaVocabNetConfig};
 #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
-pub use network::{MambaLatentNet, MambaLatentNetConfig, MambaVocabNet, MambaVocabNetConfig};
+pub use hnet::{MambaHNetCaches, MambaHNetVocabNet, MambaHNetVocabNetConfig};
+#[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
+pub use network::{MambaLatentNet, MambaVocabNet};
 
 #[cfg(all(test, feature = "_dev-test"))]
 mod tests;

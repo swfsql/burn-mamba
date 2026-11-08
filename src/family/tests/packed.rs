@@ -176,21 +176,15 @@ fn mamba3_net(micro_steps: usize, tap_pattern: TapPattern, residuals: ResidualsC
         .with_state_rank(8)
         .with_micro_steps(micro_steps)
         .with_tap_pattern(tap_pattern);
-    MambaVocabNetConfig::Mamba3 {
-        n_real_layers: 2,
-        n_virtual_layers: None,
-        grad_horizon: None,
-        vocab_size: VOCAB,
-        pad_vocab_size_multiple: 1,
-        mamba_block: block,
-        missing_lm_head: true,
-        class_latents: vec![ClassLatent::Start; 2],
-        ignore_first_residual: false,
-        ignore_last_residual: false,
-        residuals,
-        mlp: None,
-        untied: Vec::new(),
-    }
+    MambaVocabNetConfig::new(
+        VocabShape::new(
+            VOCAB,
+            NetworkShape::new(2)
+                .with_class_latents(vec![ClassLatent::Start; 2])
+                .with_residuals(residuals),
+        ),
+        MambaBlockConfig::Mamba3(block),
+    )
     .init(&test_device().autodiff())
 }
 
@@ -230,21 +224,13 @@ fn packed_mamba2_matches_alone() {
         .with_state_rank(8)
         .with_ngroups(1)
         .with_conv_kernel(4);
-    let net = MambaVocabNetConfig::Mamba2 {
-        n_real_layers: 2,
-        n_virtual_layers: None,
-        grad_horizon: None,
-        vocab_size: VOCAB,
-        pad_vocab_size_multiple: 1,
-        mamba_block: block,
-        missing_lm_head: true,
-        class_latents: vec![ClassLatent::Start; 2],
-        ignore_first_residual: false,
-        ignore_last_residual: false,
-        residuals: ResidualsConfig::Standard,
-        mlp: None,
-        untied: Vec::new(),
-    }
+    let net = MambaVocabNetConfig::new(
+        VocabShape::new(
+            VOCAB,
+            NetworkShape::new(2).with_class_latents(vec![ClassLatent::Start; 2]),
+        ),
+        MambaBlockConfig::Mamba2(block),
+    )
     .init(&test_device().autodiff());
     check(net, MambaSsdPath::Mamba2(Mamba2SsdPath::SerialRecalculated(Some(4))));
 }

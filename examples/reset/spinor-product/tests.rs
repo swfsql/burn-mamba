@@ -352,7 +352,7 @@ fn embedding(device: &Device) -> Tensor<2> {
 /// Build the block by hand at the given `micro_steps`.
 fn handmade(device: &Device, micro_steps: usize, head: Head, gen_scale: f64) -> MambaLatentNet {
     let cfg = crate::model::model_config(micro_steps, 1);
-    let MambaLatentNetConfig::Mamba3 { mamba_block, .. } = &cfg else {
+    let MambaBlockConfig::Mamba3(mamba_block) = &cfg.block else {
         unreachable!("spinor-product configures the Mamba-3 family")
     };
     let mamba_block = mamba_block.clone();
@@ -1080,7 +1080,7 @@ fn element_generator(e: usize) -> [f64; 3] {
 /// two-layer model whose first layer does its job perfectly.
 fn handmade_composed(device: &Device, head: Head) -> MambaLatentNet {
     let cfg = crate::model::model_config(1, 1);
-    let MambaLatentNetConfig::Mamba3 { mamba_block, .. } = &cfg else {
+    let MambaBlockConfig::Mamba3(mamba_block) = &cfg.block else {
         unreachable!("spinor-product configures the Mamba-3 family")
     };
     let mamba_block = mamba_block.clone();

@@ -84,6 +84,7 @@ pub mod prelude {
     pub use crate::family::{MambaCaches, MambaSsdPath};
 
     // The block-generic composition layer (`burn-stack`).
+    pub use burn_stack::modules::{BidiShape, LatentShape, NetworkShape, VocabShape};
     pub use burn_stack::prelude::*;
 }
 

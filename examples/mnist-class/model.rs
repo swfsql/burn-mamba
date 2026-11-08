@@ -3,8 +3,8 @@
 //! [`model_config`].
 
 use burn_mamba::prelude::{
-    ClassLatent, LayerUntied, Mamba3Config, Mamba3Untied, MambaLatentNetConfig, ResidualsConfig,
-    RotationKind,
+    ClassLatent, LatentShape, LayerUntied, Mamba3Config, Mamba3Untied, MambaBlockConfig,
+    MambaLatentNetConfig, NetworkShape, ResidualsConfig, RotationKind,
 };
 use burn_stack::utils::{GradHorizon, Schedule};
 
@@ -65,40 +65,41 @@ pub fn model_config() -> MambaLatentNetConfig {
             Mamba3Untied::OutNorm,
         ]);
 
-    MambaLatentNetConfig::Mamba3 {
-        // input  [batch_size, sequence_len = HEIGHT * WIDTH, input_size = 1]
-        input_size: 1,
-        // output [batch_size, HEIGHT * WIDTH + OUTPUT_SEQUENCE_EXTRA, output_size = 10]
-        // (later narrowed to the last timestep for the 10-bin classification)
-        output_size: 10,
-        final_norm: false,
-        // one real layer, applied `N_VIRTUAL_LAYERS` times
-        n_real_layers: 1,
-        n_virtual_layers: Some((N_VIRTUAL_LAYERS, Schedule::Stretched)),
-        grad_horizon: GRAD_HORIZON,
-        mamba_block,
-        // Network-level class tokens have `input_size = 1` (one learnable
-        // scalar each). The stack-level latents are `d_model` wide.
-        class_tokens: Vec::new(),
-        class_latents: vec![ClassLatent::Start; N_CLASS_LATENTS],
+    // one real layer, applied `N_VIRTUAL_LAYERS` times
+    let stack = NetworkShape::new(1)
+        .with_n_virtual_layers(Some((N_VIRTUAL_LAYERS, Schedule::Stretched)))
+        .with_grad_horizon(GRAD_HORIZON)
+        // The stack-level latents are `d_model` wide.
+        .with_class_latents(vec![ClassLatent::Start; N_CLASS_LATENTS])
         // the first input/last output could skip their residual here too
-        ignore_first_residual: false,
-        ignore_last_residual: false,
+        .with_ignore_first_residual(false)
+        .with_ignore_last_residual(false)
         // Multi-Gate residuals: `n_stream` gated residual streams, pooled into
         // the input of each layer, instead of one additive skip
         // (`ResidualsConfig::Standard`).
-        residuals: ResidualsConfig::MultiGate {
+        .with_residuals(ResidualsConfig::MultiGate {
             n_stream: 4,
             init_bias: 0.0,
             init_bias_offset: 0.0,
             // one gate module per real layer, reused by its virtual passes
             per_virtual_layer: false,
-        },
+        })
         // No feed-forward interleave: these examples are block-only.
-        mlp: None,
+        .with_mlp(None)
         // The untied tensors of the layer itself (the tensors of the block are
         // in `mamba_block`, above): the pre-norm of the block.
         // `LayerUntied::Norm2` needs an `mlp`.
-        untied: vec![LayerUntied::Norm],
-    }
+        .with_untied(vec![LayerUntied::Norm]);
+    let shape = LatentShape::new(
+        // input  [batch_size, sequence_len = HEIGHT * WIDTH, input_size = 1]
+        1,
+        // output [batch_size, HEIGHT * WIDTH + OUTPUT_SEQUENCE_EXTRA, output_size = 10]
+        // (later narrowed to the last timestep for the 10-bin classification)
+        10,
+        stack,
+    )
+    // Network-level class tokens have `input_size = 1` (one learnable scalar
+    // each).
+    .with_class_tokens(Vec::new());
+    MambaLatentNetConfig::new(shape, MambaBlockConfig::Mamba3(mamba_block))
 }

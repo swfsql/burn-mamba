@@ -42,26 +42,18 @@ pub fn tiny_net(device: &Device) -> MambaVocabNet {
         .with_rotation_fraction(1.0)
         .with_siso_specialization_decode(true)
         .with_rotation(RotationKind::Complex2D);
-    MambaVocabNetConfig::Mamba3 {
-        n_real_layers: 5,
-        n_virtual_layers: None,
-        grad_horizon: None,
-        vocab_size: VOCAB_SIZE,
-        pad_vocab_size_multiple: 1,
-        mamba_block,
-        missing_lm_head: false,
-        class_latents: vec![ClassLatent::Start; N_LATENTS],
-        ignore_first_residual: false,
-        ignore_last_residual: false,
-        residuals: ResidualsConfig::MultiGate {
+    let stack = NetworkShape::new(5)
+        .with_class_latents(vec![ClassLatent::Start; N_LATENTS])
+        .with_residuals(ResidualsConfig::MultiGate {
             n_stream: 4,
             init_bias: 0.0,
             init_bias_offset: 0.0,
             per_virtual_layer: false,
-        },
-        mlp: None,
-        untied: Vec::new(),
-    }
+        });
+    MambaVocabNetConfig::new(
+        VocabShape::new(VOCAB_SIZE, stack).with_missing_lm_head(false),
+        MambaBlockConfig::Mamba3(mamba_block),
+    )
     .init(device)
     .map(&mut Jitter)
 }

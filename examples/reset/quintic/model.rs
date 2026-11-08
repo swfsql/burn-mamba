@@ -4,7 +4,8 @@
 
 use crate::dataset::{Group, NUM_SYMBOLS};
 use burn_mamba::prelude::{
-    Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind, TapPattern,
+    LatentShape, Mamba3Config, MambaBlockConfig, MambaLatentNetConfig, NetworkShape, RotationKind,
+    TapPattern,
 };
 
 /// The default depth for a group: the fewest layers that can hold it.
@@ -120,21 +121,9 @@ pub fn model_config_with(
 
     // input  [batch, seq, NUM_SYMBOLS]  (one-hot symbol)
     // output [batch, seq, num_classes]  (one logit per arrangement, every position)
-    MambaLatentNetConfig::Mamba3 {
-        input_size: NUM_SYMBOLS,
-        output_size: group.num_classes(),
-        final_norm: false,
-        n_real_layers: layers,
-        n_virtual_layers: None,
-        grad_horizon: None,
-        mamba_block,
-        class_tokens: Vec::new(),
-        class_latents: Vec::new(),
-        ignore_first_residual: false,
+    let stack = NetworkShape::new(layers)
         // the last layer's residual: dropped, so the head sees only its state
-        ignore_last_residual: true,
-        residuals: ResidualsConfig::Standard,
-        mlp: None,
-        untied: Vec::new(),
-    }
+        .with_ignore_last_residual(true);
+    let shape = LatentShape::new(NUM_SYMBOLS, group.num_classes(), stack);
+    MambaLatentNetConfig::new(shape, MambaBlockConfig::Mamba3(mamba_block))
 }

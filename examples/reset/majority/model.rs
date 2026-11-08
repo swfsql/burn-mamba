@@ -4,7 +4,8 @@
 
 use crate::dataset::{NUM_CLASSES, NUM_SYMBOLS};
 use burn_mamba::prelude::{
-    Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind, TapPattern,
+    LatentShape, Mamba3Config, MambaBlockConfig, MambaLatentNetConfig, NetworkShape, RotationKind,
+    TapPattern,
 };
 
 /// A single Mamba-3 block at `state_rank = 1` and [`RotationKind::Real1D`],
@@ -72,24 +73,14 @@ pub fn model_config() -> MambaLatentNetConfig {
 
     // input  [batch, seq, NUM_SYMBOLS]  (one-hot symbol)
     // output [batch, seq, NUM_CLASSES]  (Neg / Pos logits, every scored position)
-    MambaLatentNetConfig::Mamba3 {
-        input_size: NUM_SYMBOLS,
-        output_size: NUM_CLASSES,
+    let stack = NetworkShape::new(1)
+        // the single layer's residual: dropped, so the head sees only the state
+        .with_ignore_last_residual(true)
+        // No feed-forward interleave: these examples are block-only.
+        .with_mlp(None);
+    let shape = LatentShape::new(NUM_SYMBOLS, NUM_CLASSES, stack)
         // the head reads a direction, not a magnitude: this norm is what bounds
         // the block's output and keeps the reference axis load-bearing.
-        final_norm: true,
-        n_real_layers: 1,
-        n_virtual_layers: None,
-        grad_horizon: None,
-        mamba_block,
-        class_tokens: Vec::new(),
-        class_latents: Vec::new(),
-        ignore_first_residual: false,
-        // the single layer's residual: dropped, so the head sees only the state
-        ignore_last_residual: true,
-        residuals: ResidualsConfig::Standard,
-        // No feed-forward interleave: these examples are block-only.
-        mlp: None,
-        untied: Vec::new(),
-    }
+        .with_final_norm(true);
+    MambaLatentNetConfig::new(shape, MambaBlockConfig::Mamba3(mamba_block))
 }

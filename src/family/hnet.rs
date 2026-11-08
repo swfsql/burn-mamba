@@ -21,34 +21,6 @@ use crate::mamba2::prelude::{Mamba2, Mamba2Config};
 #[cfg(feature = "mamba3")]
 use crate::mamba3::prelude::{Mamba3, Mamba3Config};
 
-/// A Mamba block config, tagged with its family.
-#[derive(Config, Debug)]
-pub enum MambaBlockConfig {
-    /// A Mamba-1 block.
-    #[cfg(feature = "mamba1")]
-    Mamba1(Mamba1Config),
-    /// A Mamba-2 block.
-    #[cfg(feature = "mamba2")]
-    Mamba2(Mamba2Config),
-    /// A Mamba-3 block.
-    #[cfg(feature = "mamba3")]
-    Mamba3(Mamba3Config),
-}
-
-impl MambaBlockConfig {
-    /// The family tag: `"mamba1"`, `"mamba2"` or `"mamba3"`.
-    pub fn family(&self) -> &'static str {
-        match self {
-            #[cfg(feature = "mamba1")]
-            Self::Mamba1(_) => "mamba1",
-            #[cfg(feature = "mamba2")]
-            Self::Mamba2(_) => "mamba2",
-            #[cfg(feature = "mamba3")]
-            Self::Mamba3(_) => "mamba3",
-        }
-    }
-}
-
 /// The serializable config of a [`MambaHNetVocabNet`]: the shape of
 /// `burn-stack` plus one block config per stage and one for the main stack.
 #[derive(Config, Debug)]

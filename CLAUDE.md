@@ -238,6 +238,7 @@ src/
 └─ family/               runtime-selectable enums
    ├─ mod.rs             `MambaSsdPath`, why the MIMO tensors are not Muon matrices
    ├─ adapters.rs        `MambaCaches`, `impl Block`/`BlockConfig`/`CacheStack`
+   ├─ config.rs          `MambaBlockConfig`, the `{ shape, block }` configs
    ├─ capture.rs         `CacheTensors` of each family (captured steps)
    └─ tests/             the burn-stack containers with real blocks
 build.rs                 the `cube_backend` cfg (the cubecl `backend-*` features)

@@ -32,7 +32,8 @@
 
 use crate::dataset::NUM_SYMBOLS;
 use burn_mamba::prelude::{
-    Gain, Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind, TapPattern, Tropical,
+    Gain, LatentShape, Mamba3Config, MambaBlockConfig, MambaLatentNetConfig, NetworkShape,
+    RotationKind, TapPattern, Tropical,
 };
 
 /// Number of output classes (see [`crate::dataset`]).
@@ -58,20 +59,7 @@ pub fn model_config(tropical: bool) -> MambaLatentNetConfig {
         })
         .with_has_proj_bias(true);
 
-    MambaLatentNetConfig::Mamba3 {
-        input_size: NUM_SYMBOLS,
-        output_size: NUM_CLASSES,
-        final_norm: true,
-        n_real_layers: 1,
-        n_virtual_layers: None,
-        grad_horizon: None,
-        mamba_block,
-        class_tokens: Vec::new(),
-        class_latents: Vec::new(),
-        ignore_first_residual: false,
-        ignore_last_residual: true,
-        residuals: ResidualsConfig::Standard,
-        mlp: None,
-        untied: Vec::new(),
-    }
+    let stack = NetworkShape::new(1).with_ignore_last_residual(true);
+    let shape = LatentShape::new(NUM_SYMBOLS, NUM_CLASSES, stack).with_final_norm(true);
+    MambaLatentNetConfig::new(shape, MambaBlockConfig::Mamba3(mamba_block))
 }

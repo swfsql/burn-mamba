@@ -149,22 +149,16 @@ fn mamba3_plan_fits(rotation: crate::mamba3::rotation::RotationKind) {
         .with_per_head_dim(16)
         .with_rotation_fraction(1.0)
         .with_rotation(rotation);
-    let config = MambaLatentNetConfig::Mamba3 {
-        input_size: 3,
-        output_size: 5,
-        final_norm: true,
-        n_real_layers: 2,
-        n_virtual_layers: None,
-        grad_horizon: None,
-        mamba_block: block,
-        class_tokens: Vec::new(),
-        class_latents: Vec::new(),
-        ignore_first_residual: false,
-        ignore_last_residual: false,
-        residuals: burn_stack::modules::ResidualsConfig::Standard,
-        mlp: Some(burn_stack::modules::GatedMlpConfig::new(32, 64).with_multiple_of(32)),
-        untied: Vec::new(),
-    };
+    let config = MambaLatentNetConfig::new(
+        LatentShape::new(
+            3,
+            5,
+            NetworkShape::new(2)
+                .with_mlp(Some(GatedMlpConfig::new(32, 64).with_multiple_of(32))),
+        )
+        .with_final_norm(true),
+        MambaBlockConfig::Mamba3(block),
+    );
     let rows = params_of(&config.init(&device));
     let plan = config.muon_plan();
 
@@ -179,24 +173,15 @@ fn mamba3_plan_fits(rotation: crate::mamba3::rotation::RotationKind) {
 fn mamba2_plan_fits_the_model() {
     use crate::prelude::*;
     let device = test_device();
-    let config = MambaVocabNetConfig::Mamba2 {
-        vocab_size: 20,
-        pad_vocab_size_multiple: 1,
-        n_real_layers: 2,
-        n_virtual_layers: None,
-        grad_horizon: None,
-        mamba_block: Mamba2Config::new(32)
-            .with_state_rank(16)
-            .with_expand(2)
-            .with_per_head_dim(16),
-        missing_lm_head: true,
-        class_latents: Vec::new(),
-        ignore_first_residual: false,
-        ignore_last_residual: false,
-        residuals: burn_stack::modules::ResidualsConfig::Standard,
-        mlp: None,
-        untied: Vec::new(),
-    };
+    let config = MambaVocabNetConfig::new(
+        VocabShape::new(20, NetworkShape::new(2)),
+        MambaBlockConfig::Mamba2(
+            Mamba2Config::new(32)
+                .with_state_rank(16)
+                .with_expand(2)
+                .with_per_head_dim(16),
+        ),
+    );
     let rows = params_of(&config.init(&device));
     let plan = config.muon_plan();
 
@@ -210,22 +195,10 @@ fn mamba2_plan_fits_the_model() {
 fn mamba1_plan_fits_the_model() {
     use crate::prelude::*;
     let device = test_device();
-    let config = MambaLatentNetConfig::Mamba1 {
-        input_size: 3,
-        output_size: 5,
-        final_norm: false,
-        n_real_layers: 2,
-        n_virtual_layers: None,
-        grad_horizon: None,
-        mamba_block: Mamba1Config::new(32).with_state_rank(16),
-        class_tokens: Vec::new(),
-        class_latents: Vec::new(),
-        ignore_first_residual: false,
-        ignore_last_residual: false,
-        residuals: burn_stack::modules::ResidualsConfig::Standard,
-        mlp: None,
-        untied: Vec::new(),
-    };
+    let config = MambaLatentNetConfig::new(
+        LatentShape::new(3, 5, NetworkShape::new(2)),
+        MambaBlockConfig::Mamba1(Mamba1Config::new(32).with_state_rank(16)),
+    );
     let rows = params_of(&config.init(&device));
     let plan = config.muon_plan();
 
@@ -240,24 +213,17 @@ fn mamba1_plan_fits_the_model() {
 #[cfg(feature = "mamba3")]
 #[test]
 fn bidi_plan_fits_the_model() {
-    use crate::family::MambaBidiLayersConfig;
-    use burn_stack::modules::bidi::OutputMergeConfig;
     use crate::prelude::*;
     let device = test_device();
-    let config = MambaBidiLayersConfig::Mamba3 {
-        n_real_layers: 2,
-        n_virtual_layers: None,
-        mamba_block: Mamba3Config::new(32)
-            .with_state_rank(16)
-            .with_expand(2)
-            .with_per_head_dim(16),
-        ignore_first_residual: false,
-        ignore_last_residual: false,
-        outputs_merge: OutputMergeConfig::cat_linear(2),
-        class_latents: Vec::new(),
-        residuals: burn_stack::modules::ResidualsConfig::Standard,
-        untied: Vec::new(),
-    };
+    let config = MambaBidiLayersConfig::new(
+        BidiShape::new(2, OutputMergeConfig::cat_linear(2)),
+        MambaBlockConfig::Mamba3(
+            Mamba3Config::new(32)
+                .with_state_rank(16)
+                .with_expand(2)
+                .with_per_head_dim(16),
+        ),
+    );
     let rows = params_of(&config.init(&device));
     let plan = config.muon_plan();
 
@@ -271,6 +237,68 @@ fn bidi_plan_fits_the_model() {
 
     assert_plan_fits(&plan, &rows, 1);
     assert_plan_excludes_boundaries(&plan, &rows);
+}
+
+/// Muon owns a `CatLinear` merge, because the merge is a plain hidden matrix.
+/// [`assert_plan_fits`] reads only the specs that the plan holds, so this test
+/// finds the spec by its path.
+#[cfg(feature = "mamba3")]
+#[test]
+fn bidi_plan_holds_the_cat_linear_merge() {
+    use crate::prelude::*;
+    let device = test_device();
+    let config = MambaBidiLayersConfig::new(
+        BidiShape::new(2, OutputMergeConfig::cat_linear(2)),
+        MambaBlockConfig::Mamba3(
+            Mamba3Config::new(32)
+                .with_state_rank(16)
+                .with_expand(2)
+                .with_per_head_dim(16),
+        ),
+    );
+    let rows = params_of(&config.init(&device));
+    let plan = config.muon_plan();
+
+    let merge = plan
+        .specs
+        .iter()
+        .find(|s| s.path == "CatLinear.weight")
+        .expect("the plan holds the CatLinear spec");
+    assert_eq!(selected(merge, &rows).len(), 1);
+    assert_eq!(merge.width(), 32);
+}
+
+/// The plan of a vocab network holds the feed-forward of each of its layers.
+#[cfg(feature = "mamba2")]
+#[test]
+fn vocab_plan_holds_the_mlp() {
+    use crate::prelude::*;
+    let device = test_device();
+    let config = MambaVocabNetConfig::new(
+        VocabShape::new(
+            20,
+            NetworkShape::new(2)
+                .with_mlp(Some(GatedMlpConfig::new(32, 64).with_multiple_of(32))),
+        ),
+        MambaBlockConfig::Mamba2(
+            Mamba2Config::new(32)
+                .with_state_rank(16)
+                .with_expand(2)
+                .with_per_head_dim(16),
+        ),
+    );
+    let rows = params_of(&config.init(&device));
+    let plan = config.muon_plan();
+
+    for path in ["mlp.fc1.weight", "mlp.fc2.weight"] {
+        let spec = plan
+            .specs
+            .iter()
+            .find(|s| s.path == path)
+            .unwrap_or_else(|| panic!("the plan has no {path} spec"));
+        assert_eq!(selected(spec, &rows).len(), 2, "{path}");
+    }
+    assert_plan_fits(&plan, &rows, 2);
 }
 
 /// The Muon-owned share of a Mamba-3 `in_proj`: the Δ/A/λ channels stay behind.
@@ -468,25 +496,15 @@ fn sgd_fallback_sub_projections_are_stateless_sgd() {
 fn build_assembles_groups_without_panicking() {
     use crate::prelude::*;
     let device = test_device().autodiff();
-    let config = MambaLatentNetConfig::Mamba3 {
-        input_size: 2,
-        output_size: 2,
-        final_norm: false,
-        n_real_layers: 1,
-        n_virtual_layers: None,
-        grad_horizon: None,
-        mamba_block: Mamba3Config::new(16)
-            .with_state_rank(16)
-            .with_expand(2)
-            .with_per_head_dim(8),
-        class_tokens: Vec::new(),
-        class_latents: Vec::new(),
-        ignore_first_residual: false,
-        ignore_last_residual: false,
-        residuals: burn_stack::modules::ResidualsConfig::Standard,
-        mlp: None,
-        untied: Vec::new(),
-    };
+    let config = MambaLatentNetConfig::new(
+        LatentShape::new(2, 2, NetworkShape::new(1)),
+        MambaBlockConfig::Mamba3(
+            Mamba3Config::new(16)
+                .with_state_rank(16)
+                .with_expand(2)
+                .with_per_head_dim(8),
+        ),
+    );
     let model = config.init(&device);
     let mut optim = config.muon_plan().build(&adamw().into(), &muon());
 
@@ -508,25 +526,15 @@ fn build_assembles_groups_without_panicking() {
 fn module_optimizer_state_round_trips_through_a_record() {
     use crate::prelude::*;
     let device = test_device().autodiff();
-    let config = MambaLatentNetConfig::Mamba3 {
-        input_size: 2,
-        output_size: 2,
-        final_norm: false,
-        n_real_layers: 1,
-        n_virtual_layers: None,
-        grad_horizon: None,
-        mamba_block: Mamba3Config::new(16)
-            .with_state_rank(16)
-            .with_expand(2)
-            .with_per_head_dim(8),
-        class_tokens: Vec::new(),
-        class_latents: Vec::new(),
-        ignore_first_residual: false,
-        ignore_last_residual: false,
-        residuals: burn_stack::modules::ResidualsConfig::Standard,
-        mlp: None,
-        untied: Vec::new(),
-    };
+    let config = MambaLatentNetConfig::new(
+        LatentShape::new(2, 2, NetworkShape::new(1)),
+        MambaBlockConfig::Mamba3(
+            Mamba3Config::new(16)
+                .with_state_rank(16)
+                .with_expand(2)
+                .with_per_head_dim(8),
+        ),
+    );
     let plan = config.muon_plan();
     let model = config.init(&device);
     let x = Tensor::<3>::random([1, 8, 2], burn::tensor::Distribution::Default, &device);
@@ -568,25 +576,15 @@ fn module_optimizer_state_round_trips_through_a_record() {
 fn describe_reports_every_parameter() {
     use crate::prelude::*;
     let device = test_device();
-    let config = MambaLatentNetConfig::Mamba3 {
-        input_size: 1,
-        output_size: 10,
-        final_norm: false,
-        n_real_layers: 2,
-        n_virtual_layers: None,
-        grad_horizon: None,
-        mamba_block: Mamba3Config::new(16)
-            .with_state_rank(16)
-            .with_expand(2)
-            .with_per_head_dim(8),
-        class_tokens: Vec::new(),
-        class_latents: Vec::new(),
-        ignore_first_residual: false,
-        ignore_last_residual: false,
-        residuals: burn_stack::modules::ResidualsConfig::Standard,
-        mlp: None,
-        untied: Vec::new(),
-    };
+    let config = MambaLatentNetConfig::new(
+        LatentShape::new(1, 10, NetworkShape::new(2)),
+        MambaBlockConfig::Mamba3(
+            Mamba3Config::new(16)
+                .with_state_rank(16)
+                .with_expand(2)
+                .with_per_head_dim(8),
+        ),
+    );
     let model = config.init(&device);
     let report = config.muon_plan().describe(&model);
 

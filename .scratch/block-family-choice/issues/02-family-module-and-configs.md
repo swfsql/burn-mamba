@@ -1,6 +1,6 @@
 # 02: The `family` module, and configs in the `{ shape, block }` form
 
-Status: ready-for-agent
+Status: resolved
 
 Blocked by: `01-follow-the-removals.md`
 

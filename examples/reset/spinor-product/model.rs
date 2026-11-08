@@ -4,7 +4,9 @@
 //! [`model_config`]).
 
 use crate::dataset::{INPUT_SIZE, NUM_CLASSES};
-use burn_mamba::prelude::{Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind};
+use burn_mamba::prelude::{
+    LatentShape, Mamba3Config, MambaBlockConfig, MambaLatentNetConfig, NetworkShape, RotationKind,
+};
 
 /// `d_model = d_inner = 8`: four dimensions per slot, which is the smallest that
 /// carries five symbols affinely (a 4-simplex). The state is one quaternion
@@ -92,24 +94,14 @@ pub fn model_config(micro_steps: usize, layers: usize) -> MambaLatentNetConfig {
 
     // input  [batch, tokens, INPUT_SIZE]  (two one-hot symbol slots)
     // output [batch, tokens, NUM_CLASSES] (one logit per group element, every token)
-    MambaLatentNetConfig::Mamba3 {
-        input_size: INPUT_SIZE,
-        output_size: NUM_CLASSES,
+    let stack = NetworkShape::new(layers)
+        // the last layer's residual: dropped, so the head sees only the state
+        .with_ignore_last_residual(true)
+        // No feed-forward interleave: these examples are block-only.
+        .with_mlp(None);
+    let shape = LatentShape::new(INPUT_SIZE, NUM_CLASSES, stack)
         // No final norm: the state is a unit quaternion, so the output of the
         // block is already O(1), and the head reads it directly.
-        final_norm: false,
-        n_real_layers: layers,
-        n_virtual_layers: None,
-        grad_horizon: None,
-        mamba_block,
-        class_tokens: Vec::new(),
-        class_latents: Vec::new(),
-        ignore_first_residual: false,
-        // the last layer's residual: dropped, so the head sees only the state
-        ignore_last_residual: true,
-        residuals: ResidualsConfig::Standard,
-        // No feed-forward interleave: these examples are block-only.
-        mlp: None,
-        untied: Vec::new(),
-    }
+        .with_final_norm(false);
+    MambaLatentNetConfig::new(shape, MambaBlockConfig::Mamba3(mamba_block))
 }

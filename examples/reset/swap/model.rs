@@ -4,7 +4,8 @@
 
 use crate::dataset::{NUM_CLASSES, NUM_SYMBOLS};
 use burn_mamba::prelude::{
-    Mamba3Config, MambaLatentNetConfig, ResidualsConfig, RotationKind, TapPattern,
+    LatentShape, Mamba3Config, MambaBlockConfig, MambaLatentNetConfig, NetworkShape, RotationKind,
+    TapPattern,
 };
 
 /// A Mamba-3 block at `state_rank = 4` carries, per head, a cumulative rotation
@@ -78,25 +79,15 @@ pub fn model_config(rotation: RotationKind) -> MambaLatentNetConfig {
 
     // input  [batch, seq, NUM_SYMBOLS]  (one-hot symbol)
     // output [batch, seq, NUM_CLASSES]  (one logit per permutation, every position)
-    MambaLatentNetConfig::Mamba3 {
-        input_size: NUM_SYMBOLS,
-        output_size: NUM_CLASSES,
+    let stack = NetworkShape::new(1)
+        // the single layer's residual: dropped, so the head sees only the state
+        .with_ignore_last_residual(true)
+        // No feed-forward interleave: these examples are block-only.
+        .with_mlp(None);
+    let shape = LatentShape::new(NUM_SYMBOLS, NUM_CLASSES, stack)
         // no final norm, and this is load-bearing: a norm beside a constant is
         // even in the state, which merges the two lifts `±W` and lets
         // `Quaternion4D` solve the task too (`left_isoclinic_with_final_norm`).
-        final_norm: false,
-        n_real_layers: 1,
-        n_virtual_layers: None,
-        grad_horizon: None,
-        mamba_block,
-        class_tokens: Vec::new(),
-        class_latents: Vec::new(),
-        ignore_first_residual: false,
-        // the single layer's residual: dropped, so the head sees only the state
-        ignore_last_residual: true,
-        residuals: ResidualsConfig::Standard,
-        // No feed-forward interleave: these examples are block-only.
-        mlp: None,
-        untied: Vec::new(),
-    }
+        .with_final_norm(false);
+    MambaLatentNetConfig::new(shape, MambaBlockConfig::Mamba3(mamba_block))
 }

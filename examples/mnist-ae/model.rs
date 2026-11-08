@@ -39,8 +39,8 @@ use burn::nn::{Initializer, Linear, LinearConfig};
 use burn::prelude::*;
 use burn_stack::modules::bidi::OutputMergeConfig;
 use burn_mamba::prelude::{
-    ClassLatent, Mamba3Config, Mamba3SsdPath, Mamba3Untied, MambaBidiLayers, MambaBidiLayersConfig,
-    MambaSsdPath, RotationKind,
+    BidiShape, ClassLatent, Mamba3Config, Mamba3SsdPath, Mamba3Untied, MambaBidiLayers,
+    MambaBidiLayersConfig, MambaBlockConfig, MambaSsdPath, RotationKind,
 };
 use burn_stack::utils::BidiSchedule;
 
@@ -232,33 +232,26 @@ impl AeConfig {
 
         // The encoder carries any class latents (its summary readout). The
         // decoder reconstructs at patch resolution, so it has none.
-        let enc_layers = MambaBidiLayersConfig::Mamba3 {
-            n_real_layers: self.n_enc_layers,
-            n_virtual_layers: Some((self.n_virtual_layers, BidiSchedule::StridedStretched)),
-            mamba_block: self.mamba_block.clone(),
-            // first input (before flip) is non-bidi
-            ignore_first_residual: true,
-            // last output comes only from the state
-            ignore_last_residual: true,
-            outputs_merge: OutputMergeConfig::cat_linear(self.n_enc_layers),
-            class_latents: self.enc_class_latents.clone(),
-            residuals: burn_stack::modules::ResidualsConfig::Standard,
-            untied: Vec::new(),
-        }
+        let enc_layers = MambaBidiLayersConfig::new(
+            BidiShape::new(self.n_enc_layers, OutputMergeConfig::cat_linear(self.n_enc_layers))
+                .with_n_virtual_layers(Some((self.n_virtual_layers, BidiSchedule::StridedStretched)))
+                // first input (before flip) is non-bidi
+                .with_ignore_first_residual(true)
+                // last output comes only from the state
+                .with_ignore_last_residual(true)
+                .with_class_latents(self.enc_class_latents.clone()),
+            MambaBlockConfig::Mamba3(self.mamba_block.clone()),
+        )
         .init(device);
-        let dec_layers = MambaBidiLayersConfig::Mamba3 {
-            n_real_layers: self.n_dec_layers,
-            n_virtual_layers: Some((self.n_virtual_layers, BidiSchedule::StridedStretched)),
-            mamba_block: self.mamba_block.clone(),
-            // first input (before flip) is bidi
-            ignore_first_residual: false,
-            // last output comes only from the state
-            ignore_last_residual: true,
-            outputs_merge: OutputMergeConfig::cat_linear(self.n_dec_layers),
-            class_latents: Vec::new(),
-            residuals: burn_stack::modules::ResidualsConfig::Standard,
-            untied: Vec::new(),
-        }
+        let dec_layers = MambaBidiLayersConfig::new(
+            BidiShape::new(self.n_dec_layers, OutputMergeConfig::cat_linear(self.n_dec_layers))
+                .with_n_virtual_layers(Some((self.n_virtual_layers, BidiSchedule::StridedStretched)))
+                // first input (before flip) is bidi
+                .with_ignore_first_residual(false)
+                // last output comes only from the state
+                .with_ignore_last_residual(true),
+            MambaBlockConfig::Mamba3(self.mamba_block.clone()),
+        )
         .init(device);
 
         let pos_init = Initializer::Normal {

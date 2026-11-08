@@ -61,7 +61,7 @@ pub mod tests;
 #[path = "../../common/mod.rs"]
 pub mod common;
 
-use burn_mamba::prelude::MambaLatentNetConfig;
+use burn_mamba::prelude::MambaBlockConfig;
 
 /// Wire up the device, configs, and the train/infer flow for the task.
 pub fn launch(app_args: &AppArgs) {
@@ -112,11 +112,12 @@ pub fn launch(app_args: &AppArgs) {
         );
         model::model_config_with(group, rotation, layers, d_model, expand, heads, mimo_rank)
     });
-    let MambaLatentNetConfig::Mamba3 { output_size, .. } = &model_config else {
-        panic!("reset-quintic configures the Mamba-3 family")
-    };
+    assert!(
+        matches!(model_config.block, MambaBlockConfig::Mamba3(_)),
+        "reset-quintic configures the Mamba-3 family"
+    );
     assert_eq!(
-        *output_size,
+        model_config.shape.output_size,
         group.num_classes(),
         "the persisted model config was made for the other group — pass the matching --group"
     );

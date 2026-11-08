@@ -3,7 +3,7 @@
 //! class-token / class-latent insertion + step-injection machinery.
 
 use crate::prelude::*;
-use crate::family::{bidi::*, network::*};
+use crate::family::network::*;
 use burn::prelude::*;
 use burn_stack::modules::*;
 use burn_stack::utils::class::{class_marker_output_indices, class_prime_plan, class_window_plan};
@@ -51,22 +51,10 @@ fn unified_net_config_mamba2() {
         .with_state_rank(8)
         .with_ngroups(1)
         .with_conv_kernel(4);
-    let net = MambaLatentNetConfig::Mamba2 {
-        input_size: 3,
-        n_real_layers: 2,
-        n_virtual_layers: None,
-        grad_horizon: None,
-        mamba_block: block,
-        output_size: 2,
-        final_norm: false,
-        class_tokens: Vec::new(),
-        class_latents: Vec::new(),
-        ignore_first_residual: false,
-        ignore_last_residual: false,
-        residuals: burn_stack::modules::ResidualsConfig::Standard,
-        mlp: None,
-        untied: Vec::new(),
-    }
+    let net = MambaLatentNetConfig::new(
+        LatentShape::new(3, 2, NetworkShape::new(2)),
+        MambaBlockConfig::Mamba2(block),
+    )
     .init(&device);
 
     // Explicit, family-tagged path.
@@ -104,22 +92,10 @@ fn unified_net_config_mamba3() {
         .with_ngroups(1)
         .with_mimo_rank(1)
         .with_rotation_fraction(0.5);
-    let net = MambaLatentNetConfig::Mamba3 {
-        input_size: 3,
-        n_real_layers: 2,
-        n_virtual_layers: None,
-        grad_horizon: None,
-        mamba_block: block,
-        output_size: 2,
-        final_norm: false,
-        class_tokens: Vec::new(),
-        class_latents: Vec::new(),
-        ignore_first_residual: false,
-        ignore_last_residual: false,
-        residuals: burn_stack::modules::ResidualsConfig::Standard,
-        mlp: None,
-        untied: Vec::new(),
-    }
+    let net = MambaLatentNetConfig::new(
+        LatentShape::new(3, 2, NetworkShape::new(2)),
+        MambaBlockConfig::Mamba3(block),
+    )
     .init(&device);
 
     let (y, _c) = net.forward(
@@ -139,22 +115,10 @@ fn unified_net_config_mamba3() {
 fn unified_net_config_mamba1() {
     let device = test_device();
     let block = Mamba1Config::new(16).with_state_rank(8);
-    let net = MambaLatentNetConfig::Mamba1 {
-        input_size: 3,
-        n_real_layers: 2,
-        n_virtual_layers: None,
-        grad_horizon: None,
-        mamba_block: block,
-        output_size: 2,
-        final_norm: false,
-        class_tokens: Vec::new(),
-        class_latents: Vec::new(),
-        ignore_first_residual: false,
-        ignore_last_residual: false,
-        residuals: burn_stack::modules::ResidualsConfig::Standard,
-        mlp: None,
-        untied: Vec::new(),
-    }
+    let net = MambaLatentNetConfig::new(
+        LatentShape::new(3, 2, NetworkShape::new(2)),
+        MambaBlockConfig::Mamba1(block),
+    )
     .init(&device);
 
     let (y, _c) = net.forward(
@@ -272,17 +236,10 @@ fn unified_bidi_config_mamba2() {
         .with_state_rank(8)
         .with_ngroups(1)
         .with_conv_kernel(4);
-    let layers = MambaBidiLayersConfig::Mamba2 {
-        n_real_layers: 2,
-        n_virtual_layers: None,
-        mamba_block: block,
-        ignore_first_residual: false,
-        ignore_last_residual: false,
-        outputs_merge: OutputMergeConfig::mean(2),
-        class_latents: Vec::new(),
-        residuals: burn_stack::modules::ResidualsConfig::Standard,
-        untied: Vec::new(),
-    }
+    let layers = MambaBidiLayersConfig::new(
+        BidiShape::new(2, OutputMergeConfig::mean(2)),
+        MambaBlockConfig::Mamba2(block),
+    )
     .init(&device);
     let (y, _c) = layers.forward(
         Tensor::<3>::zeros([2, 5, 16], &device),
@@ -788,22 +745,10 @@ fn prime_through_the_runtime_enums() {
         .with_conv_kernel(4);
     let (batch, seq, vocab) = (2usize, 3usize, 8usize);
 
-    let net = MambaLatentNetConfig::Mamba2 {
-        input_size: 3,
-        n_real_layers: 1,
-        n_virtual_layers: None,
-        grad_horizon: None,
-        mamba_block: block.clone(),
-        output_size: 2,
-        final_norm: false,
-        class_tokens: vec![ClassToken::Start],
-        class_latents: Vec::new(),
-        ignore_first_residual: false,
-        ignore_last_residual: false,
-        residuals: burn_stack::modules::ResidualsConfig::Standard,
-        mlp: None,
-        untied: Vec::new(),
-    }
+    let net = MambaLatentNetConfig::new(
+        LatentShape::new(3, 2, NetworkShape::new(1)).with_class_tokens(vec![ClassToken::Start]),
+        MambaBlockConfig::Mamba2(block.clone()),
+    )
     .init(&device);
 
     let mut class = ClassCursors::new(seq);

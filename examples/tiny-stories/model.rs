@@ -6,7 +6,10 @@
 //! placeholders until a parameter search.
 
 use crate::dataset::VOCAB_SIZE;
-use burn_mamba::prelude::{Mamba3Config, MambaVocabNetConfig, ResidualsConfig, RotationKind};
+use burn_mamba::prelude::{
+    Mamba3Config, MambaBlockConfig, MambaVocabNetConfig, NetworkShape, ResidualsConfig,
+    RotationKind, VocabShape,
+};
 use burn_stack::utils::{ClassLatent, GradHorizon, Schedule};
 
 /// Depth of the (virtual) layer stack: the number of applications of the real
@@ -56,29 +59,17 @@ pub fn model_config() -> MambaVocabNetConfig {
         // (data-dependent) phase. The reset-* examples use `quaternion`/`rotor`.
         .with_rotation(RotationKind::Complex2D);
 
-    MambaVocabNetConfig::Mamba3 {
-        // the real layers, cycled to `N_VIRTUAL_LAYERS` for depth at no
-        // parameter cost
-        n_real_layers: 2,
-        n_virtual_layers: Some((N_VIRTUAL_LAYERS, Schedule::Cyclic)),
-        grad_horizon: GRAD_HORIZON,
-        // the 48 case-folded characters that the corpus contains
-        vocab_size: VOCAB_SIZE,
-        // keep the softmax exactly `VOCAB_SIZE`-way: no padded class can be
-        // sampled, so every logit is a character that the decoder knows
-        pad_vocab_size_multiple: 1,
-        mamba_block,
-        // true ⇒ the LM head is the (transposed) embedding: one table for
-        // "which character is this" and "which character comes next"
-        missing_lm_head: true,
-        class_latents: vec![ClassLatent::Start; N_CLASS_LATENTS],
-        ignore_first_residual: false,
-        ignore_last_residual: false,
+    // the real layers, cycled to `N_VIRTUAL_LAYERS` for depth at no parameter
+    // cost
+    let stack = NetworkShape::new(2)
+        .with_n_virtual_layers(Some((N_VIRTUAL_LAYERS, Schedule::Cyclic)))
+        .with_grad_horizon(GRAD_HORIZON)
+        .with_class_latents(vec![ClassLatent::Start; N_CLASS_LATENTS])
         // Multi-Gate Residuals: `n_stream` pooled streams between layers instead
         // of one additive skip. The per-stream gates are the only added
         // parameters. `per_virtual_layer: false` keeps one MGR per *real*
         // layer, used again by each virtual pass.
-        residuals: ResidualsConfig::MultiGate {
+        .with_residuals(ResidualsConfig::MultiGate {
             n_stream: 4,
             // Start every stream on an equal, unbiased gate, and let training
             // break the symmetry. The accumulation phase (the first
@@ -87,9 +78,16 @@ pub fn model_config() -> MambaVocabNetConfig {
             init_bias: 0.0,
             init_bias_offset: 0.0,
             per_virtual_layer: false,
-        },
+        })
         // No feed-forward interleave: these examples are block-only.
-        mlp: None,
-        untied: Vec::new(),
-    }
+        .with_mlp(None);
+    // the 48 case-folded characters that the corpus contains
+    let shape = VocabShape::new(VOCAB_SIZE, stack)
+        // keep the softmax exactly `VOCAB_SIZE`-way: no padded class can be
+        // sampled, so every logit is a character that the decoder knows
+        .with_pad_vocab_size_multiple(1)
+        // true ⇒ the LM head is the (transposed) embedding: one table for
+        // "which character is this" and "which character comes next"
+        .with_missing_lm_head(true);
+    MambaVocabNetConfig::new(shape, MambaBlockConfig::Mamba3(mamba_block))
 }
