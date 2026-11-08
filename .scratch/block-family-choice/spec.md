@@ -43,8 +43,9 @@ them (ADR-0009). The examples stay on the enum form for the same reason.
 - The fields of `Packed` become `pub(crate)`, so no caller can skip the checks.
 - `RefBlock` gets a packed forward and a `reset_align` option (default 1).
 - The remote backend goes from both crates.
-- Per-layer class latents go, with `Layer::insert_latents`, `BidiLayerPair`, the
-  ghost latents and `ClassCursors::per_layer`. Nothing uses them.
+- Per-layer class latents go. Nothing uses them. The code that supports them
+  adapts: it loses that support, and it becomes simpler where the removal allows
+  it.
 - burn-stack goes to 0.38.0 and burn-mamba to 0.76.0.
 
 ## Evidence
