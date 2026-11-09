@@ -30,6 +30,7 @@ use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::helpers;
 use crate::mamba3::plant_frame::{PlantEntry, PlantResets, PlantTail};
 use crate::mamba3::prelude::*;
+use crate::standard_ssd;
 use burn_stack::modules::sanity as san;
 use burn::prelude::*;
 
@@ -237,7 +238,7 @@ impl Mamba3 {
 
         // ── Reshape into chunks ───────────────────────────────────────────────
         let nchunks = sequence_padded / chunk_len;
-        let chunk_tokens = Mamba3SsdPath::chunk_tokens(chunk_len, u);
+        let chunk_tokens = standard_ssd::chunk_tokens(chunk_len, u);
         let x_gamma_bnlhp = x_gamma_bShp.reshape([batch, nchunks, chunk_len, nheads, per_head_dim]);
         let da_bnlh = da_bSh.reshape([batch, nchunks, chunk_len, nheads]);
         let b_bnlmhr = b_bSmhr.reshape([batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]);

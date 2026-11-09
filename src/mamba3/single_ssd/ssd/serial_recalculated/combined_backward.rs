@@ -7,12 +7,12 @@
 //!    (BLUE), the strict lower-triangular intra-chunk (LOWER) and the
 //!    γ-weighted diagonal (DIAG) terms. BLUE and LOWER run one chunk group at
 //!    a time
-//!    ([`Mamba3SsdPath::backward_chunk_group`](crate::mamba3::ssd_path::Mamba3SsdPath::backward_chunk_group)).
+//!    ([`backward_chunk_group`](crate::standard_ssd::backward_chunk_group)).
 //! 3. Walk the K4 state-passing backward, the one recurrence.
 //!
 //! This pathway applies the trapezoid weights inside the kernel, so it also
 //! returns `d_gamma` and `d_scale`. The extended K3 helper and K1/K2/K4
-//! (forward and backward) come from the double-SSD module.
+//! (forward and backward) come from the [standard SSD scan](crate::standard_ssd).
 //!
 //! All the math is on backend **primitives**, through the rank-tagged `F`
 //! wrapper. The [recompute node](burn_stack::utils::recompute_node)
@@ -21,22 +21,21 @@
 
 #![allow(non_snake_case)]
 
-use crate::mamba3::double_ssd::ssd::serial_recalculated::combined_backward::k3_ssd_chunk_state_extended;
-use crate::mamba3::double_ssd::ssd::serial_recalculated::{
-    cat_chunk_groups, k1_ssd_chunk_cumsum, k2_ssd_bmm, k4_ssd_state_passing,
-    k4_ssd_state_passing_backward,
-};
-use crate::mamba3::helpers::prim::{read_causal_mask, read_positions, scatter_read_positions};
 use crate::mamba3::single_ssd::ssd::serial_recalculated::diag::{
     DiagGrads, y_diag_correction_backward,
 };
-use crate::mamba3::ssd_path::Mamba3SsdPath;
+use crate::standard_ssd::kernels::{
+    cat_chunk_groups, k1_ssd_chunk_cumsum, k2_ssd_bmm, k3_ssd_chunk_state_extended,
+    k4_ssd_state_passing, k4_ssd_state_passing_backward,
+};
+use crate::standard_ssd::read_axis::{read_causal_mask, read_positions, scatter_read_positions};
+use crate::standard_ssd::{backward_chunk_group, chunk_tokens};
 use burn_stack::utils::fprim::{F, san};
 use burn::backend::Backend;
 
 /// Per-input gradients produced by [`combined_backward`] for the Single-SSD.
-/// It adds `d_gamma_bnth` and `d_scale_bnlh` to the fields of the double-ssd
-/// [`crate::mamba3::double_ssd::ssd::serial_recalculated::combined_backward::CombinedGrads`].
+/// It adds `d_gamma_bnth` and `d_scale_bnlh` to the fields of the
+/// [`CombinedGrads`](crate::standard_ssd::CombinedGrads) of the standard SSD scan.
 #[non_exhaustive]
 pub struct CombinedSingleSsdGrads<B: Backend> {
     /// Gradient of the raw input `v`.
@@ -64,7 +63,7 @@ pub struct CombinedSingleSsdGrads<B: Backend> {
 /// Recomputes the forward intermediates (K1–K4) from the saved inputs, then:
 /// - computes the K5 BLUE (state-to-output) and strict lower-triangular LOWER
 ///   (intra-chunk) backwards one chunk group at a time (the group size sets
-///   the memory of the score, see [`Mamba3SsdPath::backward_chunk_group`]),
+///   the memory of the score, see [`backward_chunk_group`]),
 /// - computes the γ-weighted diagonal DIAG backward batched (its `m × m`
 ///   working tensors are tiny),
 /// - walks the K4 state-passing backward (the one recurrence) over the
@@ -114,7 +113,7 @@ pub fn combined_backward<B: Backend>(
     let dtype = v_bnlmhp.dtype();
     // The chunk's two axes: `fused` is what it writes, `read` what it is read
     // at. They coincide unless `micro_steps > 1`.
-    let chunk_tokens = Mamba3SsdPath::chunk_tokens(chunk_len, read_stride);
+    let chunk_tokens = chunk_tokens(chunk_len, read_stride);
     let fused = chunk_len * mimo_rank;
     let read = chunk_tokens * mimo_rank;
 
@@ -216,10 +215,10 @@ pub fn combined_backward<B: Backend>(
     // `chunk_input_state[i]`, which the recomputed K4 already produced batched.
     // So this side mirrors the forward's own batched K5, `group` chunks at a
     // time — the group being what prices the score `[b, group, h, TM, LM]`
-    // against that forward's peak (see [`Mamba3SsdPath::backward_chunk_group`]).
+    // against that forward's peak (see [`backward_chunk_group`]).
     // The state gradient, the one part that *is* a scan, follows below.
     // ═══════════════════════════════════════════════════════════════════════
-    let group = Mamba3SsdPath::backward_chunk_group(nchunks);
+    let group = backward_chunk_group(nchunks);
     let ngroups = nchunks.div_ceil(group);
     let mut vec_lower_d_v_bnhLMp: Vec<F<B, 5>> = Vec::with_capacity(ngroups);
     let mut vec_blue_d_c_bnhTMr: Vec<F<B, 5>> = Vec::with_capacity(ngroups);

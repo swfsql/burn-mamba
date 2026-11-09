@@ -93,6 +93,10 @@ pub mod family;
 
 pub mod packing;
 mod padding;
+/// The standard SSD scan on primitives: the forward and the analytic backward
+/// that Mamba-2 and the double-SSD pathway of Mamba-3 call.
+#[cfg(any(feature = "mamba2", feature = "mamba3"))]
+pub mod standard_ssd;
 
 /// Re-export of the block-generic composition crate this one builds on, so a
 /// dependent can reach `Layer`/`Layers`/networks without naming it separately.

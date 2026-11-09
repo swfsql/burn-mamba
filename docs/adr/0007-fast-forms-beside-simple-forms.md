@@ -7,7 +7,9 @@ Tests assert that the forms agree on outputs, final caches and gradients. So the
 simple form is the check on the fast form, and the fast form gives the memory
 savings.
 
-This independence covers the scans. Each form keeps its own scan. The work
+This independence covers the scans. Each simple form keeps its own scan, apart
+from each fast form. The fast forms of Mamba-2 and double-SSD share one scan
+(ADR-0010), and each one meets its own simple form in the tests. The work
 around the scans, the entry and the tail of the plant frame, is one module. A
 bug in that module fails all forms alike, and agreement cannot show it. So the
 module has its own tests against its definitions.

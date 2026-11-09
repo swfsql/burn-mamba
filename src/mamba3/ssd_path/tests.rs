@@ -8,6 +8,7 @@
 //! `info/mamba-3/architecture-deltas.md` §8.
 
 use super::*;
+use crate::standard_ssd;
 
 /// The SISO block's schedule is unchanged: `√(N·P)` on the 32 grid, capped.
 #[test]
@@ -44,7 +45,7 @@ fn micro_steps_subdivides_the_chunk() {
             "u = {u} moved the chunk on the write axis off {base} to {write_len}",
         );
         assert_eq!(
-            Mamba3SsdPath::chunk_tokens(write_len, u),
+            standard_ssd::chunk_tokens(write_len, u),
             base.div_ceil(u),
             "u = {u} should divide the *token* count, not the write length",
         );
@@ -83,7 +84,7 @@ fn the_schedule_stays_on_the_grid() {
                         micro_steps,
                     );
                     assert_eq!(n % micro_steps, 0, "{n} is not a whole number of tokens");
-                    assert!(Mamba3SsdPath::chunk_tokens(n, micro_steps) >= 1);
+                    assert!(standard_ssd::chunk_tokens(n, micro_steps) >= 1);
                     // The rounding to a multiple of `u` can overshoot the ceiling
                     // by less than one token, and only there.
                     assert!((32..512 + micro_steps).contains(&n), "{n} is out of range");
@@ -104,18 +105,6 @@ fn the_schedule_is_monotone_in_the_fold() {
         let n = Mamba3SsdPath::optimal_chunk_len(256, 128, fold, 1);
         assert!(n <= previous, "fold {fold} widened the chunk to {n}");
         previous = n;
-    }
-}
-
-/// The recompute backward's chunk-local pass costs two iterations at any chunk
-/// count, and never holds more of the chunk axis than the forward's own K5.
-#[test]
-fn the_backward_walk_is_two_iterations() {
-    for nchunks in [1usize, 2, 3, 4, 5, 16, 31, 32, 1024] {
-        let group = Mamba3SsdPath::backward_chunk_group(nchunks);
-        assert!((1..=nchunks).contains(&group), "{group} is not a group of {nchunks}");
-        assert!(2 * group <= nchunks + 1, "{group} of {nchunks} is over half the axis");
-        assert!(nchunks.div_ceil(group) <= 2, "{nchunks} in groups of {group} needs a third pass");
     }
 }
 

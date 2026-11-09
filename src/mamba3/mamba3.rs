@@ -1563,7 +1563,7 @@ impl Mamba3 {
     ///
     /// `reset_bs` (`[batch, sequence]`, `true` at the first token of a
     /// segment) marks each start. It must be at the first token of a chunk
-    /// (every [`Mamba3SsdPath::chunk_tokens`] tokens). The tokens before the
+    /// (every [`chunk_tokens`](crate::standard_ssd::chunk_tokens) tokens). The tokens before the
     /// first reset of a row continue from `cache`, as in [`Self::forward`]. So
     /// a sequence can continue from the previous call. A segment can end with
     /// pad tokens (`pad_bs`) up to the next start. The result for each

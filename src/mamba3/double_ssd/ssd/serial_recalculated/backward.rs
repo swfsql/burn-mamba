@@ -3,15 +3,14 @@
 //! Implements [`Mamba3DoubleSsdBackendExt`] for `Autodiff<B>` with one
 //! [recompute node](burn_stack::utils::recompute_node). The node saves the
 //! inputs of the forward and not its large intermediates. The backward replays
-//! the serial kernels and the gradient math in
-//! [`super::combined_backward`](crate::mamba3::double_ssd::ssd::serial_recalculated::combined_backward).
+//! the serial kernels and the gradient math of the
+//! [standard SSD scan](crate::standard_ssd).
 //!
 //! Without resets, `keep_bn` and `origin_bhpr` are placeholders with one
 //! element, so the node saves them at no real cost.
 
-use crate::mamba3::double_ssd::ssd::serial_recalculated::{
-    Mamba3DoubleSsdBackendExt, combined_backward::combined_backward,
-};
+use crate::mamba3::double_ssd::ssd::serial_recalculated::Mamba3DoubleSsdBackendExt;
+use crate::standard_ssd::combined_backward;
 use burn::backend::Backend;
 use burn::backend::autodiff::{Autodiff, checkpoint::strategy::CheckpointStrategy};
 use burn::backend::tensor::FloatTensor;

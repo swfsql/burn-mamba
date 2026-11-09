@@ -12,17 +12,18 @@
 //! The default body runs under a generic backend `B`, where the high-level
 //! `Tensor` (pinned to `Dispatch`) is not available. So the K1–K5 math uses
 //! the rank-tagged [`F`] primitive wrapper. K1–K4 do not depend on the form,
-//! and come from the double-SSD forward. Only the single-SSD K5 (strict-lower
-//! intra-chunk + γ-correction) is defined here, and it is forward-only.
+//! and come from the [standard SSD scan](crate::standard_ssd). Only the
+//! single-SSD K5 (strict-lower intra-chunk + γ-correction) is defined here,
+//! and it is forward-only.
 
 #![allow(non_snake_case)]
 
-use crate::mamba3::double_ssd::ssd::serial_recalculated::{
-    k1_ssd_chunk_cumsum, k2_ssd_bmm, k3_ssd_chunk_state, k4_ssd_state_passing,
-};
-use crate::mamba3::helpers::prim::{read_causal_mask, read_positions};
 use crate::mamba3::single_ssd::prelude::*;
 use crate::mamba3::single_ssd::ssd::serial_recalculated::diag::y_diag_correction;
+use crate::standard_ssd::kernels::{
+    k1_ssd_chunk_cumsum, k2_ssd_bmm, k3_ssd_chunk_state, k4_ssd_state_passing,
+};
+use crate::standard_ssd::read_axis::{read_causal_mask, read_positions};
 use burn_stack::utils::fprim::{F, san};
 use burn::backend::tensor::FloatTensor;
 use burn::backend::{Backend, Dispatch, backend_extension};

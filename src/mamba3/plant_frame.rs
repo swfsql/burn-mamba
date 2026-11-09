@@ -35,7 +35,7 @@ use crate::mamba3::in_proj_layout::GroupKey;
 use crate::mamba3::mamba3::{Mamba3, Packed};
 use crate::mamba3::product::last_micro4;
 use crate::mamba3::rotation::{RotationState, rotate_bc_forward};
-use crate::mamba3::ssd_path::Mamba3SsdPath;
+use crate::standard_ssd;
 use burn::prelude::*;
 use burn_stack::modules::{Silu, sanity as san};
 
@@ -190,7 +190,7 @@ impl Mamba3 {
         // A reset is at the first token of a chunk, which is its first
         // micro-step on the write axis. See [`crate::packing`].
         let packed = resets.map(|PlantResets { reset_bt, origin, chunk_len }| {
-            let chunk_tokens = Mamba3SsdPath::chunk_tokens(chunk_len, u);
+            let chunk_tokens = standard_ssd::chunk_tokens(chunk_len, u);
             let reset_bn = crate::packing::chunk_resets(reset_bt, chunk_tokens);
             Packed {
                 segments: crate::packing::Segments::new(reset_bn, chunk_len, sequence),

@@ -1,0 +1,447 @@
+//! # The kernels of the standard SSD scan
+//!
+//! The forward K1–K5 on backend primitives, the K4 backward and the helpers of
+//! the recompute backward. [`super::combined_backward()`] uses K1, K2 and K4
+//! again. K5 is forward-only: the backward computes the gradient of K5
+//! analytically.
+//!
+//! The kernels run under a generic backend `B`, where the high-level `Tensor`
+//! (pinned to `Dispatch`) is not available. So the math uses the rank-tagged
+//! [`F`] primitive wrapper.
+
+#![allow(non_snake_case)]
+
+use super::read_axis::{read_causal_mask, read_positions};
+use burn_stack::utils::fprim::{F, san};
+use burn::backend::Backend;
+use burn::tensor::s;
+
+/// The forward of one SSD call: K1–K5.
+///
+/// # Arguments
+/// - `v_bnlmhp`:           `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]`
+/// - `da_bnlh`:            `[batch, nchunks, chunk_len, nheads]`, the log-decay `Δ·A`
+/// - `b_bnlmhr`:           `[batch, nchunks, chunk_len, mimo_rank, nheads, state_rank]`
+/// - `c_bntmhr`:           `[batch, nchunks, chunk_tokens, mimo_rank, nheads, state_rank]`
+/// - `initial_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
+/// - `read_stride`:        write positions per read position (`micro_steps`)
+/// - `restarts`:           `(keep_bn, origin_bhpr)`, or `None`. `keep_bn` is
+///   `0` at a chunk that starts a new segment of a packed row. `origin_bhpr`
+///   is the state that such a chunk starts from.
+///
+/// # Returns
+/// - `y_bntmhp`:         `[batch, nchunks, chunk_tokens, mimo_rank, nheads, per_head_dim]`
+/// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
+pub fn forward<B: Backend>(
+    v_bnlmhp: F<B, 6>,
+    da_bnlh: F<B, 4>,
+    b_bnlmhr: F<B, 6>,
+    c_bntmhr: F<B, 6>,
+    initial_state_bhpr: F<B, 4>,
+    read_stride: usize,
+    restarts: Option<(F<B, 2>, F<B, 4>)>,
+) -> (F<B, 6>, F<B, 4>) {
+    let nchunks = v_bnlmhp.dims()[1];
+    assert!(nchunks > 0, "sequence length must be at least 1");
+
+    let (da_cumsum_bhnl, da_chunk_end_bhn) = k1_ssd_chunk_cumsum::<B>(da_bnlh);
+    san(&da_cumsum_bhnl);
+
+    let cb_bnhTMLM = k2_ssd_bmm::<B>(c_bntmhr.clone(), b_bnlmhr.clone());
+    san(&cb_bnhTMLM);
+
+    let intra_chunk_state_bnhpr =
+        k3_ssd_chunk_state::<B>(v_bnlmhp.clone(), b_bnlmhr, da_cumsum_bhnl.clone());
+    san(&intra_chunk_state_bnhpr);
+
+    let (chunk_input_state_bnhpr, final_state_bhpr) = k4_ssd_state_passing::<B>(
+        intra_chunk_state_bnhpr,
+        da_chunk_end_bhn,
+        initial_state_bhpr,
+        restarts,
+        None,
+    );
+    san(&chunk_input_state_bnhpr);
+    san(&final_state_bhpr);
+
+    let y_bntmhp = k5_ssd_chunk_scan::<B>(
+        da_cumsum_bhnl,
+        v_bnlmhp,
+        c_bntmhr,
+        cb_bnhTMLM,
+        chunk_input_state_bnhpr,
+        read_stride,
+    );
+    san(&y_bntmhp);
+
+    (y_bntmhp, final_state_bhpr)
+}
+
+/// K1: the cumulative sum of `da` inside each chunk.
+///
+/// Returns the intra-chunk cumsum `da_cumsum_bhnl` and the per-chunk last value
+/// `da_chunk_end_bhn`.
+pub(crate) fn k1_ssd_chunk_cumsum<B: Backend>(da_bnlh: F<B, 4>) -> (F<B, 4>, F<B, 3>) {
+    let da_bhnl = da_bnlh.permute([0, 3, 1, 2]);
+    let da_cumsum_bhnl = da_bhnl.cumsum(3);
+    let da_chunk_end_bhn = da_cumsum_bhnl
+        .clone()
+        .slice(s![.., .., .., -1])
+        .squeeze_dim::<3>(3);
+    (da_cumsum_bhnl, da_chunk_end_bhn)
+}
+
+/// K2: the intra-chunk matrix `C·Bᵀ`, on the fused axes.
+///
+/// Returns the block matrix `cb_bnhTMLM`.
+pub(crate) fn k2_ssd_bmm<B: Backend>(c_bntmhr: F<B, 6>, b_bnlmhr: F<B, 6>) -> F<B, 5> {
+    // `C` has the read axis of the chunk, and `B` its write axis. They are
+    // equal unless `micro_steps > 1`.
+    let [batch, nchunks, chunk_tokens, mimo_rank, nheads, state_rank] = c_bntmhr.dims();
+    let [.., chunk_len, _, _, _] = b_bnlmhr.dims();
+    let c_bnTMhr = c_bntmhr.reshape([batch, nchunks, chunk_tokens * mimo_rank, nheads, state_rank]);
+    let b_bnLMhr = b_bnlmhr.reshape([batch, nchunks, chunk_len * mimo_rank, nheads, state_rank]);
+    let c_bnhTMr = c_bnTMhr.swap_dims(2, 3);
+    let b_bnhrLM = b_bnLMhr.permute([0, 1, 3, 4, 2]);
+    c_bnhTMr.matmul(b_bnhrLM)
+}
+
+/// K3: the end state of each chunk, from a zero state at the chunk start.
+///
+/// Returns `intra_chunk_state_bnhpr`: the contribution of each chunk to its
+/// end state. `v_bnlmhp` is pre-scaled. [`k3_ssd_chunk_state_extended`] also
+/// returns the intermediates of the backward.
+pub(crate) fn k3_ssd_chunk_state<B: Backend>(
+    v_bnlmhp: F<B, 6>,
+    b_bnlmhr: F<B, 6>,
+    da_cumsum_bhnl: F<B, 4>,
+) -> F<B, 5> {
+    let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = v_bnlmhp.dims();
+    let [.., state_rank] = b_bnlmhr.dims();
+
+    let v_bnLMhp = v_bnlmhp.reshape([batch, nchunks, chunk_len * mimo_rank, nheads, per_head_dim]);
+    let b_bnLMhr = b_bnlmhr.reshape([batch, nchunks, chunk_len * mimo_rank, nheads, state_rank]);
+
+    let da_cumsum_last_bhn1 = da_cumsum_bhnl.clone().slice(s![.., .., .., -1]);
+    let da_cumsum_bhnLM = da_cumsum_bhnl
+        .unsqueeze_dim::<5>(4) // da_cumsum_bhnl1
+        .expand([batch, nheads, nchunks, chunk_len, mimo_rank]) // da_cumsum_bhnlm
+        .reshape([batch, nheads, nchunks, chunk_len * mimo_rank]); // da_cumsum_bhnLM
+    let decay_bhnLM = (da_cumsum_last_bhn1 - da_cumsum_bhnLM).exp();
+
+    let decay_bnLMh1 = decay_bhnLM.permute([0, 2, 3, 1]).unsqueeze_dim::<5>(4); // decay_bnLMh1
+    let decayed_v_bnLMhp = decay_bnLMh1 * v_bnLMhp;
+
+    let decayed_v_bnhpLM = decayed_v_bnLMhp.permute([0, 1, 3, 4, 2]);
+    let b_bnhLMr = b_bnLMhr.swap_dims(2, 3);
+    let intra_chunk_state_bnhpr = decayed_v_bnhpLM.matmul(b_bnhLMr);
+    assert_eq!(
+        [batch, nchunks, nheads, per_head_dim, state_rank],
+        intra_chunk_state_bnhpr.dims()
+    );
+    intra_chunk_state_bnhpr
+}
+
+/// The K3 kernel `k3_ssd_chunk_state`, with the intermediates of the backward:
+/// - `intra_chunk_state_bnhpr`: the chunk-end state from a zero initial state
+/// - `decay_bhnLM`: the fused-length K3 decay factor `exp(cumA_last − cumA_fused)`
+/// - `decayed_v_bnLMhp`: `v` already scaled by `decay_bnLMh1`
+pub fn k3_ssd_chunk_state_extended<B: Backend>(
+    v_bnlmhp: F<B, 6>,
+    b_bnlmhr: F<B, 6>,
+    da_cumsum_bhnl: F<B, 4>,
+) -> (F<B, 5>, F<B, 4>, F<B, 5>) {
+    let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = v_bnlmhp.dims();
+    let [.., state_rank] = b_bnlmhr.dims();
+
+    let v_bnLMhp = v_bnlmhp.reshape([batch, nchunks, chunk_len * mimo_rank, nheads, per_head_dim]);
+    let b_bnLMhr = b_bnlmhr.reshape([batch, nchunks, chunk_len * mimo_rank, nheads, state_rank]);
+
+    let da_cumsum_last_bhn1 = da_cumsum_bhnl.clone().slice(s![.., .., .., -1]);
+    let da_cumsum_bhnLM = da_cumsum_bhnl
+        .unsqueeze_dim::<5>(4) // da_cumsum_bhnl1
+        .expand([batch, nheads, nchunks, chunk_len, mimo_rank]) // da_cumsum_bhnlm
+        .reshape([batch, nheads, nchunks, chunk_len * mimo_rank]); // da_cumsum_bhnLM
+    let decay_bhnLM = (da_cumsum_last_bhn1 - da_cumsum_bhnLM).exp();
+    san(&decay_bhnLM);
+
+    let decay_bnLMh1 = decay_bhnLM
+        .clone()
+        .permute([0, 2, 3, 1])
+        .unsqueeze_dim::<5>(4);
+    let decayed_v_bnLMhp = decay_bnLMh1 * v_bnLMhp;
+    san(&decayed_v_bnLMhp);
+
+    let decayed_v_bnhpLM = decayed_v_bnLMhp.clone().permute([0, 1, 3, 4, 2]);
+    let b_bnhLMr = b_bnLMhr.swap_dims(2, 3);
+    let intra_chunk_state_bnhpr = decayed_v_bnhpLM.matmul(b_bnhLMr);
+    san(&intra_chunk_state_bnhpr);
+
+    (intra_chunk_state_bnhpr, decay_bhnLM, decayed_v_bnLMhp)
+}
+
+/// K4: the state passing across the chunks.
+///
+/// Returns the per-chunk input-state stream `chunk_input_state_bnhpr` and the
+/// `final_state_bhpr`.
+///
+/// `restarts` is `(keep_bn, origin_bhpr)`: the reset as a factor, and the
+/// origin state. The state that goes into a chunk with `keep = 0` is its
+/// restart state, `origin + seedᶜ` (`origin` without seeds). The call starts
+/// from `initial`.
+pub(crate) fn k4_ssd_state_passing<B: Backend>(
+    intra_chunk_state_bnhpr: F<B, 5>,
+    da_chunk_end_bhn: F<B, 3>,
+    initial_state_bhpr: F<B, 4>,
+    restarts: Option<(F<B, 2>, F<B, 4>)>,
+    seed_bnhpr: Option<F<B, 5>>,
+) -> (F<B, 5>, F<B, 4>) {
+    let [batch, nchunks, nheads, per_head_dim, state_rank] = intra_chunk_state_bnhpr.dims();
+    let state = [nheads, per_head_dim, state_rank];
+    let restarts = restarts.map(|(keep_bn, origin_bhpr)| {
+        let restart_bn = restart_factor(&keep_bn);
+        (keep_bn, restart_bn, origin_bhpr)
+    });
+    let restart = |origin_bhpr: &F<B, 4>, i_chunk: usize| match &seed_bnhpr {
+        Some(seed_bnhpr) => {
+            origin_bhpr.clone()
+                + seed_bnhpr
+                    .clone()
+                    .slice(s![.., i_chunk, .., .., ..])
+                    .squeeze_dim::<4>(1)
+        }
+        None => origin_bhpr.clone(),
+    };
+
+    let mut running_state_bhpr = initial_state_bhpr;
+    let mut chunk_input_state_vec_bhpr = Vec::with_capacity(nchunks + 1);
+    chunk_input_state_vec_bhpr.push(running_state_bhpr.clone());
+
+    for i_chunk in 0..nchunks {
+        // A chunk that starts a segment starts from its restart state. (A
+        // learnable `init_state_hpr` would join it, but only `Minimal` takes
+        // one.)
+        if let Some((keep_bn, restart_bn, origin_bhpr)) = &restarts {
+            running_state_bhpr = running_state_bhpr * keep_at(keep_bn, i_chunk, state)
+                + restart(origin_bhpr, i_chunk) * keep_at(restart_bn, i_chunk, state);
+            *chunk_input_state_vec_bhpr.last_mut().unwrap() = running_state_bhpr.clone();
+        }
+        let intra_state_bhpr = intra_chunk_state_bnhpr
+            .clone()
+            .slice(s![.., i_chunk, .., .., ..])
+            .squeeze_dim::<4>(1);
+        let decay_bhpr = da_chunk_end_bhn
+            .clone()
+            .slice(s![.., .., i_chunk])
+            .unsqueeze_dim::<4>(3)
+            .exp()
+            .expand([batch, nheads, per_head_dim, state_rank]);
+        running_state_bhpr = decay_bhpr * running_state_bhpr + intra_state_bhpr;
+        chunk_input_state_vec_bhpr.push(running_state_bhpr.clone());
+    }
+
+    let final_state_bhpr = chunk_input_state_vec_bhpr.pop().unwrap();
+    let chunk_input_state_bnhpr = F::stack(chunk_input_state_vec_bhpr, 1);
+    (chunk_input_state_bnhpr, final_state_bhpr)
+}
+
+/// `1 − keep`: `1` at a chunk that restarts.
+fn restart_factor<B: Backend>(keep_bn: &F<B, 2>) -> F<B, 2> {
+    F::<B, 2>::full(keep_bn.dims(), 1.0, &keep_bn.device(), keep_bn.dtype()) - keep_bn.clone()
+}
+
+/// The factor of chunk `i_chunk`, broadcast over one state
+/// (`[batch, nheads, per_head_dim, state_rank]`).
+fn keep_at<B: Backend>(keep_bn: &F<B, 2>, i_chunk: usize, [nheads, per_head_dim, state_rank]: [usize; 3]) -> F<B, 4> {
+    let batch = keep_bn.dims()[0];
+    keep_bn
+        .clone()
+        .slice(s![.., i_chunk])
+        .reshape([batch, 1, 1, 1])
+        .expand([batch, nheads, per_head_dim, state_rank])
+}
+
+/// Backward of [`k4_ssd_state_passing`]: the reverse of its scalar-decay scan.
+/// It is the only part of the recompute backward that walks the chunks, as the
+/// forward K4 does.
+///
+/// Forward, with `sᵢ` for `chunk_input_stateᵢ`: `sᵢ₊₁ = decayᵢ·sᵢ + intraᵢ`.
+/// Reverse, seeded by `d_final`: `d_intraᵢ = d_sᵢ₊₁` and
+/// `d_sᵢ = decayᵢ·d_sᵢ₊₁ + d_chunk_input_stateᵢ`. The walk ends on `d_initial`.
+/// `d_decayᵢ = d_sᵢ₊₁·sᵢ` needs no walk. `decay` is one scalar per `(b, h, n)`,
+/// so it comes out of the `(p, r)` sum, and the whole stream is one batched
+/// product.
+///
+/// Under a reset (`keep_bn`), `sᵢ = keepᵢ · (the state before chunk i) +
+/// (1 − keepᵢ) · restartᵢ`. So the gradient that goes on to chunk `i − 1` is
+/// `keepᵢ · d_sᵢ`, and `restartᵢ` gets `(1 − keepᵢ) · d_sᵢ`. The call starts
+/// from `initial`, so it gets what the walk leaves at the end. `sᵢ` in
+/// `d_decay` is already the restarted one (the caller recomputed it).
+///
+/// # Returns
+/// - `d_intra_chunk_state_bnhpr` — gradient of K3's per-chunk contribution
+/// - `d_da_chunk_end_bhn` — gradient of the per-chunk log-decay
+/// - `d_initial_state_bhpr` — what the walk leaves at the end
+/// - `d_restart_bnhpr` — the gradient of each chunk's restart state
+///   (`origin + seedᶜ`) with resets, else `None`. The origin gets its sum
+///   over the chunks, and each seed gets its own chunk.
+pub(crate) fn k4_ssd_state_passing_backward<B: Backend>(
+    d_chunk_input_state_bnhpr: F<B, 5>,
+    chunk_input_state_bnhpr: F<B, 5>,
+    da_chunk_end_bhn: F<B, 3>,
+    d_final_state_bhpr: F<B, 4>,
+    keep_bn: Option<F<B, 2>>,
+) -> (F<B, 5>, F<B, 3>, F<B, 4>, Option<F<B, 5>>) {
+    let [batch, nchunks, nheads, per_head_dim, state_rank] = chunk_input_state_bnhpr.dims();
+    let state = [nheads, per_head_dim, state_rank];
+    let restart_bn = keep_bn.as_ref().map(restart_factor);
+
+    let mut d_running_state_bhpr = d_final_state_bhpr;
+    let mut d_intra_vec_bhpr: Vec<F<B, 4>> = Vec::with_capacity(nchunks);
+    // `d_restartᵢ`, in reverse chunk order.
+    let mut d_restart_vec_bhpr: Vec<F<B, 4>> = Vec::with_capacity(nchunks);
+    for i_chunk in (0..nchunks).rev() {
+        d_intra_vec_bhpr.push(d_running_state_bhpr.clone());
+
+        let decay_bhpr: F<B, 4> = da_chunk_end_bhn
+            .clone()
+            .slice(s![.., .., i_chunk]) // da_chunk_end_bh1
+            .exp()
+            .unsqueeze_dim::<4>(3) // decay_bh11
+            .expand([batch, nheads, per_head_dim, state_rank]);
+        let d_chunk_input_state_bhpr: F<B, 4> = d_chunk_input_state_bnhpr
+            .clone()
+            .slice(s![.., i_chunk, .., .., ..])
+            .squeeze_dim::<4>(1);
+
+        d_running_state_bhpr = decay_bhpr * d_running_state_bhpr + d_chunk_input_state_bhpr;
+        if let (Some(keep_bn), Some(restart_bn)) = (&keep_bn, &restart_bn) {
+            d_restart_vec_bhpr.push(d_running_state_bhpr.clone() * keep_at(restart_bn, i_chunk, state));
+            d_running_state_bhpr = d_running_state_bhpr * keep_at(keep_bn, i_chunk, state);
+        }
+        san(&d_running_state_bhpr);
+    }
+    d_intra_vec_bhpr.reverse();
+    let d_intra_chunk_state_bnhpr: F<B, 5> = F::stack(d_intra_vec_bhpr, 1);
+
+    // The walk ends on the state before chunk 0: `initial`.
+    let d_initial_state_bhpr = d_running_state_bhpr;
+    let d_restart_bnhpr = (!d_restart_vec_bhpr.is_empty()).then(|| {
+        d_restart_vec_bhpr.reverse();
+        F::stack(d_restart_vec_bhpr, 1)
+    });
+
+    let d_decay_bhn: F<B, 3> = (d_intra_chunk_state_bnhpr.clone() * chunk_input_state_bnhpr)
+        .reshape([batch, nchunks, nheads, per_head_dim * state_rank])
+        .sum_dim(3) // d_decay_bnh1
+        .squeeze_dim::<3>(3) // d_decay_bnh
+        .permute([0, 2, 1]); // d_decay_bhn
+    // decay = exp(da_chunk_end), so the chain rule multiplies it back in.
+    let d_da_chunk_end_bhn = d_decay_bhn * da_chunk_end_bhn.exp();
+    san(&d_da_chunk_end_bhn);
+
+    (
+        d_intra_chunk_state_bnhpr,
+        d_da_chunk_end_bhn,
+        d_initial_state_bhpr,
+        d_restart_bnhpr,
+    )
+}
+
+/// Concatenate the per-group outputs of a chunk-group pass back along the
+/// chunk axis. Nothing to do when the pass ran in one group, which is the case
+/// for a short enough chunk axis (see
+/// [`backward_chunk_group`](super::backward_chunk_group)).
+pub(crate) fn cat_chunk_groups<B: Backend, const D: usize>(
+    mut groups: Vec<F<B, D>>,
+    dim: usize,
+) -> F<B, D> {
+    match groups.len() {
+        1 => groups.pop().expect("one group"),
+        _ => F::cat(groups, dim),
+    }
+}
+
+/// K5: the output of each chunk.
+///
+/// Adds the intra-chunk (ORANGE, MIMO causal) and inter-chunk (BLUE,
+/// state-carried) contributions into the output `y_bntmhp`. It applies no `D`
+/// skip: the caller adds it. Forward-only.
+fn k5_ssd_chunk_scan<B: Backend>(
+    da_cumsum_bhnl: F<B, 4>,
+    v_bnlmhp: F<B, 6>,
+    c_bntmhr: F<B, 6>,
+    cb_bnhTMLM: F<B, 5>,
+    chunk_input_state_bnhpr: F<B, 5>,
+    read_stride: usize,
+) -> F<B, 6> {
+    let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = v_bnlmhp.dims();
+    let [.., chunk_tokens, _, _, state_rank] = c_bntmhr.dims();
+    let device = v_bnlmhp.device();
+    let dtype = v_bnlmhp.dtype();
+    let fused = chunk_len * mimo_rank; // write (source) axis
+    let read = chunk_tokens * mimo_rank; // read (target) axis
+
+    let v_bnLMhp = v_bnlmhp.reshape([batch, nchunks, fused, nheads, per_head_dim]);
+    let c_bnTMhr = c_bntmhr.reshape([batch, nchunks, read, nheads, state_rank]);
+
+    // Expand base da_cumsum to fused length: [b, nheads, n, l] → [b, nheads, n, L],
+    // and to the read positions the target axis needs.
+    let da_cumsum_bhnLM = da_cumsum_bhnl
+        .clone()
+        .unsqueeze_dim::<5>(4) // da_cumsum_bhnl1
+        .expand([batch, nheads, nchunks, chunk_len, mimo_rank]) // da_cumsum_bhnlm
+        .reshape([batch, nheads, nchunks, fused]); // da_cumsum_bhnLM
+    let da_cumsum_bhnTM = read_positions::<B, 4, 5>(da_cumsum_bhnl, 3, read_stride)
+        .unsqueeze_dim::<5>(4)
+        .expand([batch, nheads, nchunks, chunk_tokens, mimo_rank])
+        .reshape([batch, nheads, nchunks, read]);
+
+    // ── BLUE (Y_off): exp(cumA[i]) · C[i] · h[n-1] ─────────────────────
+    let exp_da_bnhTMp = da_cumsum_bhnTM
+        .clone()
+        .exp()
+        .swap_dims(1, 2) // exp_da_bnhTM
+        .unsqueeze_dim::<5>(4) // exp_da_bnhTM1
+        .expand([batch, nchunks, nheads, read, per_head_dim]);
+    let c_bnhTMr = c_bnTMhr.swap_dims(2, 3);
+    let chunk_input_state_bnhrp = chunk_input_state_bnhpr.transpose();
+    let ch_bnhTMp = c_bnhTMr.matmul(chunk_input_state_bnhrp);
+    let blue_bnhTMp = ch_bnhTMp * exp_da_bnhTMp;
+
+    // ── ORANGE (Y_diag): MIMO causal decay matrix · CB @ V ────────────────────
+    let target_da_cumsum_bnhTMLM = da_cumsum_bhnTM
+        .swap_dims(1, 2) // da_cumsum_bnhTM
+        .unsqueeze_dim::<5>(4) // da_cumsum_bnhTM1
+        .expand([batch, nchunks, nheads, read, fused]);
+    let source_da_cumsum_bnhTMLM = da_cumsum_bhnLM
+        .swap_dims(1, 2) // da_cumsum_bnhLM
+        .unsqueeze_dim::<5>(3) // da_cumsum_bnh1LM
+        .expand([batch, nchunks, nheads, read, fused]);
+    let diff_da_cumsum_bnhTMLM = target_da_cumsum_bnhTMLM - source_da_cumsum_bnhTMLM;
+
+    // MIMO causal neg-inf mask: −∞ where j//m > i//m (source strictly ahead of
+    // target in time). `triu(1)` keeps the diagonal, because the sum of this
+    // scan includes the same position.
+    let neg_inf_base_bnhtl = read_causal_mask::<B>(chunk_len, read_stride, 1, &device, dtype)
+        .unsqueeze_dims::<5>(&[0, 1, 2]) // neg_inf_base_111tl
+        .expand([batch, nchunks, nheads, chunk_tokens, chunk_len]); // neg_inf_base_bnhtl
+    let neg_inf_bnhTMLM = neg_inf_base_bnhtl
+        .unsqueeze_dim::<6>(4) // neg_inf_base_bnht1l
+        .expand([batch, nchunks, nheads, chunk_tokens, mimo_rank, chunk_len]) // neg_inf_base_bnhtml
+        .reshape([batch, nchunks, nheads, read, chunk_len]) // neg_inf_base_bnhTMl
+        .unsqueeze_dim::<6>(5) // neg_inf_base_bnhTMl1
+        .expand([batch, nchunks, nheads, read, chunk_len, mimo_rank]) // neg_inf_base_bnhTMlm
+        .reshape([batch, nchunks, nheads, read, fused]); // neg_inf_bnhTMLM
+
+    let decay_bnhTMLM = (diff_da_cumsum_bnhTMLM + neg_inf_bnhTMLM).exp();
+
+    let v_bnhLMp = v_bnLMhp.swap_dims(2, 3);
+    let orange_bnhTMp = (cb_bnhTMLM * decay_bnhTMLM).matmul(v_bnhLMp);
+
+    // ── Combine and reshape ────────────────────────────────────────────────────
+    let y_bntmhp = (blue_bnhTMp + orange_bnhTMp)
+        .swap_dims(2, 3) // y_bnTMhp
+        .reshape([batch, nchunks, chunk_tokens, mimo_rank, nheads, per_head_dim]); // y_bntmhp
+    y_bntmhp
+}

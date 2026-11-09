@@ -1,5 +1,5 @@
-use super::*;
 use crate::mamba2::ssd::serial;
+use crate::standard_ssd;
 use burn_stack::utils::fprim::F;
 use burn::backend::Dispatch;
 use burn::prelude::*;
@@ -12,20 +12,22 @@ type B = Dispatch;
 
 /// Oracle for the local (BLUE+ORANGE) part of `d_da_cumsum`.
 ///
-/// Per Tri Dao's `_chunk_scan_bwd_ddAcs_unstable` (ssd_chunk_scan.py:1618):
+/// `_chunk_scan_bwd_ddAcs_unstable` (ssd_chunk_scan.py:1618) gives this
+/// identity with the ORANGE `d_dt`. The standard SSD scan takes `v = dt·x`, so
+/// the identity here uses the ORANGE `d_v`:
 /// ```text
 /// d_da_cumsum_local[b,h,n,l]
 ///   = Σ_p out_x[b,n,l,h,p] · d_y[b,n,l,h,p]
-///     − d_dt_orange[b,h,n,l] · dt[b,h,n,l]
+///     − Σ_p d_v_orange[b,n,l,h,p] · v[b,n,l,h,p]
 /// ```
-/// where `out_x = y − D·x` (output before D-skip) and `d_dt_orange` is
-/// the same-chunk d_dt contribution from ORANGE only.
+/// where `out_x = y − D·x` (output before D-skip). The two forms agree because
+/// `d_dt_orange·dt = Σ_p d_v_orange·x·dt`.
 ///
 /// This is a stronger correctness check than the autodiff comparison:
 /// both sides are computed via independent analytical paths and should
 /// match to fp32 precision on small inputs. The identity is numerically
-/// unstable for large inputs (catastrophic cancellation between einsum
-/// and ddt·dt).
+/// unstable for large inputs (catastrophic cancellation between the two
+/// sums).
 #[test]
 fn oracle_da_local_matches_einsum_minus_ddt_dt() {
     let device = test_device();
@@ -64,7 +66,7 @@ fn oracle_da_local_matches_einsum_minus_ddt_dt() {
         Distribution::Normal(0.0, 0.1),
         &device,
     );
-    let dt_discretized_bhnl = dt_bnlh.permute([0, 3, 1, 2]);
+    let dt_discretized_bhnl = dt_bnlh.clone().permute([0, 3, 1, 2]);
 
     // ─── Forward (Serial path) ───────────────────────────────────────
     let (da_cumsum_bhnl, da_chunk_end_bhn) =
@@ -84,7 +86,7 @@ fn oracle_da_local_matches_einsum_minus_ddt_dt() {
     );
     let y_bnlhp = serial::k5_ssd_chunk_scan(
         da_cumsum_bhnl,
-        dt_discretized_bhnl.clone(),
+        dt_discretized_bhnl,
         x_bnlhp.clone(),
         c_bnlhr.clone(),
         cb_bnhll,
@@ -112,30 +114,36 @@ fn oracle_da_local_matches_einsum_minus_ddt_dt() {
         &device,
     );
 
-    // ─── Run combined_backward (gets d_da_local + d_dt_orange) ───────
-    // `combined_backward` operates on `F<B>` primitives, so wrap the high-level
-    // `Tensor` inputs (and unwrap the `F` outputs back to `Tensor` below).
-    let grads = combined_backward::<B>(
-        F::new(d_y_bnlhp.clone().into_dispatch()),
+    // ─── The inputs of the standard SSD scan ──────────────────────────
+    let v_bnlhp = x_bnlhp * dt_bnlh.clone().unsqueeze_dim::<5>(4);
+    let da_bnlh = dt_bnlh * a_decay_h.unsqueeze_dims::<4>(&[0, 1, 2]);
+
+    // ─── Run the scan backward ────────────────────────────────────────
+    // It returns d_da_local and d_v_orange. It runs on `F<B>` primitives. So
+    // wrap the `Tensor` inputs here, and unwrap the `F` outputs below.
+    let grads = standard_ssd::combined_backward::<B>(
+        F::new(d_y_bnlhp.clone().unsqueeze_dim::<6>(3).into_dispatch()),
         F::new(d_final_bhpr.into_dispatch()),
-        F::new(x_bnlhp.into_dispatch()),
-        F::new(dt_discretized_bhnl.clone().into_dispatch()),
-        F::new(b_bnlhr.into_dispatch()),
-        F::new(c_bnlhr.into_dispatch()),
-        F::new(d_h.into_dispatch()),
+        F::new(v_bnlhp.clone().unsqueeze_dim::<6>(3).into_dispatch()),
+        F::new(da_bnlh.into_dispatch()),
+        F::new(b_bnlhr.unsqueeze_dim::<6>(3).into_dispatch()),
+        F::new(c_bnlhr.unsqueeze_dim::<6>(3).into_dispatch()),
         F::new(initial_state_bhpr.into_dispatch()),
-        F::new(a_decay_h.into_dispatch()),
+        1,
         None,
     );
     let d_da_local_bhnl = Tensor::<4>::from_dispatch(grads.d_da_local_bhnl.inner());
-    let d_dt_orange_bhnl = Tensor::<4>::from_dispatch(grads.d_dt_orange_bhnl.inner());
+    let d_v_orange_bnlhp =
+        Tensor::<6>::from_dispatch(grads.d_v_orange_bnlmhp.inner()).squeeze_dim::<5>(3);
 
-    // ─── Oracle: einsum(out_x, d_y, "bnlhp,bnlhp->bhnl") − d_dt_orange·dt
-    let einsum_bhnl: Tensor<4> = (out_x_bnlhp * d_y_bnlhp)
-        .sum_dim(4) // einsum_bnlh1
-        .squeeze_dim::<4>(4) // einsum_bnlh
-        .permute([0, 3, 1, 2]); // einsum_bhnl
-    let oracle_bhnl = einsum_bhnl - d_dt_orange_bhnl * dt_discretized_bhnl;
+    // ─── Oracle: Σ_p out_x·d_y − Σ_p d_v_orange·v ────────────────────
+    let sum_p_bhnl = |lhs_bnlhp: Tensor<5>, rhs_bnlhp: Tensor<5>| -> Tensor<4> {
+        (lhs_bnlhp * rhs_bnlhp)
+            .sum_dim(4) // _bnlh1
+            .squeeze_dim::<4>(4) // _bnlh
+            .permute([0, 3, 1, 2]) // _bhnl
+    };
+    let oracle_bhnl = sum_p_bhnl(out_x_bnlhp, d_y_bnlhp) - sum_p_bhnl(d_v_orange_bnlhp, v_bnlhp);
 
     // ─── Compare ─────────────────────────────────────────────────────
     let diff: f32 = (d_da_local_bhnl - oracle_bhnl)

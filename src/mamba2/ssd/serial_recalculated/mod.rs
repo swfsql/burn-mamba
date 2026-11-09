@@ -2,10 +2,10 @@
 //!
 //! The forward and the [`Mamba2BackendExt`] trait are in `serial_recalculated`.
 //! The `RecomputeOp` impl ([`backward`](crate::mamba2::ssd::serial_recalculated::backward))
-//! and the recompute-based gradient math
+//! and the gradient math
 //! ([`combined_backward`](crate::mamba2::ssd::serial_recalculated::combined_backward))
-//! mirror the official `ssd_combined.py`. Together they use ~⅓ less training
-//! memory than a backward that stores every intermediate.
+//! call the [standard SSD scan](crate::standard_ssd). Together they use ~⅓ less
+//! training memory than a backward that stores every intermediate.
 
 /// The `RecomputeOp` impl of the autodiff backend.
 #[cfg(feature = "autodiff")]

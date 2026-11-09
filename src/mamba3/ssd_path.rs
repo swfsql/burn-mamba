@@ -57,7 +57,7 @@ impl Mamba3SsdPath {
     /// Optimal chunk length, in **write positions**: `√(state_rank ·
     /// per_head_dim)` divided by `mimo_rank`, rounded up to a multiple of 32,
     /// clamped to `32 ..= 512`. `micro_steps` does not change this width:
-    /// [`Self::chunk_tokens`] absorbs it.
+    /// [`chunk_tokens`](crate::standard_ssd::chunk_tokens) absorbs it.
     ///
     /// The square root is the SISO rule of thumb: it balances the intra-chunk
     /// GEMMs against the inter-chunk scan. Two dials of the block widen a chunk
@@ -72,7 +72,8 @@ impl Mamba3SsdPath {
     /// - **`micro_steps`** (`u`) widens only the **write** axis. All `u`
     ///   micro-steps of a token write to the state, but the block *reads* the
     ///   token once, at its last micro-step. So the score is
-    ///   `[batch, nchunks, heads, T·m, T·u·m]` for `T` = [`Self::chunk_tokens`],
+    ///   `[batch, nchunks, heads, T·m, T·u·m]` for `T` =
+    ///   [`chunk_tokens`](crate::standard_ssd::chunk_tokens),
     ///   with `batch · sequence · heads · T · u · m²` elements. To keep that flat
     ///   in `u`, keep `T · u` (the chunk on the *write* axis) flat and use fewer
     ///   tokens.
@@ -99,27 +100,6 @@ impl Mamba3SsdPath {
             .clamp(32, 512); // rule-of-thumb: one plane minimum, ceiling at 512.
         // A whole number of tokens per chunk, at (very nearly) that chunk length.
         chunk_len.div_ceil(micro_steps) * micro_steps
-    }
-
-    /// Tokens per chunk: `chunk_len / micro_steps`, the **read** axis of the
-    /// chunk.
-    ///
-    /// `chunk_len` counts write positions (one per micro-step). The SSD reads
-    /// each token once, at its last micro-step. So this is the row count of the
-    /// score and of the `y` that the kernels return. See
-    /// [`Self::optimal_chunk_len`].
-    ///
-    /// # Panics
-    /// If `micro_steps` does not divide `chunk_len`.
-    /// [`Self::chunk_len_or_optimal`] makes sure that it does.
-    pub fn chunk_tokens(chunk_len: usize, micro_steps: usize) -> usize {
-        let micro_steps = micro_steps.max(1);
-        assert_eq!(
-            chunk_len % micro_steps,
-            0,
-            "chunk_len {chunk_len} must be a whole number of tokens at micro_steps {micro_steps}",
-        );
-        chunk_len / micro_steps
     }
 
     /// The chunk length carried by this variant, if any.
@@ -150,29 +130,6 @@ impl Mamba3SsdPath {
                 block.micro_steps,
             ),
         }
-    }
-
-    /// Chunks per iteration of the chunk-local pass of the
-    /// [`Self::SerialRecalculated`] backward: how many chunks that pass
-    /// batches.
-    ///
-    /// The recompute backward does not need to *walk* the chunk axis. Every
-    /// chunk-local gradient (the state-to-output term and the intra-chunk
-    /// triangular term) needs only the slices of its chunk and its input
-    /// state, which the recomputed K4 already produced, batched. Only the
-    /// state gradient is a scan, and it is a few ops per chunk.
-    ///
-    /// The cost of batching the rest is memory. The score
-    /// `[batch, group, nheads, read, fused]` is live `group`-wide. At its peak
-    /// this pass holds about six score-shaped tensors, where the forward K5
-    /// holds about four at **full** width. So **half** stays under the peak
-    /// that the forward already reaches, and the walk is two iterations at any
-    /// chunk count. The bound is a ratio of live tensors, so it needs no
-    /// dimension and no absolute budget. The promise of the path (no
-    /// intermediates carried across the forward/backward boundary) holds in
-    /// both cases: when this runs, the forward intermediates are already free.
-    pub fn backward_chunk_group(nchunks: usize) -> usize {
-        nchunks.div_ceil(2).max(1)
     }
 
     /// The recommended default path for a given block: [`Self::SerialRecalculated`]

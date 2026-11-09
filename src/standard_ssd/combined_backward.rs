@@ -1,12 +1,11 @@
-//! # Recompute-based gradient math for the Mamba-3 double-SSD
+//! # The analytic backward of the standard SSD scan
 //!
-//! The analytic backward of the MIMO-first serial scan of each pass of the
-//! double-SSD decomposition:
+//! The steps of the backward of one SSD call:
 //!
 //! 1. Recompute the forward intermediates (K1–K4) from the saved leaf inputs.
 //!    They are not stored.
 //! 2. Run the chunk-**local** K5 backward batched, one chunk group at a time
-//!    ([`Mamba3SsdPath::backward_chunk_group`](crate::mamba3::ssd_path::Mamba3SsdPath::backward_chunk_group)).
+//!    ([`backward_chunk_group`]).
 //! 3. Walk the K4 state-passing backward: the one recurrence, and the only
 //!    walk.
 //! 4. Run the K1/K2/K3 backwards batched.
@@ -17,24 +16,21 @@
 //! All the math is on backend **primitives**, through the rank-tagged `F`
 //! wrapper. The [recompute node](burn_stack::utils::recompute_node)
 //! runs with a generic backend `B`, where the high-level `Tensor` is not
-//! available, so the math uses the `float_*` ops of `B`. The recomputed
-//! K1/K2/K4 kernels are primitive ports of the high-level
-//! [`serial`](crate::mamba3::double_ssd::ssd::serial) kernels.
+//! available, so the math uses the `float_*` ops of `B`.
 
 #![allow(non_snake_case)]
 
-use super::serial_recalculated::{
-    cat_chunk_groups, k1_ssd_chunk_cumsum, k2_ssd_bmm, k4_ssd_state_passing,
-    k4_ssd_state_passing_backward,
+use super::kernels::{
+    cat_chunk_groups, k1_ssd_chunk_cumsum, k2_ssd_bmm, k3_ssd_chunk_state_extended,
+    k4_ssd_state_passing, k4_ssd_state_passing_backward,
 };
-use crate::mamba3::helpers::prim::{read_causal_mask, read_positions, scatter_read_positions};
-use crate::mamba3::ssd_path::Mamba3SsdPath;
+use super::read_axis::{read_causal_mask, read_positions, scatter_read_positions};
+use super::{backward_chunk_group, chunk_tokens};
 use burn_stack::utils::fprim::{F, san};
 use burn::backend::Backend;
-use burn::tensor::s;
 
 /// Per-input gradients produced by [`combined_backward`] (one field per
-/// differentiable forward input of the double-SSD scan).
+/// differentiable forward input of one SSD call).
 #[non_exhaustive]
 pub struct CombinedGrads<B: Backend> {
     /// Gradient of the (pre-scaled) input `v`.
@@ -49,53 +45,16 @@ pub struct CombinedGrads<B: Backend> {
     pub d_initial_state_bhpr: F<B, 4>,
     /// Gradient of the origin state of the resets (`None` without resets).
     pub d_origin_bhpr: Option<F<B, 4>>,
+    /// Local same-chunk part of `d_da_cumsum`, from BLUE and ORANGE only (no K3
+    /// and no K4 contribution). Test builds only.
+    #[cfg(test)]
+    pub d_da_local_bhnl: F<B, 4>,
+    /// The ORANGE part of `d_v`. Test builds only.
+    #[cfg(test)]
+    pub d_v_orange_bnlmhp: F<B, 6>,
 }
 
-// ─── Recomputed forward kernels ──────────────────────────────────────────────
-// The recompute backward replays K1/K2/K4 of the forward (imported above from
-// [`super::serial_recalculated`]), plus the extended K3 below. The extended K3
-// also returns the intermediates that the gradient math needs.
-
-/// Same as `k3_ssd_chunk_state`, but it also returns the intermediates that
-/// the custom backward needs:
-/// - `intra_chunk_state_bnhpr` — the chunk-end state from a zero initial state
-/// - `decay_bhnLM` — the fused-length K3 decay factor `exp(cumA_last − cumA_fused)`
-/// - `decayed_v_bnLMhp` — V already scaled by `decay_bnLMh1`
-pub fn k3_ssd_chunk_state_extended<B: Backend>(
-    v_bnlmhp: F<B, 6>,
-    b_bnlmhr: F<B, 6>,
-    da_cumsum_bhnl: F<B, 4>,
-) -> (F<B, 5>, F<B, 4>, F<B, 5>) {
-    let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = v_bnlmhp.dims();
-    let [.., state_rank] = b_bnlmhr.dims();
-
-    let v_bnLMhp = v_bnlmhp.reshape([batch, nchunks, chunk_len * mimo_rank, nheads, per_head_dim]);
-    let b_bnLMhr = b_bnlmhr.reshape([batch, nchunks, chunk_len * mimo_rank, nheads, state_rank]);
-
-    let da_cumsum_last_bhn1 = da_cumsum_bhnl.clone().slice(s![.., .., .., -1]);
-    let da_cumsum_bhnLM = da_cumsum_bhnl
-        .unsqueeze_dim::<5>(4) // da_cumsum_bhnl1
-        .expand([batch, nheads, nchunks, chunk_len, mimo_rank]) // da_cumsum_bhnlm
-        .reshape([batch, nheads, nchunks, chunk_len * mimo_rank]); // da_cumsum_bhnLM
-    let decay_bhnLM = (da_cumsum_last_bhn1 - da_cumsum_bhnLM).exp();
-    san(&decay_bhnLM);
-
-    let decay_bnLMh1 = decay_bhnLM
-        .clone()
-        .permute([0, 2, 3, 1])
-        .unsqueeze_dim::<5>(4);
-    let decayed_v_bnLMhp = decay_bnLMh1 * v_bnLMhp;
-    san(&decayed_v_bnLMhp);
-
-    let decayed_v_bnhpLM = decayed_v_bnLMhp.clone().permute([0, 1, 3, 4, 2]);
-    let b_bnhLMr = b_bnLMhr.swap_dims(2, 3);
-    let intra_chunk_state_bnhpr = decayed_v_bnhpLM.matmul(b_bnhLMr);
-    san(&intra_chunk_state_bnhpr);
-
-    (intra_chunk_state_bnhpr, decay_bhnLM, decayed_v_bnLMhp)
-}
-
-/// Memory-efficient backward for the Mamba-3 MIMO-first chunkwise SSD.
+/// Memory-efficient backward of one SSD call.
 ///
 /// Recomputes the forward intermediates (K1-K4) from the saved inputs. Then
 /// the chunk-local K5 (BLUE + ORANGE) backward runs batched over chunk groups,
@@ -134,7 +93,7 @@ pub fn combined_backward<B: Backend>(
     let device = v_bnlmhp.device();
     let dtype = v_bnlmhp.dtype();
     // The chunk's two axes: `fused` is what it writes, `read` what it is read at.
-    let chunk_tokens = Mamba3SsdPath::chunk_tokens(chunk_len, read_stride);
+    let chunk_tokens = chunk_tokens(chunk_len, read_stride);
     let fused = chunk_len * mimo_rank;
     let read = chunk_tokens * mimo_rank;
 
@@ -151,7 +110,7 @@ pub fn combined_backward<B: Backend>(
     // ═══════════════════════════════════════════════════════════════════════
 
     // K1 — pre-combined Δ·A → intra-chunk cumsum
-    let (da_cumsum_bhnl, da_chunk_end_bhn) = k1_ssd_chunk_cumsum(da_bnlh.clone());
+    let (da_cumsum_bhnl, da_chunk_end_bhn) = k1_ssd_chunk_cumsum(da_bnlh);
     san(&da_cumsum_bhnl);
 
     // K2 — CB matrix used in K5 ORANGE
@@ -182,7 +141,7 @@ pub fn combined_backward<B: Backend>(
         .unsqueeze_dim::<5>(4) // da_cumsum_bhnl1
         .expand([batch, nheads, nchunks, chunk_len, mimo_rank]) // da_cumsum_bhnlm
         .reshape([batch, nheads, nchunks, fused]); // da_cumsum_bhnLM
-    let da_cumsum_bhnTM = read_positions::<B, 4, 5>(da_cumsum_bhnl.clone(), 3, read_stride)
+    let da_cumsum_bhnTM = read_positions::<B, 4, 5>(da_cumsum_bhnl, 3, read_stride)
         .unsqueeze_dim::<5>(4)
         .expand([batch, nheads, nchunks, chunk_tokens, mimo_rank])
         .reshape([batch, nheads, nchunks, read]);
@@ -195,7 +154,7 @@ pub fn combined_backward<B: Backend>(
     san(&d_y_bnhTMp);
 
     // Reusable [chunk_tokens, chunk_len] -inf upper-triangular base mask for
-    // ORANGE (`triu(1)`: the double-SSD sum includes the same position).
+    // ORANGE (`triu(1)`: the sum of this scan includes the same position).
     let neg_inf_base_tl: F<B, 2> = read_causal_mask::<B>(chunk_len, read_stride, 1, &device, dtype);
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -205,18 +164,17 @@ pub fn combined_backward<B: Backend>(
     // `chunk_input_state[i]`, which the recomputed K4 already produced batched.
     // So this side mirrors the batched K5 of the forward, `group` chunks at a
     // time. The group size sets the memory of the score `[b, group, h, TM, LM]`
-    // against the peak of that forward (see
-    // [`Mamba3SsdPath::backward_chunk_group`]). The state gradient, the one
-    // part that *is* a scan, comes below.
+    // against the peak of that forward (see [`backward_chunk_group`]). The state
+    // gradient, the one part that *is* a scan, comes below.
     // ═══════════════════════════════════════════════════════════════════════
-    let group = Mamba3SsdPath::backward_chunk_group(nchunks);
-    let ngroups = nchunks.div_ceil(group);
-    let mut vec_orange_d_v_bnhLMp: Vec<F<B, 5>> = Vec::with_capacity(ngroups);
-    let mut vec_blue_d_c_bnhTMr: Vec<F<B, 5>> = Vec::with_capacity(ngroups);
-    let mut vec_d_cb_bnhTMLM: Vec<F<B, 5>> = Vec::with_capacity(ngroups);
-    let mut vec_blue_d_da_bnhl: Vec<F<B, 4>> = Vec::with_capacity(ngroups);
-    let mut vec_orange_d_da_bnhl: Vec<F<B, 4>> = Vec::with_capacity(ngroups);
-    let mut vec_d_chunk_input_state_bnhpr: Vec<F<B, 5>> = Vec::with_capacity(ngroups);
+    let group = backward_chunk_group(nchunks);
+    let chunk_groups = nchunks.div_ceil(group);
+    let mut vec_orange_d_v_bnhLMp: Vec<F<B, 5>> = Vec::with_capacity(chunk_groups);
+    let mut vec_blue_d_c_bnhTMr: Vec<F<B, 5>> = Vec::with_capacity(chunk_groups);
+    let mut vec_d_cb_bnhTMLM: Vec<F<B, 5>> = Vec::with_capacity(chunk_groups);
+    let mut vec_blue_d_da_bnhl: Vec<F<B, 4>> = Vec::with_capacity(chunk_groups);
+    let mut vec_orange_d_da_bnhl: Vec<F<B, 4>> = Vec::with_capacity(chunk_groups);
+    let mut vec_d_chunk_input_state_bnhpr: Vec<F<B, 5>> = Vec::with_capacity(chunk_groups);
 
     for start in (0..nchunks).step_by(group) {
         // The chunk count of this group: `group`, or fewer at the tail. It is
@@ -285,7 +243,7 @@ pub fn combined_backward<B: Backend>(
         // d_da from BLUE:
         //   ch[TM,p] = Σᵣ C[TM,r] · state[p,r]      (= C @ state_rp after transpose)
         //   d_da[TM] = (Σₚ d_y[TM,p] · ch[TM,p]) · exp_da[TM]
-        let ch_bnhTMp: F<B, 5> = c_bnhTMr.clone().matmul(
+        let ch_bnhTMp: F<B, 5> = c_bnhTMr.matmul(
             chunk_input_state_bnhpr.transpose(), // chunk_input_state_bnhrp
         ); // ch_bnhTMp
         let d_da_blue_bnhTM: F<B, 4> = (d_y_bnhTMp.clone() * ch_bnhTMp * exp_da_cumsum_bnhTMp)
@@ -307,8 +265,8 @@ pub fn combined_backward<B: Backend>(
 
         // ── ORANGE backward ────────────────────────────────────────────
         //
-        //   w[LMₜ,LMₛ] = CB[LMₜ,LMₛ] · decay[LMₜ,LMₛ]   (MIMO causal mask in decay)
-        //   orange[LMₜ,p] = Σ_{LMₛ} w[LMₜ,LMₛ] · v[LMₛ,p]
+        //   w[TMₜ,LMₛ] = CB[TMₜ,LMₛ] · decay[TMₜ,LMₛ]   (MIMO causal mask in decay)
+        //   orange[TMₜ,p] = Σ_{LMₛ} w[TMₜ,LMₛ] · v[LMₛ,p]
         let da_target_bnhTMLM: F<B, 5> = da_cumsum_bnhTM
             .unsqueeze_dim::<5>(4) // da_cumsum_bnhTMₜ1
             .expand([batch, n, nheads, read, fused]); // da_target_bnhTMₜLM
@@ -334,7 +292,7 @@ pub fn combined_backward<B: Backend>(
         let decay_bnhTMLM = (diff_bnhTMLM + neg_inf_mimo_bnhTMLM).exp();
         san(&decay_bnhTMLM);
 
-        // d_v_orange = w^T @ d_orange ; d_w = d_orange @ v^T
+        // d_v_orange = w^T @ d_orange, and d_w = d_orange @ v^T.
         let d_orange_bnhTMp = d_y_bnhTMp;
         let w_bnhTMLM = cb_bnhTMLM.clone() * decay_bnhTMLM.clone();
         let d_w_bnhTMLM: F<B, 5> = d_orange_bnhTMp.clone().matmul(
@@ -347,7 +305,7 @@ pub fn combined_backward<B: Backend>(
         san(&d_v_orange_bnhLMp);
         vec_orange_d_v_bnhLMp.push(d_v_orange_bnhLMp);
 
-        // d_cb = d_w · decay ; d_decay = d_w · cb ; d_diff = d_decay · decay
+        // d_cb = d_w · decay, d_decay = d_w · cb and d_diff = d_decay · decay.
         // (masked positions where decay=0 contribute 0 to d_diff automatically)
         let d_cb_bnhTMLM = d_w_bnhTMLM.clone() * decay_bnhTMLM.clone();
         vec_d_cb_bnhTMLM.push(d_cb_bnhTMLM);
@@ -412,24 +370,13 @@ pub fn combined_backward<B: Backend>(
     // ═══════════════════════════════════════════════════════════════════════
     // K3 BACKWARD (batched)
     //
-    // Forward (recap):
-    //   v_bnLMhp        = v.reshape
-    //   b_bnLMhr        = b.reshape
-    //   decay_bhnLM     = exp(cumA_last − cumA)
-    //   decay_bnLMh1    = decay_bhnLM.permute([0,2,3,1]).unsqueeze(4)
-    //   decayed_v_bnLMhp = decay_bnLMh1 · v_bnLMhp                      (elementwise)
-    //   decayed_v_bnhpLM = decayed_v_bnLMhp.permute([0,1,3,4,2])
-    //   b_bnhLMr        = b_bnLMhr.swap_dims(2, 3)
-    //   intra_state    = decayed_v_bnhpLM @ b_bnhLMr
+    // Forward, on the fused length:
+    //   decay       = exp(cumA_last − cumA)
+    //   decayed_v   = decay · v   (elementwise)
+    //   intra_state = decayed_v @ b
     // ═══════════════════════════════════════════════════════════════════════
-    let v_bnLMhp =
-        v_bnlmhp
-            .clone()
-            .reshape([batch, nchunks, chunk_len * mimo_rank, nheads, per_head_dim]);
-    let b_bnLMhr =
-        b_bnlmhr
-            .clone()
-            .reshape([batch, nchunks, chunk_len * mimo_rank, nheads, state_rank]);
+    let v_bnLMhp = v_bnlmhp.reshape([batch, nchunks, chunk_len * mimo_rank, nheads, per_head_dim]);
+    let b_bnLMhr = b_bnlmhr.reshape([batch, nchunks, chunk_len * mimo_rank, nheads, state_rank]);
     let b_bnhLMr = b_bnLMhr.clone().swap_dims(2, 3);
     let decayed_v_bnhpLM = k3_decayed_v_bnLMhp.permute([0, 1, 3, 4, 2]);
 
@@ -452,7 +399,7 @@ pub fn combined_backward<B: Backend>(
         .permute([0, 2, 3, 1]) // k3_decay_bnLMh
         .unsqueeze_dim::<5>(4); // k3_decay_bnLMh1
     let d_v_k3_bnLMhp: F<B, 5> = d_decayed_v_bnLMhp * k3_decay_bnLMh1;
-    let d_v_k3_bnlrhp: F<B, 6> =
+    let d_v_k3_bnlmhp: F<B, 6> =
         d_v_k3_bnLMhp.reshape([batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]);
 
     // d(cumA_last − cumA) = d_decay · decay
@@ -486,12 +433,11 @@ pub fn combined_backward<B: Backend>(
     // ═══════════════════════════════════════════════════════════════════════
     // K2 BACKWARD (batched)
     //
-    //   cb_bnhLMLM = c_bnhLMr @ b_bnhrLM   (contracts state_rank)
-    //   d_c_bnhLMr = d_cb @ b_bnhLMr      (= d_cb @ b_bnhrLM^T)
-    //   d_b_bnhrLM = c_bnhrLM @ d_cb      (= c_bnhLMr^T @ d_cb)
+    //   cb_bnhTMLM = c_bnhTMr @ b_bnhrLM   (contracts state_rank)
+    //   d_c_bnhTMr = d_cb @ b_bnhLMr      (= d_cb @ b_bnhrLM^T)
+    //   d_b_bnhrLM = c_bnhrTM @ d_cb      (= c_bnhTMr^T @ d_cb)
     // ═══════════════════════════════════════════════════════════════════════
     let c_bnhTMr = c_bntmhr
-        .clone()
         .reshape([batch, nchunks, read, nheads, state_rank]) // c_bnTMhr
         .swap_dims(2, 3); // c_bnhTMr
     let b_for_k2_bnhLMr = b_bnLMhr.swap_dims(2, 3);
@@ -513,13 +459,21 @@ pub fn combined_backward<B: Backend>(
     let d_c_blue_bntmhr: F<B, 6> = d_c_blue_bnhTMr
         .swap_dims(2, 3) // d_c_blue_bnTMhr
         .reshape([batch, nchunks, chunk_tokens, mimo_rank, nheads, state_rank]); // d_c_blue_bntmhr
-    let d_v_orange_bnlrhp: F<B, 6> = d_v_orange_bnhLMp
+    let d_v_orange_bnlmhp: F<B, 6> = d_v_orange_bnhLMp
         .swap_dims(2, 3) // d_v_orange_bnLMhp
-        .reshape([batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]); // d_v_orange_bnlrhp
+        .reshape([batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]); // d_v_orange_bnlmhp
 
     // ═══════════════════════════════════════════════════════════════════════
     // K1 BACKWARD + SUM CONTRIBUTIONS
     // ═══════════════════════════════════════════════════════════════════════
+
+    // Test-only copies for the oracle of the local same-chunk `d_da`.
+    // Production builds compute neither the add nor the copy.
+    #[cfg(test)]
+    let d_da_local_bhnl = d_da_blue_bhnl.clone() + d_da_orange_bhnl.clone();
+    #[cfg(test)]
+    let d_v_orange_save_bnlmhp = d_v_orange_bnlmhp.clone();
+
     let d_da_cumsum_bhnl =
         d_da_blue_bhnl + d_da_orange_bhnl + d_da_cumsum_k3_bhnl + d_da_cumsum_k4_bhnl;
     san(&d_da_cumsum_bhnl);
@@ -543,7 +497,7 @@ pub fn combined_backward<B: Backend>(
     let d_da_bnlh = d_da_bhnl.permute([0, 2, 3, 1]);
 
     // ── Combine per-input gradient contributions ──────────────────────────
-    let d_v_bnlmhp = d_v_k3_bnlrhp + d_v_orange_bnlrhp;
+    let d_v_bnlmhp = d_v_k3_bnlmhp + d_v_orange_bnlmhp;
     let d_b_bnlmhr = d_b_k2_bnlmhr + d_b_k3_bnlmhr;
     let d_c_bntmhr = d_c_k2_bntmhr + d_c_blue_bntmhr;
 
@@ -560,5 +514,9 @@ pub fn combined_backward<B: Backend>(
         d_c_bntmhr,
         d_initial_state_bhpr,
         d_origin_bhpr,
+        #[cfg(test)]
+        d_da_local_bhnl,
+        #[cfg(test)]
+        d_v_orange_bnlmhp: d_v_orange_save_bnlmhp,
     }
 }

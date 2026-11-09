@@ -32,9 +32,9 @@ pub use crate::mamba3::double_ssd::ssd::serial::{
     k1_ssd_chunk_cumsum, k2_ssd_bmm, k3_ssd_chunk_state, k4_ssd_state_passing,
 };
 use crate::mamba3::helpers;
-use crate::mamba3::prelude::Mamba3SsdPath;
 use crate::mamba3::single_ssd::prelude::*;
 use crate::mamba3::single_ssd::ssd::diag::y_diag_correction;
+use crate::standard_ssd;
 use burn::prelude::*;
 
 impl Mamba3SingleSsdInput {
@@ -59,7 +59,7 @@ impl Mamba3SingleSsdInput {
         input.sanity();
         let [batch, nchunks, chunk_len, _mimo_rank, nheads, per_head_dim] = input.v_bnlmhp.dims();
         let [.., state_rank] = input.b_bnlmhr.dims();
-        let chunk_tokens = Mamba3SsdPath::chunk_tokens(chunk_len, input.read_stride);
+        let chunk_tokens = standard_ssd::chunk_tokens(chunk_len, input.read_stride);
 
         assert!(
             input.init_state_hpr.is_none(),

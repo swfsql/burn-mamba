@@ -47,8 +47,10 @@ pub enum Mamba2SsdPath {
     /// See [`Mamba2SsdInput::ssd_serial_recalculated`]. For a plain autodiff
     /// backward, see [`Self::Serial`].
     ///
-    /// Based on the combined kernel `/mamba_ssm/ops/triton/ssd_combined.py` in
-    /// the `state-spaces/mamba` GitHub reference.
+    /// It calls the [standard SSD scan](crate::standard_ssd). The gradients are
+    /// those of the combined kernel `/mamba_ssm/ops/triton/ssd_combined.py` in
+    /// the `state-spaces/mamba` GitHub reference. The order of the math is that
+    /// of the scan, and not that of the kernel (ADR-0010).
     SerialRecalculated(Option<usize>),
 }
 

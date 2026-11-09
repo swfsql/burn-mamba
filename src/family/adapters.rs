@@ -372,7 +372,7 @@ mod impl_mamba3 {
         fn reset_align(&self, options: &Mamba3SsdPath) -> Option<usize> {
             match options {
                 Mamba3SsdPath::Minimal(_) => None,
-                _ => Some(Mamba3SsdPath::chunk_tokens(options.chunk_len_or_optimal(self), self.micro_steps)),
+                _ => Some(crate::standard_ssd::chunk_tokens(options.chunk_len_or_optimal(self), self.micro_steps)),
             }
         }
         fn block_step(&self, x: Tensor<2>, cache: Option<Mamba3Cache>) -> (Tensor<2>, Mamba3Cache) {

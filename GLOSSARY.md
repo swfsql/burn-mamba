@@ -88,6 +88,12 @@ Structured State Space Duality: the matrix form of the recurrence. An SSD scan
 computes it chunk by chunk.
 _Avoid_: SSD core
 
+**Standard SSD scan**:
+The SSD scan of one recurrence with a scalar decay and no trapezoid inside it.
+Mamba-2 makes one call of it. Double-SSD makes one call for each term of the
+trapezoid. Single-SSD has its own scan.
+_Avoid_: SSD core
+
 **SSD path**:
 The method that computes the chunkwise SSD scan: `Minimal`, `Serial` or
 `SerialRecalculated`. All SSD paths give the same values and gradients.

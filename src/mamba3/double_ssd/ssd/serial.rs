@@ -26,7 +26,7 @@
 
 use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::helpers;
-use crate::mamba3::prelude::Mamba3SsdPath;
+use crate::standard_ssd;
 use burn::prelude::*;
 
 impl Mamba3DoubleSsdInput {
@@ -45,7 +45,7 @@ impl Mamba3DoubleSsdInput {
         let input = self;
         let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = input.v_bnlmhp.dims();
         let [.., state_rank] = input.b_bnlmhr.dims();
-        let chunk_tokens = Mamba3SsdPath::chunk_tokens(chunk_len, input.read_stride);
+        let chunk_tokens = standard_ssd::chunk_tokens(chunk_len, input.read_stride);
 
         assert!(
             input.init_state_hpr.is_none(),

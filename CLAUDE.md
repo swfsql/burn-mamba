@@ -218,10 +218,14 @@ A directory `x/` next to a file `x.rs` holds only the `tests.rs` of `x.rs`.
 src/
 ├─ padding.rs            right padding inside a block
 ├─ packing.rs            packed segments (`forward_packed`)
+├─ standard_ssd/         the standard SSD scan on primitives (ADR-0010)
+│  ├─ kernels.rs         the forward K1–K5, the K4 backward
+│  ├─ combined_backward.rs  the analytic backward of one SSD call
+│  └─ read_axis.rs       the read-axis helpers on primitives
 ├─ mamba1/               Mamba-1 block (sequential selective scan) + cache
 ├─ mamba2/               Mamba-2 block (`mamba2.rs`: the SSD math) + cache
 │  └─ ssd/               the three SSD paths, selected by `ssd_path.rs`
-│     └─ serial_recalculated/  the recompute backward (`Mamba2BackendExt`)
+│     └─ serial_recalculated/  the chain rule and `D` skip around the standard scan
 ├─ mamba3/               Mamba-3 block (`mamba3.rs`: the math) + the cache enum
 │  ├─ helpers.rs         shared by both pathways and by forward and step
 │  ├─ in_proj_layout.rs  the table of the channel groups of the in-projection
@@ -231,7 +235,7 @@ src/
 │  ├─ double_ssd/        double-SSD pathway + its cache
 │  │  ├─ double_ssd/     its forward, and the step of both pathways
 │  │  └─ ssd/            the standard SSD paths
-│  │     ├─ serial_recalculated/  recompute backward, K1–K4 of both pathways
+│  │     ├─ serial_recalculated/  the calls into the standard scan
 │  │     └─ ssd_path/    `Mamba3DoubleSsdInput`
 │  ├─ single_ssd/        single-SSD pathway + its cache
 │  │  ├─ single_ssd/     its forward

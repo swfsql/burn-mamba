@@ -20,7 +20,7 @@
 
 use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::helpers;
-use crate::mamba3::prelude::Mamba3SsdPath;
+use crate::standard_ssd;
 use burn_stack::modules::segsum;
 use burn::prelude::*;
 
@@ -45,7 +45,7 @@ impl Mamba3DoubleSsdInput {
         // note: L above denotes the chunk_len
         let device = &input.v_bnlmhp.device();
         let read_stride = input.read_stride;
-        let chunk_tokens = Mamba3SsdPath::chunk_tokens(chunk_len, read_stride);
+        let chunk_tokens = standard_ssd::chunk_tokens(chunk_len, read_stride);
         let fused = chunk_len * mimo_rank; // write (source) axis
         let read = chunk_tokens * mimo_rank; // read (target) axis
 

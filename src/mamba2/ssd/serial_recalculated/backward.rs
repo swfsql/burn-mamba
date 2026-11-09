@@ -3,9 +3,9 @@
 //! Implements [`Mamba2BackendExt`] for `Autodiff<B>` with one
 //! [recompute node](burn_stack::utils::recompute_node). The node saves the
 //! inputs of the forward and not its large intermediates. The backward replays
-//! the inputs through the K1–K4 kernels and the analytic gradient math in
-//! [`combined_backward`]. This is the ~⅓ training-memory saving of the
-//! `SerialRecalculated` path.
+//! the inputs through [`combined_backward`], which calls the
+//! [standard SSD scan](crate::standard_ssd). This is the ~⅓ training-memory
+//! saving of the `SerialRecalculated` path.
 //!
 //! Without resets, `keep_bn` and `origin_bhpr` are placeholders with one
 //! element, so the node saves them at no real cost.

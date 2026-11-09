@@ -7,8 +7,9 @@
 //!   autodiff backward.
 //! - [`serial`] — a serial loop over chunks (it mirrors the Triton kernels
 //!   K1–K5), with the plain autodiff backward.
-//! - [`serial_recalculated`] — the same serial loop with a **custom backward**
-//!   that recomputes intermediates. It uses ~⅓ less training memory.
+//! - [`serial_recalculated`] — the [standard SSD scan](crate::standard_ssd) with
+//!   a **custom backward** that recomputes intermediates. It uses ~⅓ less
+//!   training memory.
 //!
 //! [`ssd_path`] holds the [`Mamba2SsdPath`] selector and the [`Mamba2SsdInput`]
 //! bundle whose `run()` dispatches to one of the three.

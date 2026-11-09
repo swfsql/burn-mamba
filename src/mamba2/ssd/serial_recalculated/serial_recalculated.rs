@@ -1,24 +1,27 @@
 //! # Serial SSD with a custom, memory-efficient backward (Mamba-2)
 //!
-//! This is the `SerialRecalculated` path. The forward is the same five-kernel
-//! serial scan as [`super::super::serial`], but it goes through the
+//! This is the `SerialRecalculated` path. The forward goes through the
 //! [`Mamba2BackendExt`] trait. Thus an `Autodiff` backend can use a **custom
 //! backward** that recomputes the per-chunk intermediates instead of storing
 //! them (see [`super::backward`] / [`super::combined_backward`]). This costs a
 //! little extra compute and saves ~⅓ of the training memory.
 //!
-//! Every plain (non-autodiff) backend uses the default body of the trait,
-//! which replays the [`super::super::serial`] kernels K1–K5. The
+//! The default body of the trait and the custom backward both call the
+//! [standard SSD scan](crate::standard_ssd). This file holds what Mamba-2 adds
+//! to the forward of that scan: the inputs `v = Δ·x` and `da = Δ·A`, and the
+//! `D` skip.
+//!
+//! Every plain (non-autodiff) backend uses the default body of the trait. The
 //! [`burn_stack::impl_backend_ext_for_burn_backends!`] /
 //! [`burn_stack::decl_autodiff_backend_ext!`] macros make the per-backend
 //! impls and the autodiff marker trait.
 
 use crate::mamba2::prelude::*;
-use burn_stack::utils::fprim::{F, Mask, san};
+use crate::standard_ssd;
+use burn_stack::utils::fprim::{F, san};
 use burn::backend::tensor::FloatTensor;
 use burn::backend::{Backend, Dispatch, backend_extension};
 use burn::tensor::Tensor;
-use burn::tensor::s;
 
 impl Mamba2SsdInput {
     /// Forward pass for the Mamba-2 SSD module (recompute-backward path).
@@ -29,8 +32,8 @@ impl Mamba2SsdInput {
     #[allow(non_snake_case)]
     pub fn ssd_serial_recalculated(self) -> (Tensor<5>, Tensor<4>) {
         let input = self;
-        // This must be a backend-dependent method. On a plain backend, it
-        // replays `Mamba2SsdInput::ssd_serial`. On an autodiff backend, it
+        // This must be a backend-dependent method. On a plain backend, it runs
+        // the forward of the standard SSD scan. On an autodiff backend, it
         // calls the custom backward.
 
         let [batch, nchunks, chunk_len, nheads, _per_head_dim] = input.x_bnlhp.dims();
@@ -55,9 +58,9 @@ impl Mamba2SsdInput {
         let (keep_bn, origin_bhpr, resets) =
             crate::packing::Restarts::op_inputs(input.restarts, &input.x_bnlhp);
 
-        // The custom op computes K1 itself (in forward and backward). It gets
-        // `a_decay_h` directly, so `da_cumsum` is not an autodiff-tracked
-        // intermediate that crosses the op boundary.
+        // The custom op forms `da` itself (in forward and backward). It gets
+        // `a_decay_h` directly, so `da` is not an autodiff-tracked intermediate
+        // that crosses the op boundary.
         let (y_bnlhp, final_state_bhpr) = <Dispatch as Mamba2BackendExt>::ssd_serial_recalculated(
             input.x_bnlhp.into_dispatch(),
             dt_discretized_bhnl.into_dispatch(),
@@ -112,279 +115,43 @@ pub trait Mamba2BackendExt: Backend {
         origin_bhpr: FloatTensor<Self>,
         resets: bool,
     ) -> (FloatTensor<Self>, FloatTensor<Self>) {
-        // The default impl replicates Mamba2SsdInput::ssd_serial on backend
-        // primitives. This body runs under a generic `B`, where the high-level
-        // `Tensor` (pinned to `Dispatch`) is not available. So the math uses
-        // the rank-tagged [`F`] primitive wrapper and the primitive K-kernels
-        // below.
+        // This body runs under a generic `B`, where the high-level `Tensor`
+        // (pinned to `Dispatch`) is not available. So the math uses the
+        // rank-tagged [`F`] primitive wrapper.
         let x_bnlhp = F::<Self, 5>::new(x_bnlhp);
-        let dt_discretized_bhnl = F::<Self, 4>::new(dt_discretized_bhnl);
-        let b_bnlhr = F::<Self, 5>::new(b_bnlhr);
-        let c_bnlhr = F::<Self, 5>::new(c_bnlhr);
-        let d_h = F::<Self, 1>::new(d_h);
-        let initial_state_bhpr = F::<Self, 4>::new(initial_state_bhpr);
-        let a_decay_h = F::<Self, 1>::new(a_decay_h);
+        let dt_bnlh = F::<Self, 4>::new(dt_discretized_bhnl).permute([0, 2, 3, 1]);
+        let a_decay_111h = F::<Self, 1>::new(a_decay_h).unsqueeze_dims::<4>(&[0, 1, 2]);
         let restarts = resets.then(|| (F::<Self, 2>::new(keep_bn), F::<Self, 4>::new(origin_bhpr)));
 
-        let nchunks = x_bnlhp.dims()[1];
-        assert!(nchunks > 0, "sequence length must be at least 1");
-
-        // ── Kernel 1 ──────────────────────────────────────────────────────────
-        let (da_cumsum_bhnl, da_chunk_end_bhn) =
-            k1_ssd_chunk_cumsum::<Self>(dt_discretized_bhnl.clone(), a_decay_h);
-        san(&da_cumsum_bhnl);
-
-        // ── Kernel 2 ──────────────────────────────────────────────────────────
-        let cb_bnhll = k2_ssd_bmm::<Self>(c_bnlhr.clone(), b_bnlhr.clone());
-        san(&cb_bnhll);
-
-        // ── Kernel 3 ──────────────────────────────────────────────────────────
-        let intra_chunk_state_bnhpr = k3_ssd_chunk_state::<Self>(
-            x_bnlhp.clone(),
-            b_bnlhr,
-            da_cumsum_bhnl.clone(),
-            dt_discretized_bhnl.clone(),
-        );
-        san(&intra_chunk_state_bnhpr);
-
-        // ── Kernel 4 ──────────────────────────────────────────────────────────
-        let (chunk_input_state_bnhpr, final_state_bhpr) = k4_ssd_state_passing::<Self>(
-            intra_chunk_state_bnhpr,
-            da_chunk_end_bhn,
-            initial_state_bhpr,
+        let (v_bnlhp, da_bnlh) = scan_inputs(x_bnlhp.clone(), dt_bnlh, a_decay_111h);
+        let (y_bnl1hp, final_state_bhpr) = standard_ssd::forward::<Self>(
+            v_bnlhp.unsqueeze_dim::<6>(3),
+            da_bnlh,
+            F::<Self, 5>::new(b_bnlhr).unsqueeze_dim::<6>(3),
+            F::<Self, 5>::new(c_bnlhr).unsqueeze_dim::<6>(3),
+            F::new(initial_state_bhpr),
+            1,
             restarts,
         );
-        san(&chunk_input_state_bnhpr);
-        san(&final_state_bhpr);
 
-        // ── Kernel 5 ──────────────────────────────────────────────────────────
-        let y_bnlhp = k5_ssd_chunk_scan::<Self>(
-            da_cumsum_bhnl,
-            dt_discretized_bhnl,
-            x_bnlhp,
-            c_bnlhr,
-            cb_bnhll,
-            chunk_input_state_bnhpr,
-            d_h,
-        );
+        // ── SKIP: D[h] · x[l,p] ─────────────────────────────────────────────────
+        let skip_bnlhp = x_bnlhp * F::<Self, 1>::new(d_h).unsqueeze_dims::<5>(&[0, 1, 2, 4]);
+        let y_bnlhp = y_bnl1hp.squeeze_dim::<5>(3) + skip_bnlhp;
         san(&y_bnlhp);
 
         (y_bnlhp.inner(), final_state_bhpr.inner())
     }
 }
 
-// ─── Primitive forward kernels (K1–K5) ───────────────────────────────────────
-// Primitive ports of the high-level [`crate::mamba2::ssd::serial`] kernels, on
-// the primitives of `B` through [`F`], so the default trait body can run under
-// a generic backend. The recompute backward in [`super::combined_backward`]
-// uses K1/K2/K4 again. K5 is forward-only: the backward computes the gradient
-// of K5 analytically instead of recomputing it.
-
-/// Primitive port of [`crate::mamba2::ssd::serial::k1_ssd_chunk_cumsum`].
-///
-/// Returns the intra-chunk cumsum `da_cumsum_bhnl` and the per-chunk last value
-/// `da_chunk_end_bhn`.
-pub(crate) fn k1_ssd_chunk_cumsum<B: Backend>(
-    dt_discretized_bhnl: F<B, 4>,
-    a_decay_h: F<B, 1>,
-) -> (F<B, 4>, F<B, 3>) {
-    let [batch, nheads, nchunks, chunk_len] = dt_discretized_bhnl.dims();
-    let da_cumsum_bhnl: F<B, 4> = {
-        let a_decay_bhnl = a_decay_h
-            .unsqueeze_dims::<4>(&[0, 2, 3])
-            .expand([batch, nheads, nchunks, chunk_len]);
-        (dt_discretized_bhnl * a_decay_bhnl).cumsum(3)
-    };
-    let da_chunk_end_bhn = da_cumsum_bhnl
-        .clone()
-        .slice(s![.., .., .., -1])
-        .squeeze_dim::<3>(3);
-    (da_cumsum_bhnl, da_chunk_end_bhn)
-}
-
-/// Primitive port of [`crate::mamba2::ssd::serial::k2_ssd_bmm`].
-///
-/// Returns the intra-chunk `C·Bᵀ` block matrix `cb_bnhll`.
-pub(crate) fn k2_ssd_bmm<B: Backend>(c_bnlhr: F<B, 5>, b_bnlhr: F<B, 5>) -> F<B, 5> {
-    let c_bnhlr = c_bnlhr.swap_dims(2, 3);
-    let b_bnhrl = b_bnlhr.permute([0, 1, 3, 4, 2]);
-    c_bnhlr.matmul(b_bnhrl)
-}
-
-/// Primitive port of [`crate::mamba2::ssd::serial::k3_ssd_chunk_state`] (lean:
-/// returns only the chunk-end state).
-///
-/// Returns `intra_chunk_state_bnhpr`: the contribution of each chunk to its
-/// end state, from a zero state at the chunk start.
-pub(crate) fn k3_ssd_chunk_state<B: Backend>(
+/// The inputs of the standard SSD scan: `v = Δ·x` and `da = Δ·A`.
+pub(crate) fn scan_inputs<B: Backend>(
     x_bnlhp: F<B, 5>,
-    b_bnlhr: F<B, 5>,
-    da_cumsum_bhnl: F<B, 4>,
-    dt_discretized_bhnl: F<B, 4>,
-) -> F<B, 5> {
-    let [batch, nchunks, chunk_len, nheads, per_head_dim] = x_bnlhp.dims();
-    let [.., state_rank] = b_bnlhr.dims();
-
-    let x_bnhpl = x_bnlhp.permute([0, 1, 3, 4, 2]);
-    let b_bnhlr = b_bnlhr.swap_dims(2, 3);
-
-    // K3 scaling factor: dt · exp(cumA_last − cumA)
-    let da_cumsum_last_bhn1 = da_cumsum_bhnl.clone().slice(s![.., .., .., -1]);
-    let forward_decay_to_chunk_end_bhnl =
-        (da_cumsum_last_bhn1.expand([batch, nheads, nchunks, chunk_len]) - da_cumsum_bhnl).exp();
-    let b_bar_scale_bhnl = forward_decay_to_chunk_end_bhnl * dt_discretized_bhnl;
-
-    let b_bar_scale_bnhlr = b_bar_scale_bhnl
-        .swap_dims(1, 2) // b_bar_scale_bnhl
-        .unsqueeze_dim::<5>(4) // b_bar_scale_bnhl1
-        .expand([batch, nchunks, nheads, chunk_len, state_rank]);
-    let b_scaled_bnhlr = b_bnhlr * b_bar_scale_bnhlr;
-
-    let intra_chunk_state_bnhpr = x_bnhpl.matmul(b_scaled_bnhlr);
-    assert_eq!(
-        [batch, nchunks, nheads, per_head_dim, state_rank],
-        intra_chunk_state_bnhpr.dims()
-    );
-    intra_chunk_state_bnhpr
-}
-
-/// Primitive port of [`crate::mamba2::ssd::serial::k4_ssd_state_passing`].
-///
-/// Returns the per-chunk input-state stream `chunk_input_state_bnhpr` and the
-/// `final_state_bhpr`.
-///
-/// `restarts` is `(keep_bn, origin_bhpr)`: the reset of the high-level K4 as
-/// a factor, and the origin state. The state that goes into a chunk with
-/// `keep = 0` is the origin state.
-pub(crate) fn k4_ssd_state_passing<B: Backend>(
-    intra_chunk_state_bnhpr: F<B, 5>,
-    da_chunk_end_bhn: F<B, 3>,
-    initial_state_bhpr: F<B, 4>,
-    restarts: Option<(F<B, 2>, F<B, 4>)>,
+    dt_bnlh: F<B, 4>,
+    a_decay_111h: F<B, 4>,
 ) -> (F<B, 5>, F<B, 4>) {
-    let [batch, nchunks, nheads, per_head_dim, state_rank] = intra_chunk_state_bnhpr.dims();
-
-    let mut running_state_bhpr = initial_state_bhpr.clone();
-    let mut chunk_input_state_vec_bhpr = Vec::with_capacity(nchunks + 1);
-    chunk_input_state_vec_bhpr.push(running_state_bhpr.clone());
-    let at = |t_bn: &F<B, 2>, i_chunk: usize| {
-        t_bn.clone()
-            .slice(s![.., i_chunk])
-            .reshape([batch, 1, 1, 1])
-            .expand([batch, nheads, per_head_dim, state_rank])
-    };
-    let restarts = restarts.map(|(keep_bn, origin_bhpr)| {
-        let restart_bn = restart_factor(&keep_bn);
-        (keep_bn, restart_bn, origin_bhpr)
-    });
-
-    for i_chunk in 0..nchunks {
-        // A chunk that starts a segment starts from the origin state. (A
-        // learnable `init_state_hpr` would join it, but only `Minimal` takes
-        // one.)
-        if let Some((keep_bn, restart_bn, origin_bhpr)) = &restarts {
-            running_state_bhpr = running_state_bhpr * at(keep_bn, i_chunk)
-                + origin_bhpr.clone() * at(restart_bn, i_chunk);
-            *chunk_input_state_vec_bhpr.last_mut().unwrap() = running_state_bhpr.clone();
-        }
-
-        let intra_state_bhpr = intra_chunk_state_bnhpr
-            .clone()
-            .slice(s![.., i_chunk, .., .., ..])
-            .squeeze_dim::<4>(1);
-        let decay_bhpr = da_chunk_end_bhn
-            .clone()
-            .slice(s![.., .., i_chunk])
-            .exp()
-            .unsqueeze_dim::<4>(3)
-            .expand([batch, nheads, per_head_dim, state_rank]);
-        running_state_bhpr = (decay_bhpr * running_state_bhpr) + intra_state_bhpr;
-        chunk_input_state_vec_bhpr.push(running_state_bhpr.clone());
-    }
-
-    let final_state_bhpr = chunk_input_state_vec_bhpr.pop().unwrap();
-    let chunk_input_state_bnhpr = F::stack(chunk_input_state_vec_bhpr, 1);
-    (chunk_input_state_bnhpr, final_state_bhpr)
-}
-
-/// `1 − keep`: `1` at a chunk that restarts from the origin state.
-pub(crate) fn restart_factor<B: Backend>(keep_bn: &F<B, 2>) -> F<B, 2> {
-    F::<B, 2>::full(keep_bn.dims(), 1.0, &keep_bn.device(), keep_bn.dtype()) - keep_bn.clone()
-}
-
-/// Primitive port of [`crate::mamba2::ssd::serial::k5_ssd_chunk_scan`].
-///
-/// Combines the intra-chunk (ORANGE, attention-like) and inter-chunk (BLUE,
-/// state-carried) contributions plus the `D` skip term into the output
-/// `y_bnlhp`. Forward-only.
-#[allow(clippy::too_many_arguments)]
-fn k5_ssd_chunk_scan<B: Backend>(
-    da_cumsum_bhnl: F<B, 4>,
-    dt_discretized_bhnl: F<B, 4>,
-    x_bnlhp: F<B, 5>,
-    c_bnlhr: F<B, 5>,
-    cb_bnhll: F<B, 5>,
-    chunk_input_state_bnhpr: F<B, 5>,
-    d_h: F<B, 1>,
-) -> F<B, 5> {
-    let [batch, nchunks, chunk_len, nheads, per_head_dim] = x_bnlhp.dims();
-    let device = x_bnlhp.device();
-
-    let da_cumsum_bnhl = da_cumsum_bhnl.swap_dims(1, 2);
-    let dt_bnhl = dt_discretized_bhnl.swap_dims(1, 2);
-    let x_bnhlp = x_bnlhp.clone().swap_dims(2, 3);
-    let c_bnhlr = c_bnlhr.swap_dims(2, 3);
-
-    // ── BLUE: exp(dA[l]) · C[l,:] @ state_in^T ─────────────────────────────
-    let exp_da_cumsum_bnhlp = da_cumsum_bnhl
-        .clone()
-        .exp()
-        .unsqueeze_dim::<5>(4) // exp_da_cumsum_bnhl1
-        .expand([batch, nchunks, nheads, chunk_len, per_head_dim]);
-    let chunk_input_state_bnhrp = chunk_input_state_bnhpr.transpose();
-    let blue_scaled_bnhlp = c_bnhlr.matmul(chunk_input_state_bnhrp) * exp_da_cumsum_bnhlp;
-    san(&blue_scaled_bnhlp);
-
-    // ── ORANGE: causal CB_weighted @ X ──────────────────────────────────────
-    let da_cumsum_target_bnhll = da_cumsum_bnhl
-        .clone()
-        .unsqueeze_dim::<5>(4) // da_cumsum_bnhl1
-        .expand([batch, nchunks, nheads, chunk_len, chunk_len]);
-    let da_cumsum_source_bnhll = da_cumsum_bnhl
-        .unsqueeze_dim::<5>(3) // da_cumsum_bnh1l
-        .expand([batch, nchunks, nheads, chunk_len, chunk_len]);
-    let da_cumsum_diff_bnhll = da_cumsum_target_bnhll - da_cumsum_source_bnhll;
-
-    // Causal mask + exp stabiliser: strictly-above-diagonal set to −∞.
-    let causal_mask_bnhll: Mask<B> = Mask::tril_mask(chunk_len, chunk_len, 0, &device)
-        .reshape([1, 1, 1, chunk_len, chunk_len])
-        .expand([batch, nchunks, nheads, chunk_len, chunk_len]);
-    let da_cumsum_diff_exp_bnhll = da_cumsum_diff_bnhll
-        .mask_fill(causal_mask_bnhll, f32::NEG_INFINITY)
-        .exp();
-    san(&da_cumsum_diff_exp_bnhll);
-
-    let dt_source_bnhll = dt_bnhl
-        .unsqueeze_dim::<5>(3) // dt_bnh1l
-        .expand([batch, nchunks, nheads, chunk_len, chunk_len]);
-    let orange_lhs_bnhll = cb_bnhll * da_cumsum_diff_exp_bnhll * dt_source_bnhll;
-    let orange_bnhlp = orange_lhs_bnhll.matmul(x_bnhlp);
-    san(&orange_bnhlp);
-
-    // ── SKIP: D[h] · x[l,p] ─────────────────────────────────────────────────
-    let skip_bnlhp = d_h
-        .unsqueeze_dims::<5>(&[0, 1, 2, 4]) // d_111h1
-        .expand([batch, nchunks, chunk_len, nheads, per_head_dim])
-        * x_bnlhp;
-
-    let y_partial_bnhlp = blue_scaled_bnhlp + orange_bnhlp;
-    let y_partial_bnlhp = y_partial_bnhlp.swap_dims(2, 3);
-    let y_bnlhp = y_partial_bnlhp + skip_bnlhp;
-    assert_eq!(
-        [batch, nchunks, chunk_len, nheads, per_head_dim],
-        y_bnlhp.dims()
-    );
-    y_bnlhp
+    let v_bnlhp = x_bnlhp * dt_bnlh.clone().unsqueeze_dim::<5>(4);
+    let da_bnlh = dt_bnlh * a_decay_111h;
+    (v_bnlhp, da_bnlh)
 }
 
 // Per-backend impls: each one uses the default body of the trait. The custom
