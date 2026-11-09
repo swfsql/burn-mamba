@@ -1,8 +1,10 @@
 //! # Mamba-3 — Plant Frame
 //!
 //! The plant frame is the work of a Mamba-3 block around the plant. Both
-//! forward pathways call it. Each pathway keeps only its middle: its scan and
-//! the inputs that only this scan needs.
+//! forward pathways and `step` call it. Each one keeps only its middle: its
+//! scan and the inputs that only this scan needs. `step` enters at
+//! `tokens = 1`. It adds that read axis to its input and removes it from its
+//! output.
 //!
 //! ```text
 //!   input  ── plant_entry ──▶ rotated B and C, masses, tap slots
