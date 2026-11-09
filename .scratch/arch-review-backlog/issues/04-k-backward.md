@@ -2,7 +2,7 @@
 
 Status: ready-for-agent
 
-Blocked by: `10-mamba2-on-double-ssd.md`
+Blocked by: `10-one-standard-ssd-scan.md`
 
 From the architecture review of 2026-11-03. Line numbers are those of commit
 `42ca3d0e`. Not compiled.
@@ -26,10 +26,11 @@ three `san` guards that double-SSD has (`d_c_blue`, `diff`, `d_da_blue`).
 **Cost:** Helpers must take tensors by value and drop them at the same points. A
 clone that a caller holds raises the GPU peak. The user checks it with `./bench.sh`.
 
-**A later step, worth exploring:** Mamba-2 joins this core. By reading, with no
-numeric check, its K1–K5 are the double-SSD K1–K5 at `m = 1`, `u = 1`, with
-`v = dt·x` and `da = dt·A`, plus the D skip. It needs a Mamba-2 bench by the user,
-and the fast form stops mirroring `_mamba_chunk_scan_combined_bwd` line by line.
+**A later step, worth exploring:** Mamba-2 and the Mamba-3 copy of the standard SSD scan
+share one implementation. By reading, with no numeric check, the Mamba-3 kernels compute
+the Mamba-2 K1–K5 at `m = 1` and `u = 1`, with `v = dt·x` and `da = dt·A`, plus the D
+skip. It needs a Mamba-2 bench by the user, and the fast form stops mirroring
+`_mamba_chunk_scan_combined_bwd` line by line.
 
 ## Comments
 
@@ -43,7 +44,7 @@ and the fast form stops mirroring `_mamba_chunk_scan_combined_bwd` line by line.
   The implementing agent decides, under the conditions of the brief.
 - A code read replaces a measurement of the peak memory.
 - The Mamba-2 step comes before this ticket, or in the same change. Triage selected
-  "before". See `10-mamba2-on-double-ssd.md`, which also holds the numeric check.
+  "before". See `10-one-standard-ssd-scan.md`, which also holds the numeric check.
 
 **Checks against the code:**
 

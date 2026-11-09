@@ -1,4 +1,4 @@
-# 10: Mamba-2 runs on the double-SSD recompute math
+# 10: One standard SSD scan on primitives for Mamba-2 and double-SSD
 
 Status: ready-for-agent
 
@@ -7,10 +7,11 @@ Blocked by: None
 From candidate 3 of the architecture review (`tmp/arch-review/batch-b1.md`) and the
 triage of ticket 04.
 
-**Problem:** The `SerialRecalculated` path of Mamba-2 is a second copy of the
-double-SSD math at `mimo_rank = 1` and `read_stride = 1`. A K4 or reset fix needs a
-second derivation. Mamba-2 still walks K5 chunk by chunk, because the batching of
-`e43b32e3` reached only Mamba-3.
+**Problem:** The standard SSD scan exists twice on primitives. Mamba-2 holds the scan
+as its five kernels. The Mamba-3 copy has the same structure and two more axes:
+`mimo_rank` and the read axis. The double-SSD pathway calls that copy once for each term
+of the trapezoid. A K4 or reset fix needs a second derivation. The batching of
+`e43b32e3` reached only the Mamba-3 copy, so Mamba-2 still walks K5 chunk by chunk.
 
 ## Comments
 
@@ -20,6 +21,9 @@ second derivation. Mamba-2 still walks K5 chunk by chunk, because the batching o
 
 **Decisions of the maintainer:**
 
+- The standard SSD scan starts in Mamba-2, as one SSD call. Mamba-3 based double-SSD on
+  that scan because of the trapezoid: one SSD call for each term. The single-SSD pathway
+  came after double-SSD.
 - This step comes before ticket 04, or in the same change. Triage selected "before",
   for the reasons below. One session can still do both tickets in order.
 - `./bench.sh` and `./kernels.sh` already cover Mamba-2.
@@ -31,15 +35,19 @@ second derivation. Mamba-2 still walks K5 chunk by chunk, because the batching o
 - A throwaway probe compared the public functions of the crate, in
   `tmp/triage-04/probe/`:
   - One side is the Mamba-2 forward and `combined_backward`.
-  - The other side is the double-SSD forward and `combined_backward` at `m = 1` and
-    `u = 1`, with `v = dt·x` and `da = dt·A`, plus the chain rule and the `D` skip.
+  - The other side is one SSD call of the double-SSD code, reduced to the Mamba-2 case.
+    That case has `m = 1`, `u = 1`, `v = dt·x` and `da = dt·A`. The side adds the chain
+    rule and the `D` skip.
   - On `flex` at fp32, the worst relative difference is 7.1e-7. The probe covers 10
     cases (5 shapes, each with and without resets), `y`, the final state and all 8
     gradients. A control showed that the comparison sees a 1% error.
 - So this ticket needs no new math.
 - `src/mamba2/` cannot call `src/mamba3/`. Each family is a separate feature, and
-  `scripts/check.sh` builds each family alone. The double-SSD math needs a home outside
-  `src/mamba3/`.
+  `scripts/check.sh` builds each family alone. The Mamba-3 copy of the scan needs a home
+  outside `src/mamba3/`.
+- `mimo_rank` and the read axis are not the reason for double-SSD. The single-SSD
+  pathway has both axes. `mimo_rank` is in the first Mamba-3 commit (`2bc33821`), before
+  the trapezoid (`69ed6310`).
 - The shared helpers of ticket 04 go to the same home. In the other order, those
   helpers move twice.
 - This order also keeps the time gate clean: the `mamba1` and `mamba3` rows show the
@@ -60,21 +68,22 @@ second derivation. Mamba-2 still walks K5 chunk by chunk, because the batching o
 
 **Category:** enhancement
 
-**Summary:** The `SerialRecalculated` path of Mamba-2 calls the double-SSD recompute
-math. Mamba-2 keeps only its chain rule and its `D` skip.
+**Summary:** Mamba-2 and double-SSD call one standard SSD scan on primitives. That scan
+has the axes of the Mamba-3 copy: `mimo_rank` and the read axis. Mamba-2 keeps only its
+chain rule and its `D` skip.
 
 **Current behaviour:**
 
-- Mamba-2 has its own primitive K1–K5, its own extended K3 and its own analytic
-  backward.
+- Mamba-2 holds the standard SSD scan on primitives: K1–K5, the extended K3 and the
+  analytic backward.
 - That backward walks K5 and K4 chunk by chunk.
-- The double-SSD recompute math is in the `mamba3` module. A build with only the
-  `mamba2` feature does not compile that module.
+- The `mamba3` module holds a copy of that scan, with `mimo_rank` and the read axis. A
+  build with only the `mamba2` feature does not compile that module.
 
 **Desired behaviour:**
 
-1. One module outside the three family modules holds the double-SSD math on primitives.
-   It compiles when `mamba2` or `mamba3` is on. It holds:
+1. One module outside the three family modules holds the standard SSD scan on primitives,
+   with `mimo_rank` and the read axis. It compiles when `mamba2` or `mamba3` is on. It holds:
    - the forward K1–K5 and `k3_ssd_chunk_state_extended`
    - `k4_ssd_state_passing_backward` and `cat_chunk_groups`
    - `combined_backward` with `CombinedGrads`
@@ -103,6 +112,8 @@ math. Mamba-2 keeps only its chain rule and its `D` skip.
 
 - The `mamba2` feature does not imply `mamba3`.
 - The module stays in this crate (ADR-0002).
+- The docs of the module name the standard SSD scan and its two callers. They do not
+  describe Mamba-2 as a case of double-SSD.
 - The name of the module does not use "core". `GLOSSARY.md` lists "SSD core" under
   `_Avoid_`. A new term goes to `GLOSSARY.md` through `/domain-modeling`.
 - A function takes each large tensor by value. A caller clones a tensor only if the
