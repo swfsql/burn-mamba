@@ -13,8 +13,10 @@
 //! `Tensor` (pinned to `Dispatch`) is not available. So the K1–K5 math uses
 //! the rank-tagged [`F`] primitive wrapper. K1–K4 do not depend on the form,
 //! and come from the [standard SSD scan](crate::standard_ssd). Only the
-//! single-SSD K5 (strict-lower intra-chunk + γ-correction) is defined here,
-//! and it is forward-only.
+//! forward K5 of single-SSD (strict-lower intra-chunk + γ-correction) is
+//! defined here. The backward of its LOWER and BLUE terms is in the
+//! [kernels of that scan](crate::standard_ssd::kernels). The backward of its
+//! DIAG term is in [`super::diag`].
 
 #![allow(non_snake_case)]
 
@@ -23,6 +25,7 @@ use crate::mamba3::single_ssd::ssd::serial_recalculated::diag::y_diag_correction
 use crate::standard_ssd::kernels::{
     k1_ssd_chunk_cumsum, k2_ssd_bmm, k3_ssd_chunk_state, k4_ssd_state_passing,
 };
+use crate::standard_ssd::kernels::{expand_causal_mask, k5_da_cumsum_on_chunk_axes};
 use crate::standard_ssd::read_axis::{read_causal_mask, read_positions};
 use burn_stack::utils::fprim::{F, san};
 use burn::backend::tensor::FloatTensor;
@@ -209,9 +212,10 @@ burn_stack::impl_backend_ext_for_burn_backends!(Mamba3SingleSsdBackendExt);
 // ─── Primitive forward K5 (single-ssd) ───────────────────────────────────────
 // Primitive port of [`super::super::serial::k5_single_ssd_chunk_scan`]. Combines
 // the strict-lower intra-chunk (LOWER), the γ-weighted diagonal (DIAG), and the
-// state-to-output (BLUE/Y_off) contributions. Forward-only; the backward
-// computes these gradients analytically. K1–K4 are reused from the double-SSD
-// forward (they do not depend on the pathway).
+// state-to-output (BLUE/Y_off) contributions. The backward of LOWER and BLUE is
+// `k5_ssd_chunk_scan_backward` of the standard SSD scan. The backward of DIAG is
+// in `super::diag`. K1–K4 come from the standard SSD scan (they do not depend on
+// the pathway).
 
 /// SingleSsd chunk scan, on primitives.
 ///
@@ -252,17 +256,8 @@ fn k5_single_ssd_chunk_scan<B: Backend>(
         .clone()
         .reshape([batch, nchunks, read, nheads, state_rank]);
 
-    // Per-fused-position cumulative decay (interleave-expand the base grid), on the
-    // source axis and — sliced to the readout's own positions — on the target.
-    let da_cumsum_bhnLM = da_cumsum_bhnl
-        .clone()
-        .unsqueeze_dim::<5>(4)
-        .expand([batch, nheads, nchunks, chunk_len, mimo_rank])
-        .reshape([batch, nheads, nchunks, fused]);
-    let da_cumsum_bhnTM = read_positions::<B, 4, 5>(da_cumsum_bhnl, 3, read_stride)
-        .unsqueeze_dim::<5>(4)
-        .expand([batch, nheads, nchunks, chunk_tokens, mimo_rank])
-        .reshape([batch, nheads, nchunks, read]);
+    let (da_cumsum_bhnLM, da_cumsum_bhnTM) =
+        k5_da_cumsum_on_chunk_axes::<B>(da_cumsum_bhnl, mimo_rank, read_stride);
 
     // ── Y_off: exp(cumA[t]) · C[t] · h'[n-1] ────────────────────────────────
     let exp_da_bnhTMp = da_cumsum_bhnTM
@@ -290,15 +285,13 @@ fn k5_single_ssd_chunk_scan<B: Backend>(
     // Strict-upper -inf mask over (read position, write source) on the base time
     // grid, then interleave-expand both axes so MIMO same-time blocks are
     // zeroed.
-    let inf_upper_bnhTMLM = read_causal_mask::<B>(chunk_len, read_stride, 0, &device, dtype)
-        .unsqueeze_dims::<5>(&[0, 1, 2])
-        .expand([batch, nchunks, nheads, chunk_tokens, chunk_len])
-        .unsqueeze_dim::<6>(4)
-        .expand([batch, nchunks, nheads, chunk_tokens, mimo_rank, chunk_len])
-        .reshape([batch, nchunks, nheads, read, chunk_len])
-        .unsqueeze_dim::<6>(5)
-        .expand([batch, nchunks, nheads, read, chunk_len, mimo_rank])
-        .reshape([batch, nchunks, nheads, read, fused]);
+    let inf_upper_bnhTMLM = expand_causal_mask(
+        read_causal_mask::<B>(chunk_len, read_stride, 0, &device, dtype),
+        batch,
+        nchunks,
+        nheads,
+        mimo_rank,
+    );
     let decay_strict_bnhTMLM = (diff_bnhTMLM + inf_upper_bnhTMLM).exp();
 
     // Per-column scale: `scale[t2]` lives on the source axis (column).

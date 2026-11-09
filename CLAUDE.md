@@ -221,8 +221,8 @@ src/
 ├─ padding.rs            right padding inside a block
 ├─ packing.rs            packed segments (`forward_packed`)
 ├─ standard_ssd/         the standard SSD scan on primitives (ADR-0010)
-│  ├─ kernels.rs         the forward K1–K5, the K4 backward
-│  ├─ combined_backward.rs  the analytic backward of one SSD call
+│  ├─ kernels.rs         the forward K1–K5, the backward of each kernel
+│  ├─ combined_backward.rs  the assembly of the backward of one SSD call
 │  └─ read_axis.rs       the read-axis helpers on primitives
 ├─ mamba1/               Mamba-1 block (sequential selective scan) + cache
 ├─ mamba2/               Mamba-2 block (`mamba2.rs`: the SSD math) + cache

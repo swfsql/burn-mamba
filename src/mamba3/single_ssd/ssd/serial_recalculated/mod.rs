@@ -10,7 +10,8 @@
 /// The `RecomputeOp` impl of the autodiff backend.
 #[cfg(feature = "autodiff")]
 pub mod backward;
-/// Recompute-based gradient math (the memory-efficient backward).
+/// The assembly of the memory-efficient backward. Its kernels are in the
+/// [standard SSD scan](crate::standard_ssd::kernels).
 pub mod combined_backward;
 /// The diagonal γ-correction on primitives — forward and analytic backward.
 pub mod diag;

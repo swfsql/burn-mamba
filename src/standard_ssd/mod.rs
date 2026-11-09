@@ -21,9 +21,10 @@
 //! - The **double-SSD pathway** of Mamba-3 makes one SSD call for each term of
 //!   the trapezoid (`crate::mamba3::double_ssd::ssd::serial_recalculated`).
 //!
-//! The single-SSD pathway makes one SSD call for all terms, with its own K5 and
-//! its own backward. It uses K1–K4, the K4 backward and the helpers of this
-//! module.
+//! The single-SSD pathway makes one SSD call for all terms, with its own
+//! forward K5 and its own diagonal term. It assembles its backward from the
+//! backwards of K1–K5 in `kernels.rs`, and it uses K1–K4 and the helpers of
+//! this module.
 //!
 //! The scan has the two axes that the callers need: `mimo_rank` and the read
 //! axis. A caller without such an axis passes a length-1 `m` axis and

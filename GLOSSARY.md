@@ -91,7 +91,8 @@ _Avoid_: SSD core
 **Standard SSD scan**:
 The SSD scan of one recurrence with a scalar decay and no trapezoid inside it.
 Mamba-2 makes one call of it. Double-SSD makes one call for each term of the
-trapezoid. Single-SSD has its own scan.
+trapezoid. Single-SSD has its own forward scan, and its backward uses the
+backwards of the kernels of this scan.
 _Avoid_: SSD core
 
 **SSD path**:

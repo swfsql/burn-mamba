@@ -28,3 +28,7 @@ statements with that kernel.
   with the reference.
 - A bug in the scan fails both callers alike. The agreement tests of each family
   show it, because each family has simple forms that do not use the scan.
+- The backward of single-SSD assembles the backwards of K1–K5 of the scan. One K5
+  backward serves both K5 forwards, with the scale and the mask diagonal as
+  arguments. `Minimal` and `Serial` of single-SSD use autodiff, so they stay the
+  check on that backward.
