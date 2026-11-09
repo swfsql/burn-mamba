@@ -36,3 +36,4 @@ After the user runs the benches, run `scripts/compare_reports.py BASE --changed 
 - A launch gate reads the `cuda` column of `kernels.md`. A count of that column is exact and repeatable.
 - The `cuda + fusion + autotune` column can change between runs, because the tuner selects by time. `kernels.sh` runs it three times, and a cell `a–b` gives the lowest and the highest count. Two ranges that overlap show no change.
 - A time gate compares the changed cells with the other cells. The change does not touch the other cells, so their change shows the noise of the run.
+- To find the kernels that caused a change of a launch count, run `scripts/kernels_report.py diff`. It compares the last two runs of `./kernels.sh`, per kernel.

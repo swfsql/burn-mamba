@@ -67,6 +67,7 @@ if [ -z "${CI:-}" ]; then
 fi
 
 python3 scripts/compare_reports.py --selftest
+python3 scripts/kernels_report.py --selftest
 
 no_warnings cargo check
 for family in mamba1 mamba2 mamba3; do

@@ -259,7 +259,7 @@ src/
 build.rs                 the `cube_backend` cfg (the cubecl `backend-*` features)
 benches/layer.rs         single-block benches, run by `bench.sh`/`kernels.sh`
 info/                    derivation notes
-scripts/                 the float64 checks of the `info/` notes, `check.sh` (CI), `compare_reports.py` (bench gates)
+scripts/                 the float64 checks of the `info/` notes, `check.sh` (CI), `compare_reports.py` and `kernels_report.py` (bench gates)
 examples/                see `examples/README.md`
 docs/                    `adr/`, `agents/`, `source-terms.md`, `box.tsv`
 ```

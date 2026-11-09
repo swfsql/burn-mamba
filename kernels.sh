@@ -76,16 +76,21 @@
 #   BENCH_SEQ=1024 ./kernels.sh     # any BENCH_* the bench understands
 #   KERNELS_SKIP=cuda-fusion ./kernels.sh    # skip configurations by label
 #   KERNELS_FUSION_RUNS=1 ./kernels.sh       # one fused run, so no range
+#
+# Each configuration that runs moves its previous logs to `target/kernel-logs.prev`.
+# A run with a filter also moves them. After a run, `scripts/kernels_report.py diff`
+# gives the kernels that caused a change of a launch count.
 
 set -euo pipefail
 cd "$(dirname "$0")"
 
 OUT="${KERNELS_OUT:-kernels.md}"
 LOG_DIR="${KERNELS_LOG_DIR:-target/kernel-logs}"
+PREV_DIR="$LOG_DIR.prev"
 FILTER="${1:-}"
 SKIP="${KERNELS_SKIP:-}"
 
-mkdir -p "$LOG_DIR"
+mkdir -p "$LOG_DIR" "$PREV_DIR"
 
 # cubecl loads the nearest cubecl.toml above the *current directory*. So the
 # runs occur in a scratch dir with a cubecl.toml that enables profiling. The
@@ -137,6 +142,13 @@ for line in sys.stdin:
         exit 1
     fi
 
+    # Keep the logs of the previous run of this label. A failed build keeps
+    # them in place.
+    if compgen -G "$LOG_DIR/$label.*" >/dev/null; then
+        rm -f "$PREV_DIR/$label."*
+        mv "$LOG_DIR/$label."* "$PREV_DIR/"
+    fi
+
     # The case list, in the order of criterion. So the script can attribute the
     # tables, and does not have to hardcode the cases.
     ( cd "$WORK" && BURN_DEVICE="$device" "$bin" --list ${FILTER:+"$FILTER"} ) \
@@ -154,187 +166,4 @@ done
 # --------------------------------------------------------------------------
 # Report: read the last summary table of each case into one table per group.
 # --------------------------------------------------------------------------
-python3 - "$OUT" "$LOG_DIR" "${RAN[*]:-}" <<'PY'
-import re, sys, datetime, pathlib
-
-out_path, log_dir = sys.argv[1], pathlib.Path(sys.argv[2])
-# label -> the number of its runs.
-ran = {label: int(runs) for label, runs in (e.split(":") for e in sys.argv[3].split())}
-
-# (label, column heading) in report order.
-CONFIGS = [
-    ("cuda", "cuda"),
-    ("cuda-fusion", "cuda + fusion + autotune"),
-]
-GROUP_TITLES = {
-    "forward": "`forward` — chunkwise prefill / inference",
-    "train": "`train` — forward + backward (autodiff device)",
-    "step": "`step` — one recurrent decode step",
-}
-
-# The syncs of a case without tuning: three warm-up iterations and the measured
-# iteration.
-SYNCS = 4
-
-# The parser reads two kinds of line, in their order in the log:
-#   - `Testing <case>`: the per-case banner of criterion under `--test`. The
-#     tables after a banner belong to the case that it names. Attribution by
-#     banner (not by position) keeps the surplus tables of a case away from
-#     its neighbours.
-#   - `| Total | <duration> | <num computed> | <ratio> |`: the last line of a
-#     table. Kernel names can contain `|`, so the fields are counted from the
-#     right.
-EVENT = re.compile(
-    r"^Testing (?P<case>\S+)\s*$"
-    r"|^\| Total\s+\|.*?\|\s*(?P<total>\d+)\s*\|\s*\d+ %\s*\|",
-    re.M,
-)
-
-def read_run(label, log, cases):
-    """The text of one run, and the launch count of each case in that run."""
-    text = log.read_text(errors="replace")
-
-    # case -> its summary tables, in order. The tables before the first banner
-    # belong to no case, and the parser drops them.
-    tables, current = {c: [] for c in cases}, None
-    for m in EVENT.finditer(text):
-        case = m.group("case")
-        if case is not None:
-            current = case if case in tables else None
-        elif current is not None:
-            tables[current].append(int(m.group("total")))
-
-    # The *shape* of the per-case counts (not their total) tells which failure
-    # occurred. Every case runs the same code, so a changed sync point moves
-    # all of them together. A killed run makes them uneven. Autotuning also
-    # makes them uneven, but it is not a failure. A filter can select one case,
-    # and one case has no shape to compare.
-    counted = {c: len(t) for c, t in tables.items()}
-    shape = set(counted.values())
-
-    if shape == {0}:
-        sys.exit(
-            f"{label}: no summary table belongs to any of the {len(cases)} "
-            f"cases. The `Testing <case>` banners of criterion do not match "
-            f"`--list`, or profiling is off. See {log}"
-        )
-    short = sorted(c for c, n in counted.items() if n < SYNCS)
-    if len(shape) == 1 and (short or (len(cases) > 1 and shape != {SYNCS})):
-        n = shape.pop()
-        sys.exit(
-            f"{label}: every case emitted {n} summary table{'s'[:n != 1]}, "
-            f"not {SYNCS}. The sync points in benches/layer.rs changed. See {log}"
-        )
-    if short:
-        sys.exit(
-            f"{label}: {len(short)} of {len(cases)} cases emitted fewer "
-            f"than the {SYNCS} expected summary tables "
-            f"({', '.join(short[:3])}). The run stopped early, or a table "
-            f"came after the next banner. See {log}"
-        )
-
-    # The last two iterations run the same work. So different counts mean that
-    # the last table cannot be trusted.
-    unstable = sorted(c for c, t in tables.items() if t[-2] != t[-1])
-    if unstable:
-        worst = ", ".join(
-            f"{c} ({tables[c][-2]} then {tables[c][-1]})" for c in unstable[:3]
-        )
-        sys.exit(
-            f"{label}: {len(unstable)} of {len(cases)} cases launched different "
-            f"kernel counts in their last two iterations ({worst}). The two "
-            "iterations run the same work, so the last table is not reliable. "
-            f"Tuning or a change of block state can cause this. See {log}"
-        )
-
-    # The last table is the measured iteration, alone.
-    return text, {case: tables[case][-1] for case in cases}
-
-
-# (group, case, label) -> the count of each run.
-results, config_lines, present = {}, {}, []
-for label, _ in CONFIGS:
-    if label not in ran:
-        continue
-    logs = [log_dir / f"{label}.{run}.log" for run in range(1, ran[label] + 1)]
-    cases_file = log_dir / f"{label}.cases"
-    if not (cases_file.exists() and all(log.exists() for log in logs)):
-        continue
-    cases = cases_file.read_text().split()
-    runs = [read_run(label, log, cases) for log in logs]
-
-    present.append(label)
-    for m in re.finditer(r"^bench-config: (.*)$", runs[0][0], re.M):
-        config_lines[label] = m.group(1)
-        break
-    for case in cases:
-        group, _, name = case.partition("/")
-        results[(group, name, label)] = [counts[case] for _, counts in runs]
-
-cols = [(label, head) for label, head in CONFIGS if label in present]
-if not cols:
-    sys.exit("no run logs found")
-
-
-def cell(counts):
-    """One count, or the lowest and the highest count of runs that differ."""
-    low, high = min(counts), max(counts)
-    return str(low) if low == high else f"{low}–{high}"
-
-
-notes = (
-    "One iteration per case is measured rather than a criterion sample. A "
-    "`cuda` count follows from the op graph, not from the machine, so it is "
-    "exact and repeatable. The counts come from the per-sync profiling summary "
-    "of cubecl, which serialises the queue. So the timings in "
-    "`target/kernel-logs/` have no meaning."
-)
-if "cuda-fusion" in present:
-    notes += (
-        " A count of the autotune column also depends on the candidates that "
-        "the tuner selects in each process, so it can change between runs. "
-        f"That column comes from {ran['cuda-fusion']} run(s). A cell `a–b` "
-        "gives the lowest and the highest count."
-    )
-
-lines = [
-    "# Kernel launch counts",
-    "",
-    f"One SSM block per case, generated by `./kernels.sh` on "
-    f"{datetime.date.today().isoformat()}. Each cell is the number of GPU "
-    "kernels launched by one iteration of that case. Lower is better.",
-    "",
-    notes,
-    "",
-]
-
-if config_lines:
-    lines += ["| run | configuration |", "|---|---|"]
-    for label, _ in cols:
-        lines.append(f"| `{label}` | `{config_lines.get(label, 'n/a')}` |")
-    lines.append("")
-
-for group in ["forward", "train", "step"]:
-    cases = []
-    for (g, case, label) in results:
-        if g == group and case not in cases:
-            cases.append(case)
-    if not cases:
-        continue
-    lines += [
-        f"## {GROUP_TITLES[group]}",
-        "",
-        "| case | " + " | ".join(head for _, head in cols) + " |",
-        "|---|" + "---|" * len(cols),
-    ]
-    for case in cases:
-        row = [
-            cell(results[(group, case, label)]) if (group, case, label) in results else "—"
-            for label, _ in cols
-        ]
-        lines.append(f"| `{case}` | " + " | ".join(row) + " |")
-    lines.append("")
-
-pathlib.Path(out_path).write_text("\n".join(lines))
-print(f"wrote {out_path} ({len(results)} counts)")
-PY
+python3 scripts/kernels_report.py report "$OUT" "$LOG_DIR" "${RAN[*]:-}"
