@@ -13,7 +13,7 @@ cargo check                                     # type-check the lib
 cargo test --lib -- --test-threads=1            # lib tests
 cargo test --examples -j 1 -- --test-threads=1  # example tests
 cargo doc --all --no-deps                       # docs
-./scripts/check.sh                              # the lines above + host paths
+./scripts/check.sh                              # the lines above + each family alone, private docs, host paths, prose
 cargo run --example reset-majority -- --training --inference
 # the user runs the benches, not you:
 ./bench.sh
@@ -169,7 +169,13 @@ Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See
 
 ### Test seams
 
-The seams to propose for `/to-spec` and `/tdd`. See `docs/agents/testing.md`.
+The seams to propose for `/to-spec` and `/tdd`, and the bench gates of a ticket.
+See `docs/agents/testing.md`.
+
+### Code review
+
+What each `/code-review` agent receives, and how to review before the last
+commit. See `docs/agents/code-review.md`.
 
 ## Notation
 

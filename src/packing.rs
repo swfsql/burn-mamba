@@ -53,6 +53,9 @@
 //! The entry points are `Mamba2::forward_packed` and
 //! `Mamba3::forward_packed`.
 
+// A build without Mamba-3 reads only a part of this module.
+#![cfg_attr(not(feature = "mamba3"), allow(dead_code))]
+
 use burn::prelude::*;
 
 /// The resets of a packed row as an SSD pass takes them: the chunks that

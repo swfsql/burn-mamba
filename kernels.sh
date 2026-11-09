@@ -21,14 +21,18 @@
 # The last table of a case is its per-iteration launch count. The table before
 # it counts the same work, and the script compares the two.
 #
-# One run is sufficient
-# ---------------------
-# A launch count is a property of the op graph, not of the machine. It is exact
-# and repeatable, without the variance that makes criterion sample a benchmark
-# hundreds of times. So this script runs the same binary in the `--test` mode
-# of criterion (one measured iteration per case), with `BENCH_WARMUP_ITERS=3`.
-# The whole matrix takes about a minute per configuration, almost all of it
-# kernel compilation, not measurement.
+# How many runs
+# -------------
+# A launch count on `cuda` is a property of the op graph, not of the machine.
+# It is exact and repeatable, without the variance that makes criterion sample
+# a benchmark hundreds of times. So one run is sufficient there. This script
+# runs the same binary in the `--test` mode of criterion (one measured iteration
+# per case), with `BENCH_WARMUP_ITERS=3`. The whole matrix takes about a minute
+# per configuration, almost all of it kernel compilation, not measurement.
+#
+# A count on `cuda-fusion` also depends on the tuner (see below). So the script
+# runs that configuration `KERNELS_FUSION_RUNS` times (3 by default), and the
+# report gives the lowest and the highest count.
 #
 # The `basic` level has two consequences that are worth knowing:
 #   - It times every launch with `submit_blocking`, which serialises the queue.
@@ -71,6 +75,7 @@
 #   ./kernels.sh step               # only cases matching the criterion filter
 #   BENCH_SEQ=1024 ./kernels.sh     # any BENCH_* the bench understands
 #   KERNELS_SKIP=cuda-fusion ./kernels.sh    # skip configurations by label
+#   KERNELS_FUSION_RUNS=1 ./kernels.sh       # one fused run, so no range
 
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -93,10 +98,10 @@ level = "basic"
 stdout = true
 EOF
 
-# label | extra cargo features (on top of the defaults) | BURN_DEVICE | target dir
+# label | extra cargo features (on top of the defaults) | BURN_DEVICE | target dir | runs
 CONFIGS=(
-    "cuda|backend-cuda|cuda|target/bench-cuda"
-    "cuda-fusion|backend-cuda,fusion,dev-autotune|cuda|target/bench-cuda-fusion"
+    "cuda|backend-cuda|cuda|target/bench-cuda|1"
+    "cuda-fusion|backend-cuda,fusion,dev-autotune|cuda|target/bench-cuda-fusion|${KERNELS_FUSION_RUNS:-3}"
 )
 
 # The report has only the configurations that this invocation ran. The log
@@ -106,7 +111,7 @@ CONFIGS=(
 RAN=()
 
 for entry in "${CONFIGS[@]}"; do
-    IFS='|' read -r label features device target <<<"$entry"
+    IFS='|' read -r label features device target runs <<<"$entry"
 
     if [[ ",$SKIP," == *",$label,"* ]]; then
         echo "==> skipping $label"
@@ -137,10 +142,13 @@ for line in sys.stdin:
     ( cd "$WORK" && BURN_DEVICE="$device" "$bin" --list ${FILTER:+"$FILTER"} ) \
         2>/dev/null | sed -n 's/: benchmark$//p' >"$LOG_DIR/$label.cases"
 
-    ( cd "$WORK" && BURN_DEVICE="$device" BENCH_WARMUP_ITERS=3 BENCH_SETTLE_MS=200 \
-        "$bin" --test ${FILTER:+"$FILTER"} ) >"$LOG_DIR/$label.log" 2>&1
+    # Each process tunes from an empty cache.
+    for run in $(seq 1 "$runs"); do
+        ( cd "$WORK" && BURN_DEVICE="$device" BENCH_WARMUP_ITERS=3 BENCH_SETTLE_MS=200 \
+            "$bin" --test ${FILTER:+"$FILTER"} ) >"$LOG_DIR/$label.$run.log" 2>&1
+    done
 
-    RAN+=("$label")
+    RAN+=("$label:$runs")
 done
 
 # --------------------------------------------------------------------------
@@ -150,7 +158,8 @@ python3 - "$OUT" "$LOG_DIR" "${RAN[*]:-}" <<'PY'
 import re, sys, datetime, pathlib
 
 out_path, log_dir = sys.argv[1], pathlib.Path(sys.argv[2])
-ran = set(sys.argv[3].split())
+# label -> the number of its runs.
+ran = {label: int(runs) for label, runs in (e.split(":") for e in sys.argv[3].split())}
 
 # (label, column heading) in report order.
 CONFIGS = [
@@ -181,15 +190,9 @@ EVENT = re.compile(
     re.M,
 )
 
-results, config_lines, present = {}, {}, []
-for label, _ in CONFIGS:
-    if label not in ran:
-        continue
-    log, cases_file = log_dir / f"{label}.log", log_dir / f"{label}.cases"
-    if not (log.exists() and cases_file.exists()):
-        continue
+def read_run(label, log, cases):
+    """The text of one run, and the launch count of each case in that run."""
     text = log.read_text(errors="replace")
-    cases = cases_file.read_text().split()
 
     # case -> its summary tables, in order. The tables before the first banner
     # belong to no case, and the parser drops them.
@@ -244,32 +247,64 @@ for label, _ in CONFIGS:
             f"Tuning or a change of block state can cause this. See {log}"
         )
 
+    # The last table is the measured iteration, alone.
+    return text, {case: tables[case][-1] for case in cases}
+
+
+# (group, case, label) -> the count of each run.
+results, config_lines, present = {}, {}, []
+for label, _ in CONFIGS:
+    if label not in ran:
+        continue
+    logs = [log_dir / f"{label}.{run}.log" for run in range(1, ran[label] + 1)]
+    cases_file = log_dir / f"{label}.cases"
+    if not (cases_file.exists() and all(log.exists() for log in logs)):
+        continue
+    cases = cases_file.read_text().split()
+    runs = [read_run(label, log, cases) for log in logs]
+
     present.append(label)
-    for m in re.finditer(r"^bench-config: (.*)$", text, re.M):
+    for m in re.finditer(r"^bench-config: (.*)$", runs[0][0], re.M):
         config_lines[label] = m.group(1)
         break
-    # The last table is the measured iteration, alone.
     for case in cases:
         group, _, name = case.partition("/")
-        results[(group, name, label)] = tables[case][-1]
+        results[(group, name, label)] = [counts[case] for _, counts in runs]
 
 cols = [(label, head) for label, head in CONFIGS if label in present]
 if not cols:
     sys.exit("no run logs found")
+
+
+def cell(counts):
+    """One count, or the lowest and the highest count of runs that differ."""
+    low, high = min(counts), max(counts)
+    return str(low) if low == high else f"{low}–{high}"
+
+
+notes = (
+    "One iteration per case is measured rather than a criterion sample. A "
+    "`cuda` count follows from the op graph, not from the machine, so it is "
+    "exact and repeatable. The counts come from the per-sync profiling summary "
+    "of cubecl, which serialises the queue. So the timings in "
+    "`target/kernel-logs/` have no meaning."
+)
+if "cuda-fusion" in present:
+    notes += (
+        " A count of the autotune column also depends on the candidates that "
+        "the tuner selects in each process, so it can change between runs. "
+        f"That column comes from {ran['cuda-fusion']} run(s). A cell `a–b` "
+        "gives the lowest and the highest count."
+    )
 
 lines = [
     "# Kernel launch counts",
     "",
     f"One SSM block per case, generated by `./kernels.sh` on "
     f"{datetime.date.today().isoformat()}. Each cell is the number of GPU "
-    "kernels launched by one iteration of that case; lower is better.",
+    "kernels launched by one iteration of that case. Lower is better.",
     "",
-    "Counts are exact and repeatable — they follow from the op graph, not from "
-    "the machine — so one iteration per case is measured rather than a "
-    "criterion sample. They are read from cubecl's own per-sync profiling "
-    "summary, which serialises the queue: the counts are meaningful, the timings "
-    "in `target/kernel-logs/` are not. The autotune column also depends on the "
-    "candidates that the tuner selects in that run.",
+    notes,
     "",
 ]
 
@@ -294,7 +329,8 @@ for group in ["forward", "train", "step"]:
     ]
     for case in cases:
         row = [
-            str(results.get((group, case, label), "—")) for label, _ in cols
+            cell(results[(group, case, label)]) if (group, case, label) in results else "—"
+            for label, _ in cols
         ]
         lines.append(f"| `{case}` | " + " | ".join(row) + " |")
     lines.append("")

@@ -59,6 +59,7 @@ pub(crate) fn window<const D: usize>(
 /// `pad_bt` with every position repeated `u` times in place: the padding of a
 /// token spread over its `u` micro-steps on the write axis (`[batch, tokens]`
 /// → `[batch, tokens·u]`).
+#[cfg_attr(not(feature = "mamba3"), allow(dead_code))]
 pub(crate) fn repeat_positions(pad_bt: Tensor<2, Bool>, u: usize) -> Tensor<2, Bool> {
     let [batch, tokens] = pad_bt.dims();
     pad_bt

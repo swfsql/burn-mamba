@@ -21,3 +21,11 @@ An expected value comes from a source outside the code under test:
 
 - A claim about training quality (for example, "this option learns faster") has no test seam. A run of an example answers it.
 - The tests run on `flex`. A failure that only another backend shows needs a run on that backend.
+
+## Bench gates
+
+A ticket can gate on the reports of `./bench.sh` and `./kernels.sh`. Only the user runs them.
+
+- A launch gate reads the `cuda` column of `kernels.md`. A count of that column is exact and repeatable.
+- The `cuda + fusion + autotune` column can change between runs, because the tuner selects by time. `kernels.sh` runs it three times, and a cell `a–b` gives the lowest and the highest count. Two ranges that overlap show no change.
+- A time gate compares a changed family with the families that the change does not touch. The change of those families shows the noise of the run.

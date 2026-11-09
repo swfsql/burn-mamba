@@ -337,7 +337,7 @@ pub fn read_causal_mask(
 /// The read axis on primitives, for the recompute-backward math.
 ///
 /// The same definitions as [`read_positions`] / [`read_causal_mask`] one module up,
-/// on [`F`] instead of `Tensor`. Every kernel in this crate has this split: a
+/// on `F` instead of `Tensor`. Every kernel in this crate has this split: a
 /// `Tensor` body, and an `F<B, _>` body that a
 /// [`Backward`](burn::backend::autodiff::ops::Backward) node can run (see
 /// [`fprim`](burn_stack::utils::fprim)). Both are reshape-and-narrow, so
