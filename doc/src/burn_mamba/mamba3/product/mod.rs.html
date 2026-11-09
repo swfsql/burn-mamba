@@ -96,136 +96,132 @@
 <a href=#96 id=96 data-nosnippet>96</a>//! ## How it is evaluated
 <a href=#97 id=97 data-nosnippet>97</a>//!
 <a href=#98 id=98 data-nosnippet>98</a>//! Not with a new kernel: the micro-steps fold into the **write axis**. The
-<a href=#99 id=99 data-nosnippet>99</a>//! in-projection widens exactly the per-micro-step channel groups,
-<a href=#100 id=100 data-nosnippet>100</a>//!
-<a href=#101 id=101 data-nosnippet>101</a>//! ```text
-<a href=#102 id=102 data-nosnippet>102</a>//!   [ z | x·u | B·u | C | Δ·u | A·u | λ·u | μ·u | rotation·u | r·u | a·u | b·u ]
-<a href=#103 id=103 data-nosnippet>103</a>//! ```
-<a href=#104 id=104 data-nosnippet>104</a>//!
-<a href=#105 id=105 data-nosnippet>105</a>//! and [`unfold_micro_bs`] reads each `u`-wide channel group as `u`
-<a href=#106 id=106 data-nosnippet>106</a>//! consecutive write positions. So the SSD scan, the trapezoid, the rotation scan, the
-<a href=#107 id=107 data-nosnippet>107</a>//! chunking and the caches all run unchanged on a sequence of length
-<a href=#108 id=108 data-nosnippet>108</a>//! `sequence · u`. Two placements make that exactly the recurrence above:
-<a href=#109 id=109 data-nosnippet>109</a>//!
-<a href=#110 id=110 data-nosnippet>110</a>//! - **The read `C` is on the last micro-step, and only there.** Every
-<a href=#111 id=111 data-nosnippet>111</a>//!   micro-step *writes* to the state, so `B`, `x`, `Δ`, `A`, `λ` and the
-<a href=#112 id=112 data-nosnippet>112</a>//!   rotation are on the write axis. The token is *read* once, so `C` stays at
-<a href=#113 id=113 data-nosnippet>113</a>//!   token resolution, and so does the `y` that the SSD returns. That is the
-<a href=#114 id=114 data-nosnippet>114</a>//!   **read axis** of the chunk (`helpers::read_positions`). `u` widens only the
-<a href=#115 id=115 data-nosnippet>115</a>//!   write axis of a chunk. So the intra-chunk score, the state-to-output
-<a href=#116 id=116 data-nosnippet>116</a>//!   product and the QK-norm/rotation of `C` are `u`-invariant. The block does
-<a href=#117 id=117 data-nosnippet>117</a>//!   not compute `u`× the output to discard all positions but one.
-<a href=#118 id=118 data-nosnippet>118</a>//! - **`z`, the `D` skip and the output gate are per token.** The skip takes
-<a href=#119 id=119 data-nosnippet>119</a>//!   the `x` of the last micro-step, which is contemporaneous with the readout
-<a href=#120 id=120 data-nosnippet>120</a>//!   ([`last_micro4`]).
-<a href=#121 id=121 data-nosnippet>121</a>//!
-<a href=#122 id=122 data-nosnippet>122</a>//! `step` folds the same way, over a block of `u` positions (not a sequence),
-<a href=#123 id=123 data-nosnippet>123</a>//! and evaluates that block **at once**. With the rotation factored out, the
-<a href=#124 id=124 data-nosnippet>124</a>//! transition inside a token is the scalar `α`. So the block has the closed
-<a href=#125 id=125 data-nosnippet>125</a>//! form `h = (∏ⱼ αⱼ)·h₋₁ + Σⱼ wⱼ·writeⱼ`, and every write in it is an outer
-<a href=#126 id=126 data-nosnippet>126</a>//! product into one shared state. The transport by `wⱼ = ∏_{r&gt;j} αᵣ`, and the
-<a href=#127 id=127 data-nosnippet>127</a>//! fusion of `(u, mimo_rank)` into one contracted axis, make each side of the
-<a href=#128 id=128 data-nosnippet>128</a>//! recurrence one `mimo_outer_sum`. So a decode step costs the same number of
-<a href=#129 id=129 data-nosnippet>129</a>//! kernel launches at every `u`.
-<a href=#130 id=130 data-nosnippet>130</a>//!
-<a href=#131 id=131 data-nosnippet>131</a>//! Everything else is per micro-step, including the decay. In Mamba, the decay
-<a href=#132 id=132 data-nosnippet>132</a>//! is not a control of its own: it comes from the step size (`α = exp(ΔA)`),
-<a href=#133 id=133 data-nosnippet>133</a>//! and `Δ` also weights the write and paces the rotation. So the "forget gate on micro-step 0" of
-<a href=#134 id=134 data-nosnippet>134</a>//! DeltaProduct has no faithful analogue here. `α ≡ 1` on the interior
-<a href=#135 id=135 data-nosnippet>135</a>//! micro-steps would also stop the rotation. A scalar decay composes either way
-<a href=#136 id=136 data-nosnippet>136</a>//! (`∏ⱼ αₜ,ⱼ` is one decay per token), so the uniform placement costs nothing
-<a href=#137 id=137 data-nosnippet>137</a>//! and keeps every micro-step the plain Mamba-3 update.
-<a href=#138 id=138 data-nosnippet>138</a>//!
-<a href=#139 id=139 data-nosnippet>139</a>//! ## Caches, and what does *not* change
-<a href=#140 id=140 data-nosnippet>140</a>//!
-<a href=#141 id=141 data-nosnippet>141</a>//! The state is one `[batch, nheads, per_head_dim, state_rank]` matrix at
-<a href=#142 id=142 data-nosnippet>142</a>//! every `u`. Like DeltaProduct, this buys transition expressiveness, not
-<a href=#143 id=143 data-nosnippet>143</a>//! memory. The rotation accumulator holds the **last micro-step** of the last
-<a href=#144 id=144 data-nosnippet>144</a>//! token, which is the position just before the first micro-step of the next
-<a href=#145 id=145 data-nosnippet>145</a>//! call. So a prefill over several windows splits at token boundaries, as at
-<a href=#146 id=146 data-nosnippet>146</a>//! `u = 1`.
-<a href=#147 id=147 data-nosnippet>147</a>//!
-<a href=#148 id=148 data-nosnippet>148</a>//! What `u &gt; 1` does change is the taps of the trapezoid. They are now on the
-<a href=#149 id=149 data-nosnippet>149</a>//! write axis, so they become a *choice*
-<a href=#150 id=150 data-nosnippet>150</a>//! ([`TapPattern`](crate::mamba3::tap_pattern::TapPattern)). The default
-<a href=#151 id=151 data-nosnippet>151</a>//! `HorizontalCarryOver` reads the previous **micro-step**: the 2-tap FIR
-<a href=#152 id=152 data-nosnippet>152</a>//! filter runs at the finer rate, and only `1/u` of the taps still cross a
-<a href=#153 id=153 data-nosnippet>153</a>//! token. `Vertical` reads the same micro-step of the previous **token**. The
-<a href=#154 id=154 data-nosnippet>154</a>//! tap cache (`k_state`, `v_state`) is the FIFO that the choice needs: one
-<a href=#155 id=155 data-nosnippet>155</a>//! slot, or `u`. Either way, `forward` runs the same write axis as `step`,
-<a href=#156 id=156 data-nosnippet>156</a>//! which keeps them in exact agreement.
-<a href=#157 id=157 data-nosnippet>157</a>//!
-<a href=#158 id=158 data-nosnippet>158</a>//! ## Notation
-<a href=#159 id=159 data-nosnippet>159</a>//!
-<a href=#160 id=160 data-nosnippet>160</a>//! `u` is `micro_steps`. On the write axis of `forward`, the shape letter
-<a href=#161 id=161 data-nosnippet>161</a>//! `s` counts **micro-steps**, not tokens. A name at token resolution says so
-<a href=#162 id=162 data-nosnippet>162</a>//! (`tokens`). See the [`mamba3`](crate::mamba3::mamba3) module header for the
-<a href=#163 id=163 data-nosnippet>163</a>//! other dimension keys.
-<a href=#164 id=164 data-nosnippet>164</a>
-<a href=#165 id=165 data-nosnippet>165</a></span><span class="kw">use </span>burn::prelude::<span class="kw-2">*</span>;
-<a href=#166 id=166 data-nosnippet>166</a>
-<a href=#167 id=167 data-nosnippet>167</a><span class="doccomment">/// Fold a `u`-wide in-projection channel group into the write axis.
-<a href=#168 id=168 data-nosnippet>168</a>///
-<a href=#169 id=169 data-nosnippet>169</a>/// The projection lays the micro-steps of a token out contiguously
-<a href=#170 id=170 data-nosnippet>170</a>/// (`channel = j·width + c`), which is already the memory order of
-<a href=#171 id=171 data-nosnippet>171</a>/// `[batch, sequence, u, width]`. So the fold is one reshape and never moves
-<a href=#172 id=172 data-nosnippet>172</a>/// data.
-<a href=#173 id=173 data-nosnippet>173</a>///
-<a href=#174 id=174 data-nosnippet>174</a>/// # Shapes
-<a href=#175 id=175 data-nosnippet>175</a>/// - `t_bsW` : `[batch, sequence, u · width]`
-<a href=#176 id=176 data-nosnippet>176</a>/// - out     : `[batch, sequence · u, width]`
-<a href=#177 id=177 data-nosnippet>177</a></span><span class="attr">#[allow(non_snake_case)]
-<a href=#178 id=178 data-nosnippet>178</a></span><span class="kw">pub fn </span>unfold_micro_bs(t_bsW: Tensor&lt;<span class="number">3</span>&gt;, micro_steps: usize) -&gt; Tensor&lt;<span class="number">3</span>&gt; {
-<a href=#179 id=179 data-nosnippet>179</a>    <span class="kw">let </span>[batch, sequence, fused] = t_bsW.dims();
-<a href=#180 id=180 data-nosnippet>180</a>    <span class="macro">assert_eq!</span>(
-<a href=#181 id=181 data-nosnippet>181</a>        fused % micro_steps,
-<a href=#182 id=182 data-nosnippet>182</a>        <span class="number">0</span>,
-<a href=#183 id=183 data-nosnippet>183</a>        <span class="string">"a per-micro-step channel group is a multiple of micro_steps wide"
-<a href=#184 id=184 data-nosnippet>184</a>    </span>);
-<a href=#185 id=185 data-nosnippet>185</a>    t_bsW.reshape([batch, sequence * micro_steps, fused / micro_steps])
-<a href=#186 id=186 data-nosnippet>186</a>}
-<a href=#187 id=187 data-nosnippet>187</a>
-<a href=#188 id=188 data-nosnippet>188</a><span class="doccomment">/// [`unfold_micro_bs`] for a single token: move the micro-steps onto their own
-<a href=#189 id=189 data-nosnippet>189</a>/// axis.
-<a href=#190 id=190 data-nosnippet>190</a>///
-<a href=#191 id=191 data-nosnippet>191</a>/// # Shapes
-<a href=#192 id=192 data-nosnippet>192</a>/// - `t_bW` : `[batch, u · width]`
-<a href=#193 id=193 data-nosnippet>193</a>/// - out    : `[batch, u, width]`
-<a href=#194 id=194 data-nosnippet>194</a></span><span class="attr">#[allow(non_snake_case)]
-<a href=#195 id=195 data-nosnippet>195</a></span><span class="kw">pub fn </span>unfold_micro_b(t_bW: Tensor&lt;<span class="number">2</span>&gt;, micro_steps: usize) -&gt; Tensor&lt;<span class="number">3</span>&gt; {
-<a href=#196 id=196 data-nosnippet>196</a>    <span class="kw">let </span>[batch, fused] = t_bW.dims();
-<a href=#197 id=197 data-nosnippet>197</a>    <span class="macro">assert_eq!</span>(
-<a href=#198 id=198 data-nosnippet>198</a>        fused % micro_steps,
-<a href=#199 id=199 data-nosnippet>199</a>        <span class="number">0</span>,
-<a href=#200 id=200 data-nosnippet>200</a>        <span class="string">"a per-micro-step channel group is a multiple of micro_steps wide"
-<a href=#201 id=201 data-nosnippet>201</a>    </span>);
-<a href=#202 id=202 data-nosnippet>202</a>    t_bW.reshape([batch, micro_steps, fused / micro_steps])
-<a href=#203 id=203 data-nosnippet>203</a>}
-<a href=#204 id=204 data-nosnippet>204</a>
-<a href=#205 id=205 data-nosnippet>205</a><span class="doccomment">/// Keep the **last** micro-step of each token of the value stream (the
-<a href=#206 id=206 data-nosnippet>206</a>/// position that is contemporaneous with the readout). This collapses the
-<a href=#207 id=207 data-nosnippet>207</a>/// write axis back to the read axis for the `D` skip.
+<a href=#99 id=99 data-nosnippet>99</a>//! in-projection widens exactly the per-micro-step channel groups (see the
+<a href=#100 id=100 data-nosnippet>100</a>//! layout of [`Mamba3::in_proj`](crate::mamba3::mamba3::Mamba3::in_proj)),
+<a href=#101 id=101 data-nosnippet>101</a>//! and [`unfold_micro_bs`] reads each `u`-wide channel group as `u`
+<a href=#102 id=102 data-nosnippet>102</a>//! consecutive write positions. So the SSD scan, the trapezoid, the rotation scan, the
+<a href=#103 id=103 data-nosnippet>103</a>//! chunking and the caches all run unchanged on a sequence of length
+<a href=#104 id=104 data-nosnippet>104</a>//! `sequence · u`. Two placements make that exactly the recurrence above:
+<a href=#105 id=105 data-nosnippet>105</a>//!
+<a href=#106 id=106 data-nosnippet>106</a>//! - **The read `C` is on the last micro-step, and only there.** Every
+<a href=#107 id=107 data-nosnippet>107</a>//!   micro-step *writes* to the state, so `B`, `x`, `Δ`, `A`, `λ` and the
+<a href=#108 id=108 data-nosnippet>108</a>//!   rotation are on the write axis. The token is *read* once, so `C` stays at
+<a href=#109 id=109 data-nosnippet>109</a>//!   token resolution, and so does the `y` that the SSD returns. That is the
+<a href=#110 id=110 data-nosnippet>110</a>//!   **read axis** of the chunk (`helpers::read_positions`). `u` widens only the
+<a href=#111 id=111 data-nosnippet>111</a>//!   write axis of a chunk. So the intra-chunk score, the state-to-output
+<a href=#112 id=112 data-nosnippet>112</a>//!   product and the QK-norm/rotation of `C` are `u`-invariant. The block does
+<a href=#113 id=113 data-nosnippet>113</a>//!   not compute `u`× the output to discard all positions but one.
+<a href=#114 id=114 data-nosnippet>114</a>//! - **`z`, the `D` skip and the output gate are per token.** The skip takes
+<a href=#115 id=115 data-nosnippet>115</a>//!   the `x` of the last micro-step, which is contemporaneous with the readout
+<a href=#116 id=116 data-nosnippet>116</a>//!   ([`last_micro4`]).
+<a href=#117 id=117 data-nosnippet>117</a>//!
+<a href=#118 id=118 data-nosnippet>118</a>//! `step` folds the same way, over a block of `u` positions (not a sequence),
+<a href=#119 id=119 data-nosnippet>119</a>//! and evaluates that block **at once**. With the rotation factored out, the
+<a href=#120 id=120 data-nosnippet>120</a>//! transition inside a token is the scalar `α`. So the block has the closed
+<a href=#121 id=121 data-nosnippet>121</a>//! form `h = (∏ⱼ αⱼ)·h₋₁ + Σⱼ wⱼ·writeⱼ`, and every write in it is an outer
+<a href=#122 id=122 data-nosnippet>122</a>//! product into one shared state. The transport by `wⱼ = ∏_{r&gt;j} αᵣ`, and the
+<a href=#123 id=123 data-nosnippet>123</a>//! fusion of `(u, mimo_rank)` into one contracted axis, make each side of the
+<a href=#124 id=124 data-nosnippet>124</a>//! recurrence one `mimo_outer_sum`. So a decode step costs the same number of
+<a href=#125 id=125 data-nosnippet>125</a>//! kernel launches at every `u`.
+<a href=#126 id=126 data-nosnippet>126</a>//!
+<a href=#127 id=127 data-nosnippet>127</a>//! Everything else is per micro-step, including the decay. In Mamba, the decay
+<a href=#128 id=128 data-nosnippet>128</a>//! is not a control of its own: it comes from the step size (`α = exp(ΔA)`),
+<a href=#129 id=129 data-nosnippet>129</a>//! and `Δ` also weights the write and paces the rotation. So the "forget gate on micro-step 0" of
+<a href=#130 id=130 data-nosnippet>130</a>//! DeltaProduct has no faithful analogue here. `α ≡ 1` on the interior
+<a href=#131 id=131 data-nosnippet>131</a>//! micro-steps would also stop the rotation. A scalar decay composes either way
+<a href=#132 id=132 data-nosnippet>132</a>//! (`∏ⱼ αₜ,ⱼ` is one decay per token), so the uniform placement costs nothing
+<a href=#133 id=133 data-nosnippet>133</a>//! and keeps every micro-step the plain Mamba-3 update.
+<a href=#134 id=134 data-nosnippet>134</a>//!
+<a href=#135 id=135 data-nosnippet>135</a>//! ## Caches, and what does *not* change
+<a href=#136 id=136 data-nosnippet>136</a>//!
+<a href=#137 id=137 data-nosnippet>137</a>//! The state is one `[batch, nheads, per_head_dim, state_rank]` matrix at
+<a href=#138 id=138 data-nosnippet>138</a>//! every `u`. Like DeltaProduct, this buys transition expressiveness, not
+<a href=#139 id=139 data-nosnippet>139</a>//! memory. The rotation accumulator holds the **last micro-step** of the last
+<a href=#140 id=140 data-nosnippet>140</a>//! token, which is the position just before the first micro-step of the next
+<a href=#141 id=141 data-nosnippet>141</a>//! call. So a prefill over several windows splits at token boundaries, as at
+<a href=#142 id=142 data-nosnippet>142</a>//! `u = 1`.
+<a href=#143 id=143 data-nosnippet>143</a>//!
+<a href=#144 id=144 data-nosnippet>144</a>//! What `u &gt; 1` does change is the taps of the trapezoid. They are now on the
+<a href=#145 id=145 data-nosnippet>145</a>//! write axis, so they become a *choice*
+<a href=#146 id=146 data-nosnippet>146</a>//! ([`TapPattern`](crate::mamba3::tap_pattern::TapPattern)). The default
+<a href=#147 id=147 data-nosnippet>147</a>//! `HorizontalCarryOver` reads the previous **micro-step**: the 2-tap FIR
+<a href=#148 id=148 data-nosnippet>148</a>//! filter runs at the finer rate, and only `1/u` of the taps still cross a
+<a href=#149 id=149 data-nosnippet>149</a>//! token. `Vertical` reads the same micro-step of the previous **token**. The
+<a href=#150 id=150 data-nosnippet>150</a>//! tap cache (`k_state`, `v_state`) is the FIFO that the choice needs: one
+<a href=#151 id=151 data-nosnippet>151</a>//! slot, or `u`. Either way, `forward` runs the same write axis as `step`,
+<a href=#152 id=152 data-nosnippet>152</a>//! which keeps them in exact agreement.
+<a href=#153 id=153 data-nosnippet>153</a>//!
+<a href=#154 id=154 data-nosnippet>154</a>//! ## Notation
+<a href=#155 id=155 data-nosnippet>155</a>//!
+<a href=#156 id=156 data-nosnippet>156</a>//! `u` is `micro_steps`. On the write axis of `forward`, the shape letter
+<a href=#157 id=157 data-nosnippet>157</a>//! `s` counts **micro-steps**, not tokens. A name at token resolution says so
+<a href=#158 id=158 data-nosnippet>158</a>//! (`tokens`). See the [`mamba3`](crate::mamba3::mamba3) module header for the
+<a href=#159 id=159 data-nosnippet>159</a>//! other dimension keys.
+<a href=#160 id=160 data-nosnippet>160</a>
+<a href=#161 id=161 data-nosnippet>161</a></span><span class="kw">use </span>burn::prelude::<span class="kw-2">*</span>;
+<a href=#162 id=162 data-nosnippet>162</a>
+<a href=#163 id=163 data-nosnippet>163</a><span class="doccomment">/// Fold a `u`-wide in-projection channel group into the write axis.
+<a href=#164 id=164 data-nosnippet>164</a>///
+<a href=#165 id=165 data-nosnippet>165</a>/// The projection lays the micro-steps of a token out contiguously
+<a href=#166 id=166 data-nosnippet>166</a>/// (`channel = j·width + c`), which is already the memory order of
+<a href=#167 id=167 data-nosnippet>167</a>/// `[batch, sequence, u, width]`. So the fold is one reshape and never moves
+<a href=#168 id=168 data-nosnippet>168</a>/// data.
+<a href=#169 id=169 data-nosnippet>169</a>///
+<a href=#170 id=170 data-nosnippet>170</a>/// # Shapes
+<a href=#171 id=171 data-nosnippet>171</a>/// - `t_bsW` : `[batch, sequence, u · width]`
+<a href=#172 id=172 data-nosnippet>172</a>/// - out     : `[batch, sequence · u, width]`
+<a href=#173 id=173 data-nosnippet>173</a></span><span class="attr">#[allow(non_snake_case)]
+<a href=#174 id=174 data-nosnippet>174</a></span><span class="kw">pub fn </span>unfold_micro_bs(t_bsW: Tensor&lt;<span class="number">3</span>&gt;, micro_steps: usize) -&gt; Tensor&lt;<span class="number">3</span>&gt; {
+<a href=#175 id=175 data-nosnippet>175</a>    <span class="kw">let </span>[batch, sequence, fused] = t_bsW.dims();
+<a href=#176 id=176 data-nosnippet>176</a>    <span class="macro">assert_eq!</span>(
+<a href=#177 id=177 data-nosnippet>177</a>        fused % micro_steps,
+<a href=#178 id=178 data-nosnippet>178</a>        <span class="number">0</span>,
+<a href=#179 id=179 data-nosnippet>179</a>        <span class="string">"a per-micro-step channel group is a multiple of micro_steps wide"
+<a href=#180 id=180 data-nosnippet>180</a>    </span>);
+<a href=#181 id=181 data-nosnippet>181</a>    t_bsW.reshape([batch, sequence * micro_steps, fused / micro_steps])
+<a href=#182 id=182 data-nosnippet>182</a>}
+<a href=#183 id=183 data-nosnippet>183</a>
+<a href=#184 id=184 data-nosnippet>184</a><span class="doccomment">/// [`unfold_micro_bs`] for a single token: move the micro-steps onto their own
+<a href=#185 id=185 data-nosnippet>185</a>/// axis.
+<a href=#186 id=186 data-nosnippet>186</a>///
+<a href=#187 id=187 data-nosnippet>187</a>/// # Shapes
+<a href=#188 id=188 data-nosnippet>188</a>/// - `t_bW` : `[batch, u · width]`
+<a href=#189 id=189 data-nosnippet>189</a>/// - out    : `[batch, u, width]`
+<a href=#190 id=190 data-nosnippet>190</a></span><span class="attr">#[allow(non_snake_case)]
+<a href=#191 id=191 data-nosnippet>191</a></span><span class="kw">pub fn </span>unfold_micro_b(t_bW: Tensor&lt;<span class="number">2</span>&gt;, micro_steps: usize) -&gt; Tensor&lt;<span class="number">3</span>&gt; {
+<a href=#192 id=192 data-nosnippet>192</a>    <span class="kw">let </span>[batch, fused] = t_bW.dims();
+<a href=#193 id=193 data-nosnippet>193</a>    <span class="macro">assert_eq!</span>(
+<a href=#194 id=194 data-nosnippet>194</a>        fused % micro_steps,
+<a href=#195 id=195 data-nosnippet>195</a>        <span class="number">0</span>,
+<a href=#196 id=196 data-nosnippet>196</a>        <span class="string">"a per-micro-step channel group is a multiple of micro_steps wide"
+<a href=#197 id=197 data-nosnippet>197</a>    </span>);
+<a href=#198 id=198 data-nosnippet>198</a>    t_bW.reshape([batch, micro_steps, fused / micro_steps])
+<a href=#199 id=199 data-nosnippet>199</a>}
+<a href=#200 id=200 data-nosnippet>200</a>
+<a href=#201 id=201 data-nosnippet>201</a><span class="doccomment">/// Keep the **last** micro-step of each token of the value stream (the
+<a href=#202 id=202 data-nosnippet>202</a>/// position that is contemporaneous with the readout). This collapses the
+<a href=#203 id=203 data-nosnippet>203</a>/// write axis back to the read axis for the `D` skip.
+<a href=#204 id=204 data-nosnippet>204</a>///
+<a href=#205 id=205 data-nosnippet>205</a>/// The output `y` needs no such collapse. The SSD computes only the readout
+<a href=#206 id=206 data-nosnippet>206</a>/// position (the read axis of the chunk, see `helpers::read_positions`), so it already
+<a href=#207 id=207 data-nosnippet>207</a>/// returns token resolution.
 <a href=#208 id=208 data-nosnippet>208</a>///
-<a href=#209 id=209 data-nosnippet>209</a>/// The output `y` needs no such collapse. The SSD computes only the readout
-<a href=#210 id=210 data-nosnippet>210</a>/// position (the read axis of the chunk, see `helpers::read_positions`), so it already
-<a href=#211 id=211 data-nosnippet>211</a>/// returns token resolution.
-<a href=#212 id=212 data-nosnippet>212</a>///
-<a href=#213 id=213 data-nosnippet>213</a>/// # Shapes
-<a href=#214 id=214 data-nosnippet>214</a>/// - `t_bShp` : `[batch, sequence · u, nheads, per_head_dim]`
-<a href=#215 id=215 data-nosnippet>215</a>/// - out      : `[batch, sequence, nheads, per_head_dim]`
-<a href=#216 id=216 data-nosnippet>216</a></span><span class="attr">#[allow(non_snake_case)]
-<a href=#217 id=217 data-nosnippet>217</a></span><span class="kw">pub fn </span>last_micro4(t_bShp: Tensor&lt;<span class="number">4</span>&gt;, micro_steps: usize) -&gt; Tensor&lt;<span class="number">4</span>&gt; {
-<a href=#218 id=218 data-nosnippet>218</a>    <span class="kw">let </span>[batch, write_len, nheads, per_head_dim] = t_bShp.dims();
-<a href=#219 id=219 data-nosnippet>219</a>    <span class="kw">if </span>micro_steps == <span class="number">1 </span>{
-<a href=#220 id=220 data-nosnippet>220</a>        <span class="kw">return </span>t_bShp;
-<a href=#221 id=221 data-nosnippet>221</a>    }
-<a href=#222 id=222 data-nosnippet>222</a>    <span class="kw">let </span>sequence = write_len / micro_steps;
-<a href=#223 id=223 data-nosnippet>223</a>    t_bShp
-<a href=#224 id=224 data-nosnippet>224</a>        .reshape([batch, sequence, micro_steps, nheads, per_head_dim])
-<a href=#225 id=225 data-nosnippet>225</a>        .narrow(<span class="number">2</span>, micro_steps - <span class="number">1</span>, <span class="number">1</span>)
-<a href=#226 id=226 data-nosnippet>226</a>        .squeeze_dim(<span class="number">2</span>)
-<a href=#227 id=227 data-nosnippet>227</a>}
-<a href=#228 id=228 data-nosnippet>228</a>
-<a href=#229 id=229 data-nosnippet>229</a><span class="attr">#[cfg(all(test, feature = <span class="string">"_dev-test"</span>))]
-<a href=#230 id=230 data-nosnippet>230</a></span><span class="kw">mod </span>tests;
+<a href=#209 id=209 data-nosnippet>209</a>/// # Shapes
+<a href=#210 id=210 data-nosnippet>210</a>/// - `t_bShp` : `[batch, sequence · u, nheads, per_head_dim]`
+<a href=#211 id=211 data-nosnippet>211</a>/// - out      : `[batch, sequence, nheads, per_head_dim]`
+<a href=#212 id=212 data-nosnippet>212</a></span><span class="attr">#[allow(non_snake_case)]
+<a href=#213 id=213 data-nosnippet>213</a></span><span class="kw">pub fn </span>last_micro4(t_bShp: Tensor&lt;<span class="number">4</span>&gt;, micro_steps: usize) -&gt; Tensor&lt;<span class="number">4</span>&gt; {
+<a href=#214 id=214 data-nosnippet>214</a>    <span class="kw">let </span>[batch, write_len, nheads, per_head_dim] = t_bShp.dims();
+<a href=#215 id=215 data-nosnippet>215</a>    <span class="kw">if </span>micro_steps == <span class="number">1 </span>{
+<a href=#216 id=216 data-nosnippet>216</a>        <span class="kw">return </span>t_bShp;
+<a href=#217 id=217 data-nosnippet>217</a>    }
+<a href=#218 id=218 data-nosnippet>218</a>    <span class="kw">let </span>sequence = write_len / micro_steps;
+<a href=#219 id=219 data-nosnippet>219</a>    t_bShp
+<a href=#220 id=220 data-nosnippet>220</a>        .reshape([batch, sequence, micro_steps, nheads, per_head_dim])
+<a href=#221 id=221 data-nosnippet>221</a>        .narrow(<span class="number">2</span>, micro_steps - <span class="number">1</span>, <span class="number">1</span>)
+<a href=#222 id=222 data-nosnippet>222</a>        .squeeze_dim(<span class="number">2</span>)
+<a href=#223 id=223 data-nosnippet>223</a>}
+<a href=#224 id=224 data-nosnippet>224</a>
+<a href=#225 id=225 data-nosnippet>225</a><span class="attr">#[cfg(all(test, feature = <span class="string">"_dev-test"</span>))]
+<a href=#226 id=226 data-nosnippet>226</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

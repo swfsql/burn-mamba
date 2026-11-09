@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["GroupAxis","GroupKey","GroupOptimizer","GroupPlace"],"struct":["ChannelGroup","InProjLayout","InProjParts","InProjSettings"]};
