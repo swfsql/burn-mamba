@@ -187,7 +187,7 @@ fn write_in_proj(block: &mut Mamba3, points: &[Vec<f64>], channels: &[Channel], 
 /// - the QK-norm scales at one,
 /// - no `B` bias,
 /// - `C` aimed by head at the state component `aim[h]`
-///   (`C_raw = (1,0,0,0)` normalises to `(2,0,0,0)`, and the bias moves it to
+///   (`c_raw = (1,0,0,0)` normalises to `(2,0,0,0)`, and the bias moves it to
 ///   `2·e_aim`),
 /// - an identity out-projection.
 fn write_block_rest(block: &mut Mamba3, aim: &[usize], device: &Device) {
@@ -300,8 +300,8 @@ fn handmade_a5(device: &Device, rotation: RotationKind, head: Head) -> MambaLate
     let mut channels: Vec<Channel> = Vec::new();
     channels.extend((0..H).map(|_| vec![Z_ON; NUM_SYMBOLS])); // z
     channels.extend((0..H).map(|_| vec![0.0, 0.0, X_WRITE])); // x — only R writes
-    channels.extend((0..RANK).map(|r| vec![REF_POINT[r]; NUM_SYMBOLS])); // B_raw
-    channels.extend((0..RANK).map(|r| vec![f64::from(r == 0); NUM_SYMBOLS])); // C_raw
+    channels.extend((0..RANK).map(|r| vec![REF_POINT[r]; NUM_SYMBOLS])); // b_raw
+    channels.extend((0..RANK).map(|r| vec![f64::from(r == 0); NUM_SYMBOLS])); // c_raw
     channels.extend((0..H).map(|_| vec![softplus_inv(DELTA); NUM_SYMBOLS])); // Δ
     channels.extend((0..H).map(|_| vec![A_HOLD_RAW, A_HOLD_RAW, softplus_inv(A_WIPE)])); // A
     let pi = std::f64::consts::PI;
@@ -388,7 +388,7 @@ fn handmade_s5(device: &Device, head: Head) -> MambaLatentNet {
         }));
         channels.extend((0..RANK).map(|r| {
             let w = f64::from(r == 0);
-            v(w, w, w) // C_raw
+            v(w, w, w) // c_raw
         }));
         let dt = softplus_inv(DELTA);
         channels.extend((0..H).map(|_| v(dt, dt, dt))); // Δ
@@ -414,8 +414,8 @@ fn handmade_s5(device: &Device, head: Head) -> MambaLatentNet {
         let mut channels: Vec<Channel> = Vec::new();
         channels.extend((0..H).map(|_| vec![Z_ON; 4])); // z
         channels.extend((0..H).map(|_| vec![0.0, 0.0, 0.0, X_WRITE])); // x — only R writes
-        channels.extend((0..RANK).map(|r| vec![REF_POINT[r]; 4])); // B_raw
-        channels.extend((0..RANK).map(|r| vec![f64::from(r == 0); 4])); // C_raw
+        channels.extend((0..RANK).map(|r| vec![REF_POINT[r]; 4])); // b_raw
+        channels.extend((0..RANK).map(|r| vec![f64::from(r == 0); 4])); // c_raw
         channels.extend((0..H).map(|_| vec![softplus_inv(DELTA); 4])); // Δ
         let wipe = softplus_inv(A_WIPE);
         channels.extend((0..H).map(|_| vec![A_HOLD_RAW, A_HOLD_RAW, A_HOLD_RAW, wipe])); // A

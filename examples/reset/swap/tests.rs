@@ -205,7 +205,7 @@ fn handmade(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentN
     };
 
     // ── block in_proj: one affine functional per channel ─────────────────────
-    // Channel order: [z(2) | x(2) | B_raw(4) | C_raw(4) | Δ(2) | A(2) | ϑ(2, 6 or 12)].
+    // Channel order: [z(2) | x(2) | b_raw(4) | c_raw(4) | Δ(2) | A(2) | ϑ(2, 6 or 12)].
     // The 2s are `nheads`, and the 4s are `state_rank`. `TapPattern::None`
     // projects no λ, so the whole mass of the micro-step is `γ = Δ`. Each entry is
     // the value of the channel at (SWAP_L, SWAP_R, RESET), *before* its
@@ -213,8 +213,8 @@ fn handmade(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentN
     let mut channels: Vec<[f64; NUM_SYMBOLS]> = Vec::new();
     channels.extend([[Z_PRE; NUM_SYMBOLS]; NHEADS]); // z
     channels.extend([[0.0, 0.0, X_WRITE]; NHEADS]); // x: only R writes
-    channels.extend(b_channels(rotation)); // B_raw — the vector the write stores
-    channels.extend(basis_channels()); // C_raw (the per-head bias aims it)
+    channels.extend(b_channels(rotation)); // b_raw — the vector the write stores
+    channels.extend(basis_channels()); // c_raw (the per-head bias aims it)
     channels.extend([[softplus_inv(DELTA); NUM_SYMBOLS]; NHEADS]); // Δ
     channels.extend([[A_HOLD_RAW, A_HOLD_RAW, softplus_inv(A_WIPE)]; NHEADS]); // A
     channels.extend(rotation_channels(rotation));

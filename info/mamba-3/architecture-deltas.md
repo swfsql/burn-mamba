@@ -10,7 +10,7 @@
 > - the `B`/`C` biases (`b_bias_hmr`/`c_bias_hmr`),
 > - the absent short convolution,
 > - the optional output norm (`has_outproj_norm`),
-> - the data-dependent `A` (`dd_A`, `a_floor`).
+> - the data-dependent `A` (`dd_a_raw`, `a_floor`).
 >
 > It is the companion of the trio that classifies the recurrence itself:
 > [`trapezoid-as-integration.md`](trapezoid-as-integration.md),

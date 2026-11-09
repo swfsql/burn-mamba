@@ -253,7 +253,7 @@ fn handmade_rotor(device: &Device, turn: Turn, head: Head) -> MambaLatentNet {
         }
         Turn::Fixed(omega) => [(omega / MAX_ANGLE).atanh(); 3],
     };
-    // Channel order: [z(2) | x(2) | B_raw(2) | C_raw(2) | dt(2) | A(2) | ϑ(1)].
+    // Channel order: [z(2) | x(2) | b_raw(2) | c_raw(2) | dt(2) | A(2) | ϑ(1)].
     // `TapPattern::None` projects no λ, as `Real1D` projects no ϑ.
     let channels: Vec<[f64; 3]> = vec![
         [Z_PRE; 3],                                                    // z, head 0

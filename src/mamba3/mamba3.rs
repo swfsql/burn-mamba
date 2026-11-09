@@ -250,8 +250,8 @@ pub struct Mamba3 {
     /// Input projection; width [`Mamba3Config::d_in_proj`].
     ///
     /// Output splits, with `u` = [`Self::micro_steps`]:
-    /// `[z | x·u | B_raw·u | C_raw | dd_dt·u | dd_A·u | lambda_raw·u | mu_raw·u
-    /// | rotation·u | noise·u | tropical_a·u | tropical_b·u]`
+    /// `[z | x·u | b_raw·u | c_raw | dd_dt·u | dd_a_raw·u | lambda_raw·u |
+    /// mu_raw·u | rotation·u | kalman_noise·u | tropical_a·u | tropical_b·u]`
     ///
     /// The sub-projections from `lambda_raw` on are optional, so they are at
     /// the end:
@@ -259,7 +259,8 @@ pub struct Mamba3 {
     /// - [`TapPattern::None`] projects no `lambda_raw`,
     /// - a one-tap pattern projects no `mu_raw`,
     /// - [`RotationKind::Real1D`] projects no `rotation`,
-    /// - every [`Gain`] except [`Gain::KalmanProjectedNoise`] projects no `noise`,
+    /// - every [`Gain`] except [`Gain::KalmanProjectedNoise`] projects no
+    ///   `kalman_noise`,
     /// - [`Tropical::None`] projects no `tropical_*`.
     ///
     /// The block projects each **per-micro-step** stream `u` times, and
@@ -268,16 +269,16 @@ pub struct Mamba3 {
     /// stock `d_model → 2·d_inner + 2·ngroups·state_rank·mimo_rank + 3·nheads
     /// + num_rotation_channels`.
     ///
-    /// Under [`Mamba3Untied::InProjTail`], `in_proj` stops at `C_raw`, and the
+    /// Under [`Mamba3Untied::InProjTail`], `in_proj` stops at `c_raw`, and the
     /// rest is in [`Self::in_proj_tail`]. [`Self::project_in`] reads the two
     /// as one.
     pub in_proj: Linear,
 
     /// The trailing per-micro-step sub-projections of `in_proj`,
-    /// `[dd_dt·u | dd_A·u | lambda_raw·u | mu_raw·u | rotation·u | noise·u |
-    /// tropical_a·u | tropical_b·u]`, when [`Mamba3Untied::InProjTail`] unties
-    /// them: one copy per application, along the output axis. `None` ⇒
-    /// `in_proj` holds them.
+    /// `[dd_dt·u | dd_a_raw·u | lambda_raw·u | mu_raw·u | rotation·u |
+    /// kalman_noise·u | tropical_a·u | tropical_b·u]`, when
+    /// [`Mamba3Untied::InProjTail`] unties them: one copy per application,
+    /// along the output axis. `None` ⇒ `in_proj` holds them.
     pub in_proj_tail: Option<Linear>,
 
     /// Per-head bias for the discretisation step size Δ.
@@ -1323,25 +1324,25 @@ impl Mamba3Config {
         let per_micro = |sub: Sub| std::iter::repeat_n(sub, self.micro_steps);
         let head: Vec<Sub> = std::iter::once(Sub::muon("z", d_inner))
             .chain(per_micro(Sub::muon("x", d_inner)))
-            .chain(per_micro(Sub::muon("b", bc)))
-            .chain(std::iter::once(Sub::muon("c", bc)))
+            .chain(per_micro(Sub::muon("b_raw", bc)))
+            .chain(std::iter::once(Sub::muon("c_raw", bc)))
             .collect();
-        let tail: Vec<Sub> = per_micro(Sub::adamw("dt", nheads))
-            .chain(per_micro(Sub::adamw("a", nheads)))
+        let tail: Vec<Sub> = per_micro(Sub::adamw("dd_dt", nheads))
+            .chain(per_micro(Sub::adamw("dd_a_raw", nheads)))
             // `TapPattern::None` projects no `λ` (as `Real1D` projects no
             // rotation). Only a two-tap pattern projects `μ`, the mix of the
             // second mass.
             .chain(
                 self.tap_pattern
                     .has_beta_tap()
-                    .then(|| per_micro(Sub::adamw("lambda", nheads)))
+                    .then(|| per_micro(Sub::adamw("lambda_raw", nheads)))
                     .into_iter()
                     .flatten(),
             )
             .chain(
                 self.tap_pattern
                     .has_two_taps(self.micro_steps)
-                    .then(|| per_micro(Sub::adamw("mu", nheads)))
+                    .then(|| per_micro(Sub::adamw("mu_raw", nheads)))
                     .into_iter()
                     .flatten(),
             )

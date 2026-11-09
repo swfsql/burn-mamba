@@ -27,9 +27,8 @@ struct Group {
     per_micro_step: bool,
 }
 
-/// `[z | x·u | B_raw·u | C_raw | dd_dt·u | dd_A·u | lambda_raw·u | mu_raw·u
-/// | rotation·u | noise·u | tropical_a·u | tropical_b·u]`, without the optional
-/// groups that the config does not project.
+/// The layout in the doc of [`Mamba3::in_proj`], without the optional groups
+/// that the config does not project.
 fn documented_layout(model: &Mamba3, on: Optional) -> Vec<Group> {
     let d_inner = model.d_inner();
     let nheads = model.nheads();
@@ -38,10 +37,10 @@ fn documented_layout(model: &Mamba3, on: Optional) -> Vec<Group> {
     let mut layout = vec![
         group("z", d_inner, false),
         group("x", d_inner, true),
-        group("B_raw", bc, true),
-        group("C_raw", bc, false),
+        group("b_raw", bc, true),
+        group("c_raw", bc, false),
         group("dd_dt", nheads, true),
-        group("dd_A", nheads, true),
+        group("dd_a_raw", nheads, true),
     ];
     if on.lambda {
         layout.push(group("lambda_raw", nheads, true));
@@ -53,7 +52,7 @@ fn documented_layout(model: &Mamba3, on: Optional) -> Vec<Group> {
         layout.push(group("rotation", model.num_rotation_channels, true));
     }
     if on.noise {
-        layout.push(group("noise", nheads, true));
+        layout.push(group("kalman_noise", nheads, true));
     }
     if on.tropical {
         layout.push(group("tropical_a", nheads, true));
@@ -123,19 +122,19 @@ fn assert_split(label: &str, cfg: Mamba3Config, on: Optional) {
     let check = |name: &str, stream: Tensor<3>| assert_stream(label, &layout, name, stream, tokens, u);
     check("z", s.z_bti);
     check("x", s.x_bsi);
-    check("B_raw", s.b_raw_bsMGR);
-    check("C_raw", s.c_raw_btMGR);
+    check("b_raw", s.b_raw_bsMGR);
+    check("c_raw", s.c_raw_btMGR);
     check("dd_dt", s.dd_dt_bsh);
-    check("dd_A", s.dd_a_raw_bsh);
+    check("dd_a_raw", s.dd_a_raw_bsh);
     assert_presence(label, "lambda_raw", s.lambda_raw_bsh.is_some(), on.lambda);
     assert_presence(label, "mu_raw", s.mu_raw_bsh.is_some(), on.mu);
     assert_presence(label, "rotation", s.rot_bsa.is_some(), on.rotation);
-    assert_presence(label, "noise", s.noise_bsh.is_some(), on.noise);
+    assert_presence(label, "kalman_noise", s.noise_bsh.is_some(), on.noise);
     assert_presence(label, "tropical", s.tropical_ab_bsh.is_some(), on.tropical);
     s.lambda_raw_bsh.map(|t| check("lambda_raw", t));
     s.mu_raw_bsh.map(|t| check("mu_raw", t));
     s.rot_bsa.map(|t| check("rotation", t));
-    s.noise_bsh.map(|t| check("noise", t));
+    s.noise_bsh.map(|t| check("kalman_noise", t));
     s.tropical_ab_bsh.map(|(a, b)| {
         check("tropical_a", a);
         check("tropical_b", b);
@@ -200,6 +199,97 @@ fn split_at_one_micro_step() {
     // At `u = 1`, a two-tap pattern folds and projects no `μ`.
     let cfg = all_on().with_micro_steps(1);
     assert_split("u = 1", cfg, Optional { mu: false, ..ALL });
+}
+
+// ---------------------------------------------------------------------------
+// The Muon plan of the in-projection
+// ---------------------------------------------------------------------------
+
+/// The groups that Muon updates. Each other group uses the fallback optimizer.
+#[cfg(feature = "optim")]
+const MUON_GROUPS: [&str; 5] = ["z", "x", "b_raw", "c_raw", "rotation"];
+
+/// The groups that `in_proj` keeps under [`Mamba3Untied::InProjTail`].
+#[cfg(feature = "optim")]
+const TIED_GROUPS: [&str; 4] = ["z", "x", "b_raw", "c_raw"];
+
+/// The sub-projections of a part of the layout: one for each micro-step of a
+/// per-micro-step group, and one for a per-token group.
+#[cfg(feature = "optim")]
+fn expected_sub_projections(layout: &[Group], u: usize) -> Vec<burn_stack::optim::SubProjection> {
+    use burn_stack::optim::SubProjection;
+    layout
+        .iter()
+        .flat_map(|group| {
+            let sub = if MUON_GROUPS.contains(&group.name) {
+                SubProjection::muon(group.name, group.width)
+            } else {
+                SubProjection::adamw(group.name, group.width)
+            };
+            std::iter::repeat_n(sub, if group.per_micro_step { u } else { 1 })
+        })
+        .collect()
+}
+
+/// The `(path, tiled, sub-projections)` of the specs of the in-projection.
+#[cfg(feature = "optim")]
+fn in_proj_specs(cfg: &Mamba3Config) -> Vec<(String, bool, Vec<burn_stack::optim::SubProjection>)> {
+    cfg.muon_projections()
+        .into_iter()
+        .filter(|spec| spec.path.starts_with("in_proj"))
+        .map(|spec| (spec.path, spec.tiled, spec.sub_projections))
+        .collect()
+}
+
+/// Compare the Muon plan with the documented layout, entry by entry: the order,
+/// the name, the width and the Muon flag. The tied and the untied tail both
+/// get the check.
+#[cfg(feature = "optim")]
+fn assert_muon_plan(label: &str, cfg: Mamba3Config, on: Optional) {
+    let model = cfg.init(&test_device());
+    let u = model.micro_steps;
+    let layout = documented_layout(&model, on);
+
+    let tied = vec![("in_proj.weight".to_string(), false, expected_sub_projections(&layout, u))];
+    assert_eq!(tied, in_proj_specs(&cfg), "{label}: tied tail");
+
+    let (head, tail): (Vec<Group>, Vec<Group>) =
+        layout.iter().copied().partition(|group| TIED_GROUPS.contains(&group.name));
+    let untied = vec![
+        ("in_proj.weight".to_string(), false, expected_sub_projections(&head, u)),
+        ("in_proj_tail.weight".to_string(), true, expected_sub_projections(&tail, u)),
+    ];
+    let untied_cfg = cfg.with_untied(vec![Mamba3Untied::InProjTail]);
+    assert_eq!(untied, in_proj_specs(&untied_cfg), "{label}: untied tail");
+}
+
+#[cfg(feature = "optim")]
+#[test]
+fn muon_plan_with_all_optional_groups() {
+    assert_muon_plan("all on, u = 2", all_on(), ALL);
+    assert_muon_plan("all on, u = 3", all_on().with_micro_steps(3), ALL);
+}
+
+#[cfg(feature = "optim")]
+#[test]
+fn muon_plan_without_each_optional_group() {
+    let no_lambda = all_on().with_tap_pattern(TapPattern::None);
+    assert_muon_plan("no lambda", no_lambda, Optional { lambda: false, mu: false, ..ALL });
+    let no_mu = all_on().with_tap_pattern(TapPattern::HorizontalCarryOver);
+    assert_muon_plan("no mu", no_mu, Optional { mu: false, ..ALL });
+    let no_rotation = all_on().with_rotation(RotationKind::Real1D);
+    assert_muon_plan("no rotation", no_rotation, Optional { rotation: false, ..ALL });
+    let no_noise = all_on().with_gain(Gain::Kalman);
+    assert_muon_plan("no noise", no_noise, Optional { noise: false, ..ALL });
+    let no_tropical = all_on().with_tropical(Tropical::None);
+    assert_muon_plan("no tropical", no_tropical, Optional { tropical: false, ..ALL });
+}
+
+#[cfg(feature = "optim")]
+#[test]
+fn muon_plan_at_one_micro_step() {
+    // At `u = 1`, a two-tap pattern folds and projects no `μ`.
+    assert_muon_plan("u = 1", all_on().with_micro_steps(1), Optional { mu: false, ..ALL });
 }
 
 // ---------------------------------------------------------------------------

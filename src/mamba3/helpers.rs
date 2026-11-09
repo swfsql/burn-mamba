@@ -671,8 +671,8 @@ pub fn trapezoidal_coefficients(
     // the (positive) softplus *before* the negation. A method call binds
     // tighter than unary minus, so `-softplus(x).clamp(NEG_INFINITY,
     // -a_floor)` would clamp the positive softplus to the constant `-a_floor`
-    // and give `A ≡ +a_floor`: a *growing* state (`α > 1`) with a dead `dd_A`
-    // projection.
+    // and give `A ≡ +a_floor`: a *growing* state (`α > 1`) with a dead
+    // `dd_a_raw` projection.
     let a = -softplus(dd_a_raw).clamp(a_floor, f64::INFINITY);
     let da = dt.clone() * a;
     let open_mask = |crosses: bool| {

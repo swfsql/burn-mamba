@@ -369,11 +369,11 @@ fn every_micro_step_receives_gradient() {
     let mut at = d_inner;
     for (name, width) in [
         ("x", d_inner),
-        ("b", bc),
+        ("b_raw", bc),
         ("skip-c", 0),
-        ("dt", nheads),
-        ("a", nheads),
-        ("lambda", nheads),
+        ("dd_dt", nheads),
+        ("dd_a_raw", nheads),
+        ("lambda_raw", nheads),
         ("rotation", rot),
     ] {
         if width == 0 {

@@ -464,12 +464,12 @@ mod tests {
                         .map(|s| s.name.to_string())
                         .collect();
                     assert_eq!(
-                        names.iter().any(|n| n == "lambda"),
+                        names.iter().any(|n| n == "lambda_raw"),
                         pattern.has_beta_tap(),
                         "{label}: λ sub-projection"
                     );
                     assert_eq!(
-                        names.iter().any(|n| n == "mu"),
+                        names.iter().any(|n| n == "mu_raw"),
                         pattern.has_two_taps(micro_steps),
                         "{label}: μ sub-projection"
                     );
@@ -503,8 +503,8 @@ mod tests {
                     .map(|s| s.name.to_string())
                     .collect::<Vec<_>>()
             };
-            assert!(names(&with).iter().any(|n| n == "lambda"));
-            assert!(!names(&without).iter().any(|n| n == "lambda"));
+            assert!(names(&with).iter().any(|n| n == "lambda_raw"));
+            assert!(!names(&without).iter().any(|n| n == "lambda_raw"));
         }
     }
 
