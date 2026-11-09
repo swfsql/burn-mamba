@@ -19,23 +19,23 @@ Counts are exact and repeatable — they follow from the op graph, not from the 
 | `mamba3/mimo-rank1` | 212 | 128 |
 | `mamba3/mimo-rank4` | 247 | 160 |
 | `mamba3/real1d` | 144 | 89 |
-| `mamba3/quaternion4d` | 653 | 251 |
-| `mamba3/rotor4d` | 735 | 327 |
-| `mamba3/siso-double-ssd` | 250 | 164 |
+| `mamba3/quaternion4d` | 653 | 289 |
+| `mamba3/rotor4d` | 735 | 365 |
+| `mamba3/siso-double-ssd` | 250 | 163 |
 
 ## `train` — forward + backward (autodiff device)
 
 | case | cuda | cuda + fusion + autotune |
 |---|---|---|
-| `mamba1` | 5259 | 3755 |
+| `mamba1` | 5259 | 4011 |
 | `mamba2` | 555 | 366 |
-| `mamba3/siso` | 699 | 464 |
-| `mamba3/mimo-rank1` | 721 | 483 |
-| `mamba3/mimo-rank4` | 837 | 585 |
-| `mamba3/real1d` | 557 | 352 |
-| `mamba3/quaternion4d` | 1845 | 714 |
-| `mamba3/rotor4d` | 2109 | 843 |
-| `mamba3/siso-double-ssd` | 928 | 611 |
+| `mamba3/siso` | 699 | 463 |
+| `mamba3/mimo-rank1` | 721 | 482 |
+| `mamba3/mimo-rank4` | 837 | 584 |
+| `mamba3/real1d` | 557 | 351 |
+| `mamba3/quaternion4d` | 1845 | 743 |
+| `mamba3/rotor4d` | 2109 | 872 |
+| `mamba3/siso-double-ssd` | 928 | 610 |
 
 ## `step` — one recurrent decode step
 
@@ -45,7 +45,7 @@ Counts are exact and repeatable — they follow from the op graph, not from the 
 | `mamba2` | 49 | 35 |
 | `mamba3/siso` | 118 | 58 |
 | `mamba3/mimo-rank1` | 127 | 64 |
-| `mamba3/mimo-rank4` | 134 | 70 |
+| `mamba3/mimo-rank4` | 133 | 68 |
 | `mamba3/real1d` | 73 | 35 |
 | `mamba3/quaternion4d` | 273 | 172 |
 | `mamba3/rotor4d` | 355 | 249 |
