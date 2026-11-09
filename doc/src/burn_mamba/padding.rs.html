@@ -59,25 +59,26 @@
 <a href=#59 id=59 data-nosnippet>59</a><span class="doccomment">/// `pad_bt` with every position repeated `u` times in place: the padding of a
 <a href=#60 id=60 data-nosnippet>60</a>/// token spread over its `u` micro-steps on the write axis (`[batch, tokens]`
 <a href=#61 id=61 data-nosnippet>61</a>/// → `[batch, tokens·u]`).
-<a href=#62 id=62 data-nosnippet>62</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>repeat_positions(pad_bt: Tensor&lt;<span class="number">2</span>, Bool&gt;, u: usize) -&gt; Tensor&lt;<span class="number">2</span>, Bool&gt; {
-<a href=#63 id=63 data-nosnippet>63</a>    <span class="kw">let </span>[batch, tokens] = pad_bt.dims();
-<a href=#64 id=64 data-nosnippet>64</a>    pad_bt
-<a href=#65 id=65 data-nosnippet>65</a>        .unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">2</span>)
-<a href=#66 id=66 data-nosnippet>66</a>        .expand([batch, tokens, u])
-<a href=#67 id=67 data-nosnippet>67</a>        .reshape([batch, tokens * u])
-<a href=#68 id=68 data-nosnippet>68</a>}
-<a href=#69 id=69 data-nosnippet>69</a>
-<a href=#70 id=70 data-nosnippet>70</a><span class="doccomment">/// `x` with the entries of every padded position replaced by `value`. `x` is
-<a href=#71 id=71 data-nosnippet>71</a>/// `[batch, sequence, …]` and `pad_bs` is `[batch, sequence]`.
-<a href=#72 id=72 data-nosnippet>72</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>fill_padded&lt;<span class="kw">const </span>D: usize&gt;(x: Tensor&lt;D&gt;, pad_bs: <span class="kw-2">&amp;</span>Tensor&lt;<span class="number">2</span>, Bool&gt;, value: f32) -&gt; Tensor&lt;D&gt; {
-<a href=#73 id=73 data-nosnippet>73</a>    <span class="kw">let </span>[batch, sequence] = pad_bs.dims();
-<a href=#74 id=74 data-nosnippet>74</a>    <span class="kw">let </span><span class="kw-2">mut </span>shape = [<span class="number">1usize</span>; D];
-<a href=#75 id=75 data-nosnippet>75</a>    shape[<span class="number">0</span>] = batch;
-<a href=#76 id=76 data-nosnippet>76</a>    shape[<span class="number">1</span>] = sequence;
-<a href=#77 id=77 data-nosnippet>77</a>    <span class="kw">let </span>dims = x.dims();
-<a href=#78 id=78 data-nosnippet>78</a>    x.mask_fill(pad_bs.clone().reshape(shape).expand(dims), value)
-<a href=#79 id=79 data-nosnippet>79</a>}
-<a href=#80 id=80 data-nosnippet>80</a>
-<a href=#81 id=81 data-nosnippet>81</a><span class="attr">#[cfg(all(test, feature = <span class="string">"_dev-test"</span>))]
-<a href=#82 id=82 data-nosnippet>82</a></span><span class="kw">mod </span>tests;
+<a href=#62 id=62 data-nosnippet>62</a></span><span class="attr">#[cfg_attr(not(feature = <span class="string">"mamba3"</span>), allow(dead_code))]
+<a href=#63 id=63 data-nosnippet>63</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>repeat_positions(pad_bt: Tensor&lt;<span class="number">2</span>, Bool&gt;, u: usize) -&gt; Tensor&lt;<span class="number">2</span>, Bool&gt; {
+<a href=#64 id=64 data-nosnippet>64</a>    <span class="kw">let </span>[batch, tokens] = pad_bt.dims();
+<a href=#65 id=65 data-nosnippet>65</a>    pad_bt
+<a href=#66 id=66 data-nosnippet>66</a>        .unsqueeze_dim::&lt;<span class="number">3</span>&gt;(<span class="number">2</span>)
+<a href=#67 id=67 data-nosnippet>67</a>        .expand([batch, tokens, u])
+<a href=#68 id=68 data-nosnippet>68</a>        .reshape([batch, tokens * u])
+<a href=#69 id=69 data-nosnippet>69</a>}
+<a href=#70 id=70 data-nosnippet>70</a>
+<a href=#71 id=71 data-nosnippet>71</a><span class="doccomment">/// `x` with the entries of every padded position replaced by `value`. `x` is
+<a href=#72 id=72 data-nosnippet>72</a>/// `[batch, sequence, …]` and `pad_bs` is `[batch, sequence]`.
+<a href=#73 id=73 data-nosnippet>73</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>fill_padded&lt;<span class="kw">const </span>D: usize&gt;(x: Tensor&lt;D&gt;, pad_bs: <span class="kw-2">&amp;</span>Tensor&lt;<span class="number">2</span>, Bool&gt;, value: f32) -&gt; Tensor&lt;D&gt; {
+<a href=#74 id=74 data-nosnippet>74</a>    <span class="kw">let </span>[batch, sequence] = pad_bs.dims();
+<a href=#75 id=75 data-nosnippet>75</a>    <span class="kw">let </span><span class="kw-2">mut </span>shape = [<span class="number">1usize</span>; D];
+<a href=#76 id=76 data-nosnippet>76</a>    shape[<span class="number">0</span>] = batch;
+<a href=#77 id=77 data-nosnippet>77</a>    shape[<span class="number">1</span>] = sequence;
+<a href=#78 id=78 data-nosnippet>78</a>    <span class="kw">let </span>dims = x.dims();
+<a href=#79 id=79 data-nosnippet>79</a>    x.mask_fill(pad_bs.clone().reshape(shape).expand(dims), value)
+<a href=#80 id=80 data-nosnippet>80</a>}
+<a href=#81 id=81 data-nosnippet>81</a>
+<a href=#82 id=82 data-nosnippet>82</a><span class="attr">#[cfg(all(test, feature = <span class="string">"_dev-test"</span>))]
+<a href=#83 id=83 data-nosnippet>83</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

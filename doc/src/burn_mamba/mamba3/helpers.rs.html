@@ -337,7 +337,7 @@
 <a href=#337 id=337 data-nosnippet>337</a><span class="doccomment">/// The read axis on primitives, for the recompute-backward math.
 <a href=#338 id=338 data-nosnippet>338</a>///
 <a href=#339 id=339 data-nosnippet>339</a>/// The same definitions as [`read_positions`] / [`read_causal_mask`] one module up,
-<a href=#340 id=340 data-nosnippet>340</a>/// on [`F`] instead of `Tensor`. Every kernel in this crate has this split: a
+<a href=#340 id=340 data-nosnippet>340</a>/// on `F` instead of `Tensor`. Every kernel in this crate has this split: a
 <a href=#341 id=341 data-nosnippet>341</a>/// `Tensor` body, and an `F&lt;B, _&gt;` body that a
 <a href=#342 id=342 data-nosnippet>342</a>/// [`Backward`](burn::backend::autodiff::ops::Backward) node can run (see
 <a href=#343 id=343 data-nosnippet>343</a>/// [`fprim`](burn_stack::utils::fprim)). Both are reshape-and-narrow, so
