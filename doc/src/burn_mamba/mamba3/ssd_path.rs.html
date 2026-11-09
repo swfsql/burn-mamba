@@ -57,7 +57,7 @@
 <a href=#57 id=57 data-nosnippet>57</a>    <span class="doccomment">/// Optimal chunk length, in **write positions**: `√(state_rank ·
 <a href=#58 id=58 data-nosnippet>58</a>    /// per_head_dim)` divided by `mimo_rank`, rounded up to a multiple of 32,
 <a href=#59 id=59 data-nosnippet>59</a>    /// clamped to `32 ..= 512`. `micro_steps` does not change this width:
-<a href=#60 id=60 data-nosnippet>60</a>    /// [`Self::chunk_tokens`] absorbs it.
+<a href=#60 id=60 data-nosnippet>60</a>    /// [`chunk_tokens`](crate::standard_ssd::chunk_tokens) absorbs it.
 <a href=#61 id=61 data-nosnippet>61</a>    ///
 <a href=#62 id=62 data-nosnippet>62</a>    /// The square root is the SISO rule of thumb: it balances the intra-chunk
 <a href=#63 id=63 data-nosnippet>63</a>    /// GEMMs against the inter-chunk scan. Two dials of the block widen a chunk
@@ -72,129 +72,86 @@
 <a href=#72 id=72 data-nosnippet>72</a>    /// - **`micro_steps`** (`u`) widens only the **write** axis. All `u`
 <a href=#73 id=73 data-nosnippet>73</a>    ///   micro-steps of a token write to the state, but the block *reads* the
 <a href=#74 id=74 data-nosnippet>74</a>    ///   token once, at its last micro-step. So the score is
-<a href=#75 id=75 data-nosnippet>75</a>    ///   `[batch, nchunks, heads, T·m, T·u·m]` for `T` = [`Self::chunk_tokens`],
-<a href=#76 id=76 data-nosnippet>76</a>    ///   with `batch · sequence · heads · T · u · m²` elements. To keep that flat
-<a href=#77 id=77 data-nosnippet>77</a>    ///   in `u`, keep `T · u` (the chunk on the *write* axis) flat and use fewer
-<a href=#78 id=78 data-nosnippet>78</a>    ///   tokens.
-<a href=#79 id=79 data-nosnippet>79</a>    ///   Memory is the binding constraint here, because no fused kernel hides it.
-<a href=#80 id=80 data-nosnippet>80</a>    ///
-<a href=#81 id=81 data-nosnippet>81</a>    /// So `u` subdivides the chunk and does not shorten it, and `nchunks` grows
-<a href=#82 id=82 data-nosnippet>82</a>    /// like `u`, not `u²`. The returned length is a multiple of `micro_steps`.
-<a href=#83 id=83 data-nosnippet>83</a>    /// So each chunk is a whole number of tokens, and their positions are a
-<a href=#84 id=84 data-nosnippet>84</a>    /// contiguous run. It is on the 32 grid exactly when `micro_steps` divides
-<a href=#85 id=85 data-nosnippet>85</a>    /// it.
-<a href=#86 id=86 data-nosnippet>86</a>    ///
-<a href=#87 id=87 data-nosnippet>87</a>    /// `info/mamba-3/architecture-deltas.md` §8.
-<a href=#88 id=88 data-nosnippet>88</a>    </span><span class="kw">pub fn </span>optimal_chunk_len(
-<a href=#89 id=89 data-nosnippet>89</a>        state_rank: usize,
-<a href=#90 id=90 data-nosnippet>90</a>        per_head_dim: usize,
-<a href=#91 id=91 data-nosnippet>91</a>        mimo_rank: usize,
-<a href=#92 id=92 data-nosnippet>92</a>        micro_steps: usize,
-<a href=#93 id=93 data-nosnippet>93</a>    ) -&gt; usize {
-<a href=#94 id=94 data-nosnippet>94</a>        <span class="kw">let </span>micro_steps = micro_steps.max(<span class="number">1</span>);
-<a href=#95 id=95 data-nosnippet>95</a>        <span class="kw">let </span>chunk_len = (state_rank * per_head_dim)
-<a href=#96 id=96 data-nosnippet>96</a>            .isqrt()
-<a href=#97 id=97 data-nosnippet>97</a>            .div_ceil(mimo_rank.max(<span class="number">1</span>)) <span class="comment">// the fused read axis is `chunk_tokens · m`.
-<a href=#98 id=98 data-nosnippet>98</a>            </span>.next_multiple_of(<span class="number">32</span>) <span class="comment">// rule-of-thumb: common plane dimension.
-<a href=#99 id=99 data-nosnippet>99</a>            </span>.clamp(<span class="number">32</span>, <span class="number">512</span>); <span class="comment">// rule-of-thumb: one plane minimum, ceiling at 512.
-<a href=#100 id=100 data-nosnippet>100</a>        // A whole number of tokens per chunk, at (very nearly) that chunk length.
-<a href=#101 id=101 data-nosnippet>101</a>        </span>chunk_len.div_ceil(micro_steps) * micro_steps
-<a href=#102 id=102 data-nosnippet>102</a>    }
-<a href=#103 id=103 data-nosnippet>103</a>
-<a href=#104 id=104 data-nosnippet>104</a>    <span class="doccomment">/// Tokens per chunk: `chunk_len / micro_steps`, the **read** axis of the
-<a href=#105 id=105 data-nosnippet>105</a>    /// chunk.
-<a href=#106 id=106 data-nosnippet>106</a>    ///
-<a href=#107 id=107 data-nosnippet>107</a>    /// `chunk_len` counts write positions (one per micro-step). The SSD reads
-<a href=#108 id=108 data-nosnippet>108</a>    /// each token once, at its last micro-step. So this is the row count of the
-<a href=#109 id=109 data-nosnippet>109</a>    /// score and of the `y` that the kernels return. See
-<a href=#110 id=110 data-nosnippet>110</a>    /// [`Self::optimal_chunk_len`].
-<a href=#111 id=111 data-nosnippet>111</a>    ///
-<a href=#112 id=112 data-nosnippet>112</a>    /// # Panics
-<a href=#113 id=113 data-nosnippet>113</a>    /// If `micro_steps` does not divide `chunk_len`.
-<a href=#114 id=114 data-nosnippet>114</a>    /// [`Self::chunk_len_or_optimal`] makes sure that it does.
-<a href=#115 id=115 data-nosnippet>115</a>    </span><span class="kw">pub fn </span>chunk_tokens(chunk_len: usize, micro_steps: usize) -&gt; usize {
-<a href=#116 id=116 data-nosnippet>116</a>        <span class="kw">let </span>micro_steps = micro_steps.max(<span class="number">1</span>);
-<a href=#117 id=117 data-nosnippet>117</a>        <span class="macro">assert_eq!</span>(
-<a href=#118 id=118 data-nosnippet>118</a>            chunk_len % micro_steps,
-<a href=#119 id=119 data-nosnippet>119</a>            <span class="number">0</span>,
-<a href=#120 id=120 data-nosnippet>120</a>            <span class="string">"chunk_len {chunk_len} must be a whole number of tokens at micro_steps {micro_steps}"</span>,
-<a href=#121 id=121 data-nosnippet>121</a>        );
-<a href=#122 id=122 data-nosnippet>122</a>        chunk_len / micro_steps
-<a href=#123 id=123 data-nosnippet>123</a>    }
-<a href=#124 id=124 data-nosnippet>124</a>
-<a href=#125 id=125 data-nosnippet>125</a>    <span class="doccomment">/// The chunk length carried by this variant, if any.
-<a href=#126 id=126 data-nosnippet>126</a>    </span><span class="kw">pub fn </span>chunk_len(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;usize&gt; {
-<a href=#127 id=127 data-nosnippet>127</a>        <span class="kw">match </span><span class="self">self </span>{
-<a href=#128 id=128 data-nosnippet>128</a>            <span class="self">Self</span>::Minimal(chunk_len)
-<a href=#129 id=129 data-nosnippet>129</a>            | <span class="self">Self</span>::Serial(chunk_len)
-<a href=#130 id=130 data-nosnippet>130</a>            | <span class="self">Self</span>::SerialRecalculated(chunk_len) =&gt; <span class="kw-2">*</span>chunk_len,
-<a href=#131 id=131 data-nosnippet>131</a>        }
-<a href=#132 id=132 data-nosnippet>132</a>    }
-<a href=#133 id=133 data-nosnippet>133</a>
-<a href=#134 id=134 data-nosnippet>134</a>    <span class="doccomment">/// The chunk length carried by this variant, or [`Self::optimal_chunk_len`]
-<a href=#135 id=135 data-nosnippet>135</a>    /// for the dimensions of `block` when unset. In both cases the length is
-<a href=#136 id=136 data-nosnippet>136</a>    /// rounded **up to a multiple of `micro_steps`**, so a chunk is a whole
-<a href=#137 id=137 data-nosnippet>137</a>    /// number of tokens.
-<a href=#138 id=138 data-nosnippet>138</a>    ///
-<a href=#139 id=139 data-nosnippet>139</a>    /// With that rounding, the read axis is a plain reshape. With
-<a href=#140 id=140 data-nosnippet>140</a>    /// `chunk_len = T·u`, a chunk covers write positions `[cL, (c+1)L)`, that
-<a href=#141 id=141 data-nosnippet>141</a>    /// is tokens `[cT, (c+1)T)`, and the surviving positions (`≡ u−1 mod u`) are a
-<a href=#142 id=142 data-nosnippet>142</a>    /// contiguous run of them. At `micro_steps = 1` the rounding does nothing.
-<a href=#143 id=143 data-nosnippet>143</a>    </span><span class="kw">pub fn </span>chunk_len_or_optimal(<span class="kw-2">&amp;</span><span class="self">self</span>, block: <span class="kw-2">&amp;</span>Mamba3) -&gt; usize {
-<a href=#144 id=144 data-nosnippet>144</a>        <span class="kw">match </span><span class="self">self</span>.chunk_len() {
-<a href=#145 id=145 data-nosnippet>145</a>            <span class="prelude-val">Some</span>(chunk_len) =&gt; chunk_len.next_multiple_of(block.micro_steps.max(<span class="number">1</span>)),
-<a href=#146 id=146 data-nosnippet>146</a>            <span class="prelude-val">None </span>=&gt; <span class="self">Self</span>::optimal_chunk_len(
-<a href=#147 id=147 data-nosnippet>147</a>                block.state_rank,
-<a href=#148 id=148 data-nosnippet>148</a>                block.per_head_dim(),
-<a href=#149 id=149 data-nosnippet>149</a>                block.mimo_rank,
-<a href=#150 id=150 data-nosnippet>150</a>                block.micro_steps,
-<a href=#151 id=151 data-nosnippet>151</a>            ),
-<a href=#152 id=152 data-nosnippet>152</a>        }
-<a href=#153 id=153 data-nosnippet>153</a>    }
+<a href=#75 id=75 data-nosnippet>75</a>    ///   `[batch, nchunks, heads, T·m, T·u·m]` for `T` =
+<a href=#76 id=76 data-nosnippet>76</a>    ///   [`chunk_tokens`](crate::standard_ssd::chunk_tokens),
+<a href=#77 id=77 data-nosnippet>77</a>    ///   with `batch · sequence · heads · T · u · m²` elements. To keep that flat
+<a href=#78 id=78 data-nosnippet>78</a>    ///   in `u`, keep `T · u` (the chunk on the *write* axis) flat and use fewer
+<a href=#79 id=79 data-nosnippet>79</a>    ///   tokens.
+<a href=#80 id=80 data-nosnippet>80</a>    ///   Memory is the binding constraint here, because no fused kernel hides it.
+<a href=#81 id=81 data-nosnippet>81</a>    ///
+<a href=#82 id=82 data-nosnippet>82</a>    /// So `u` subdivides the chunk and does not shorten it, and `nchunks` grows
+<a href=#83 id=83 data-nosnippet>83</a>    /// like `u`, not `u²`. The returned length is a multiple of `micro_steps`.
+<a href=#84 id=84 data-nosnippet>84</a>    /// So each chunk is a whole number of tokens, and their positions are a
+<a href=#85 id=85 data-nosnippet>85</a>    /// contiguous run. It is on the 32 grid exactly when `micro_steps` divides
+<a href=#86 id=86 data-nosnippet>86</a>    /// it.
+<a href=#87 id=87 data-nosnippet>87</a>    ///
+<a href=#88 id=88 data-nosnippet>88</a>    /// `info/mamba-3/architecture-deltas.md` §8.
+<a href=#89 id=89 data-nosnippet>89</a>    </span><span class="kw">pub fn </span>optimal_chunk_len(
+<a href=#90 id=90 data-nosnippet>90</a>        state_rank: usize,
+<a href=#91 id=91 data-nosnippet>91</a>        per_head_dim: usize,
+<a href=#92 id=92 data-nosnippet>92</a>        mimo_rank: usize,
+<a href=#93 id=93 data-nosnippet>93</a>        micro_steps: usize,
+<a href=#94 id=94 data-nosnippet>94</a>    ) -&gt; usize {
+<a href=#95 id=95 data-nosnippet>95</a>        <span class="kw">let </span>micro_steps = micro_steps.max(<span class="number">1</span>);
+<a href=#96 id=96 data-nosnippet>96</a>        <span class="kw">let </span>chunk_len = (state_rank * per_head_dim)
+<a href=#97 id=97 data-nosnippet>97</a>            .isqrt()
+<a href=#98 id=98 data-nosnippet>98</a>            .div_ceil(mimo_rank.max(<span class="number">1</span>)) <span class="comment">// the fused read axis is `chunk_tokens · m`.
+<a href=#99 id=99 data-nosnippet>99</a>            </span>.next_multiple_of(<span class="number">32</span>) <span class="comment">// rule-of-thumb: common plane dimension.
+<a href=#100 id=100 data-nosnippet>100</a>            </span>.clamp(<span class="number">32</span>, <span class="number">512</span>); <span class="comment">// rule-of-thumb: one plane minimum, ceiling at 512.
+<a href=#101 id=101 data-nosnippet>101</a>        // A whole number of tokens per chunk, at (very nearly) that chunk length.
+<a href=#102 id=102 data-nosnippet>102</a>        </span>chunk_len.div_ceil(micro_steps) * micro_steps
+<a href=#103 id=103 data-nosnippet>103</a>    }
+<a href=#104 id=104 data-nosnippet>104</a>
+<a href=#105 id=105 data-nosnippet>105</a>    <span class="doccomment">/// The chunk length carried by this variant, if any.
+<a href=#106 id=106 data-nosnippet>106</a>    </span><span class="kw">pub fn </span>chunk_len(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;usize&gt; {
+<a href=#107 id=107 data-nosnippet>107</a>        <span class="kw">match </span><span class="self">self </span>{
+<a href=#108 id=108 data-nosnippet>108</a>            <span class="self">Self</span>::Minimal(chunk_len)
+<a href=#109 id=109 data-nosnippet>109</a>            | <span class="self">Self</span>::Serial(chunk_len)
+<a href=#110 id=110 data-nosnippet>110</a>            | <span class="self">Self</span>::SerialRecalculated(chunk_len) =&gt; <span class="kw-2">*</span>chunk_len,
+<a href=#111 id=111 data-nosnippet>111</a>        }
+<a href=#112 id=112 data-nosnippet>112</a>    }
+<a href=#113 id=113 data-nosnippet>113</a>
+<a href=#114 id=114 data-nosnippet>114</a>    <span class="doccomment">/// The chunk length carried by this variant, or [`Self::optimal_chunk_len`]
+<a href=#115 id=115 data-nosnippet>115</a>    /// for the dimensions of `block` when unset. In both cases the length is
+<a href=#116 id=116 data-nosnippet>116</a>    /// rounded **up to a multiple of `micro_steps`**, so a chunk is a whole
+<a href=#117 id=117 data-nosnippet>117</a>    /// number of tokens.
+<a href=#118 id=118 data-nosnippet>118</a>    ///
+<a href=#119 id=119 data-nosnippet>119</a>    /// With that rounding, the read axis is a plain reshape. With
+<a href=#120 id=120 data-nosnippet>120</a>    /// `chunk_len = T·u`, a chunk covers write positions `[cL, (c+1)L)`, that
+<a href=#121 id=121 data-nosnippet>121</a>    /// is tokens `[cT, (c+1)T)`, and the surviving positions (`≡ u−1 mod u`) are a
+<a href=#122 id=122 data-nosnippet>122</a>    /// contiguous run of them. At `micro_steps = 1` the rounding does nothing.
+<a href=#123 id=123 data-nosnippet>123</a>    </span><span class="kw">pub fn </span>chunk_len_or_optimal(<span class="kw-2">&amp;</span><span class="self">self</span>, block: <span class="kw-2">&amp;</span>Mamba3) -&gt; usize {
+<a href=#124 id=124 data-nosnippet>124</a>        <span class="kw">match </span><span class="self">self</span>.chunk_len() {
+<a href=#125 id=125 data-nosnippet>125</a>            <span class="prelude-val">Some</span>(chunk_len) =&gt; chunk_len.next_multiple_of(block.micro_steps.max(<span class="number">1</span>)),
+<a href=#126 id=126 data-nosnippet>126</a>            <span class="prelude-val">None </span>=&gt; <span class="self">Self</span>::optimal_chunk_len(
+<a href=#127 id=127 data-nosnippet>127</a>                block.state_rank,
+<a href=#128 id=128 data-nosnippet>128</a>                block.per_head_dim(),
+<a href=#129 id=129 data-nosnippet>129</a>                block.mimo_rank,
+<a href=#130 id=130 data-nosnippet>130</a>                block.micro_steps,
+<a href=#131 id=131 data-nosnippet>131</a>            ),
+<a href=#132 id=132 data-nosnippet>132</a>        }
+<a href=#133 id=133 data-nosnippet>133</a>    }
+<a href=#134 id=134 data-nosnippet>134</a>
+<a href=#135 id=135 data-nosnippet>135</a>    <span class="doccomment">/// The recommended default path for a given block: [`Self::SerialRecalculated`]
+<a href=#136 id=136 data-nosnippet>136</a>    /// with [`Self::optimal_chunk_len`] for the block's dimensions.
+<a href=#137 id=137 data-nosnippet>137</a>    </span><span class="kw">pub fn </span>default_optimal_from_block(block: <span class="kw-2">&amp;</span>Mamba3) -&gt; <span class="self">Self </span>{
+<a href=#138 id=138 data-nosnippet>138</a>        <span class="kw">let </span>chunk_len = <span class="self">Self</span>::optimal_chunk_len(
+<a href=#139 id=139 data-nosnippet>139</a>            block.state_rank,
+<a href=#140 id=140 data-nosnippet>140</a>            block.per_head_dim(),
+<a href=#141 id=141 data-nosnippet>141</a>            block.mimo_rank,
+<a href=#142 id=142 data-nosnippet>142</a>            block.micro_steps,
+<a href=#143 id=143 data-nosnippet>143</a>        );
+<a href=#144 id=144 data-nosnippet>144</a>        <span class="self">Self</span>::SerialRecalculated(<span class="prelude-val">Some</span>(chunk_len))
+<a href=#145 id=145 data-nosnippet>145</a>    }
+<a href=#146 id=146 data-nosnippet>146</a>}
+<a href=#147 id=147 data-nosnippet>147</a>
+<a href=#148 id=148 data-nosnippet>148</a><span class="kw">impl </span>Default <span class="kw">for </span>Mamba3SsdPath {
+<a href=#149 id=149 data-nosnippet>149</a>    <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
+<a href=#150 id=150 data-nosnippet>150</a>        <span class="comment">// Defaults to the SerialRecalculated SSD path with the optimal chunk length.
+<a href=#151 id=151 data-nosnippet>151</a>        </span><span class="self">Self</span>::SerialRecalculated(<span class="prelude-val">None</span>)
+<a href=#152 id=152 data-nosnippet>152</a>    }
+<a href=#153 id=153 data-nosnippet>153</a>}
 <a href=#154 id=154 data-nosnippet>154</a>
-<a href=#155 id=155 data-nosnippet>155</a>    <span class="doccomment">/// Chunks per iteration of the chunk-local pass of the
-<a href=#156 id=156 data-nosnippet>156</a>    /// [`Self::SerialRecalculated`] backward: how many chunks that pass
-<a href=#157 id=157 data-nosnippet>157</a>    /// batches.
-<a href=#158 id=158 data-nosnippet>158</a>    ///
-<a href=#159 id=159 data-nosnippet>159</a>    /// The recompute backward does not need to *walk* the chunk axis. Every
-<a href=#160 id=160 data-nosnippet>160</a>    /// chunk-local gradient (the state-to-output term and the intra-chunk
-<a href=#161 id=161 data-nosnippet>161</a>    /// triangular term) needs only the slices of its chunk and its input
-<a href=#162 id=162 data-nosnippet>162</a>    /// state, which the recomputed K4 already produced, batched. Only the
-<a href=#163 id=163 data-nosnippet>163</a>    /// state gradient is a scan, and it is a few ops per chunk.
-<a href=#164 id=164 data-nosnippet>164</a>    ///
-<a href=#165 id=165 data-nosnippet>165</a>    /// The cost of batching the rest is memory. The score
-<a href=#166 id=166 data-nosnippet>166</a>    /// `[batch, group, nheads, read, fused]` is live `group`-wide. At its peak
-<a href=#167 id=167 data-nosnippet>167</a>    /// this pass holds about six score-shaped tensors, where the forward K5
-<a href=#168 id=168 data-nosnippet>168</a>    /// holds about four at **full** width. So **half** stays under the peak
-<a href=#169 id=169 data-nosnippet>169</a>    /// that the forward already reaches, and the walk is two iterations at any
-<a href=#170 id=170 data-nosnippet>170</a>    /// chunk count. The bound is a ratio of live tensors, so it needs no
-<a href=#171 id=171 data-nosnippet>171</a>    /// dimension and no absolute budget. The promise of the path (no
-<a href=#172 id=172 data-nosnippet>172</a>    /// intermediates carried across the forward/backward boundary) holds in
-<a href=#173 id=173 data-nosnippet>173</a>    /// both cases: when this runs, the forward intermediates are already free.
-<a href=#174 id=174 data-nosnippet>174</a>    </span><span class="kw">pub fn </span>backward_chunk_group(nchunks: usize) -&gt; usize {
-<a href=#175 id=175 data-nosnippet>175</a>        nchunks.div_ceil(<span class="number">2</span>).max(<span class="number">1</span>)
-<a href=#176 id=176 data-nosnippet>176</a>    }
-<a href=#177 id=177 data-nosnippet>177</a>
-<a href=#178 id=178 data-nosnippet>178</a>    <span class="doccomment">/// The recommended default path for a given block: [`Self::SerialRecalculated`]
-<a href=#179 id=179 data-nosnippet>179</a>    /// with [`Self::optimal_chunk_len`] for the block's dimensions.
-<a href=#180 id=180 data-nosnippet>180</a>    </span><span class="kw">pub fn </span>default_optimal_from_block(block: <span class="kw-2">&amp;</span>Mamba3) -&gt; <span class="self">Self </span>{
-<a href=#181 id=181 data-nosnippet>181</a>        <span class="kw">let </span>chunk_len = <span class="self">Self</span>::optimal_chunk_len(
-<a href=#182 id=182 data-nosnippet>182</a>            block.state_rank,
-<a href=#183 id=183 data-nosnippet>183</a>            block.per_head_dim(),
-<a href=#184 id=184 data-nosnippet>184</a>            block.mimo_rank,
-<a href=#185 id=185 data-nosnippet>185</a>            block.micro_steps,
-<a href=#186 id=186 data-nosnippet>186</a>        );
-<a href=#187 id=187 data-nosnippet>187</a>        <span class="self">Self</span>::SerialRecalculated(<span class="prelude-val">Some</span>(chunk_len))
-<a href=#188 id=188 data-nosnippet>188</a>    }
-<a href=#189 id=189 data-nosnippet>189</a>}
-<a href=#190 id=190 data-nosnippet>190</a>
-<a href=#191 id=191 data-nosnippet>191</a><span class="kw">impl </span>Default <span class="kw">for </span>Mamba3SsdPath {
-<a href=#192 id=192 data-nosnippet>192</a>    <span class="kw">fn </span>default() -&gt; <span class="self">Self </span>{
-<a href=#193 id=193 data-nosnippet>193</a>        <span class="comment">// Defaults to the SerialRecalculated SSD path with the optimal chunk length.
-<a href=#194 id=194 data-nosnippet>194</a>        </span><span class="self">Self</span>::SerialRecalculated(<span class="prelude-val">None</span>)
-<a href=#195 id=195 data-nosnippet>195</a>    }
-<a href=#196 id=196 data-nosnippet>196</a>}
-<a href=#197 id=197 data-nosnippet>197</a>
-<a href=#198 id=198 data-nosnippet>198</a><span class="attr">#[cfg(all(test, feature = <span class="string">"_dev-test"</span>))]
-<a href=#199 id=199 data-nosnippet>199</a></span><span class="kw">mod </span>tests;
+<a href=#155 id=155 data-nosnippet>155</a><span class="attr">#[cfg(all(test, feature = <span class="string">"_dev-test"</span>))]
+<a href=#156 id=156 data-nosnippet>156</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>

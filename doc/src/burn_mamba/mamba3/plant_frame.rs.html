@@ -35,7 +35,7 @@
 <a href=#35 id=35 data-nosnippet>35</a><span class="kw">use </span><span class="kw">crate</span>::mamba3::mamba3::{Mamba3, Packed};
 <a href=#36 id=36 data-nosnippet>36</a><span class="kw">use </span><span class="kw">crate</span>::mamba3::product::last_micro4;
 <a href=#37 id=37 data-nosnippet>37</a><span class="kw">use </span><span class="kw">crate</span>::mamba3::rotation::{RotationState, rotate_bc_forward};
-<a href=#38 id=38 data-nosnippet>38</a><span class="kw">use </span><span class="kw">crate</span>::mamba3::ssd_path::Mamba3SsdPath;
+<a href=#38 id=38 data-nosnippet>38</a><span class="kw">use </span><span class="kw">crate</span>::standard_ssd;
 <a href=#39 id=39 data-nosnippet>39</a><span class="kw">use </span>burn::prelude::<span class="kw-2">*</span>;
 <a href=#40 id=40 data-nosnippet>40</a><span class="kw">use </span>burn_stack::modules::{Silu, sanity <span class="kw">as </span>san};
 <a href=#41 id=41 data-nosnippet>41</a>
@@ -190,7 +190,7 @@
 <a href=#190 id=190 data-nosnippet>190</a>        <span class="comment">// A reset is at the first token of a chunk, which is its first
 <a href=#191 id=191 data-nosnippet>191</a>        // micro-step on the write axis. See [`crate::packing`].
 <a href=#192 id=192 data-nosnippet>192</a>        </span><span class="kw">let </span>packed = resets.map(|PlantResets { reset_bt, origin, chunk_len }| {
-<a href=#193 id=193 data-nosnippet>193</a>            <span class="kw">let </span>chunk_tokens = Mamba3SsdPath::chunk_tokens(chunk_len, u);
+<a href=#193 id=193 data-nosnippet>193</a>            <span class="kw">let </span>chunk_tokens = standard_ssd::chunk_tokens(chunk_len, u);
 <a href=#194 id=194 data-nosnippet>194</a>            <span class="kw">let </span>reset_bn = <span class="kw">crate</span>::packing::chunk_resets(reset_bt, chunk_tokens);
 <a href=#195 id=195 data-nosnippet>195</a>            Packed {
 <a href=#196 id=196 data-nosnippet>196</a>                segments: <span class="kw">crate</span>::packing::Segments::new(reset_bn, chunk_len, sequence),

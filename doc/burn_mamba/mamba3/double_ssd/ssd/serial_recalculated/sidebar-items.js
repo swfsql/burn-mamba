@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["backward","combined_backward","serial_recalculated"]};
+window.SIDEBAR_ITEMS = {"mod":["backward","serial_recalculated"]};

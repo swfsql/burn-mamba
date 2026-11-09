@@ -1563,7 +1563,7 @@
 <a href=#1563 id=1563 data-nosnippet>1563</a>    ///
 <a href=#1564 id=1564 data-nosnippet>1564</a>    /// `reset_bs` (`[batch, sequence]`, `true` at the first token of a
 <a href=#1565 id=1565 data-nosnippet>1565</a>    /// segment) marks each start. It must be at the first token of a chunk
-<a href=#1566 id=1566 data-nosnippet>1566</a>    /// (every [`Mamba3SsdPath::chunk_tokens`] tokens). The tokens before the
+<a href=#1566 id=1566 data-nosnippet>1566</a>    /// (every [`chunk_tokens`](crate::standard_ssd::chunk_tokens) tokens). The tokens before the
 <a href=#1567 id=1567 data-nosnippet>1567</a>    /// first reset of a row continue from `cache`, as in [`Self::forward`]. So
 <a href=#1568 id=1568 data-nosnippet>1568</a>    /// a sequence can continue from the previous call. A segment can end with
 <a href=#1569 id=1569 data-nosnippet>1569</a>    /// pad tokens (`pad_bs`) up to the next start. The result for each

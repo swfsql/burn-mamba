@@ -2,10 +2,10 @@
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! The forward and the [`Mamba2BackendExt`] trait are in `serial_recalculated`.
 <a href=#4 id=4 data-nosnippet>4</a>//! The `RecomputeOp` impl ([`backward`](crate::mamba2::ssd::serial_recalculated::backward))
-<a href=#5 id=5 data-nosnippet>5</a>//! and the recompute-based gradient math
+<a href=#5 id=5 data-nosnippet>5</a>//! and the gradient math
 <a href=#6 id=6 data-nosnippet>6</a>//! ([`combined_backward`](crate::mamba2::ssd::serial_recalculated::combined_backward))
-<a href=#7 id=7 data-nosnippet>7</a>//! mirror the official `ssd_combined.py`. Together they use ~⅓ less training
-<a href=#8 id=8 data-nosnippet>8</a>//! memory than a backward that stores every intermediate.
+<a href=#7 id=7 data-nosnippet>7</a>//! call the [standard SSD scan](crate::standard_ssd). Together they use ~⅓ less
+<a href=#8 id=8 data-nosnippet>8</a>//! training memory than a backward that stores every intermediate.
 <a href=#9 id=9 data-nosnippet>9</a>
 <a href=#10 id=10 data-nosnippet>10</a>/// The `RecomputeOp` impl of the autodiff backend.
 <a href=#11 id=11 data-nosnippet>11</a></span><span class="attr">#[cfg(feature = <span class="string">"autodiff"</span>)]

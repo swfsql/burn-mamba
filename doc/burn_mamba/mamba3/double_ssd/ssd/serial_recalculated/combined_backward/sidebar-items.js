@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"fn":["combined_backward","k3_ssd_chunk_state_extended"],"struct":["CombinedGrads"]};

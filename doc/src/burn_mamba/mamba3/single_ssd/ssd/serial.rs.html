@@ -32,9 +32,9 @@
 <a href=#32 id=32 data-nosnippet>32</a>    k1_ssd_chunk_cumsum, k2_ssd_bmm, k3_ssd_chunk_state, k4_ssd_state_passing,
 <a href=#33 id=33 data-nosnippet>33</a>};
 <a href=#34 id=34 data-nosnippet>34</a><span class="kw">use </span><span class="kw">crate</span>::mamba3::helpers;
-<a href=#35 id=35 data-nosnippet>35</a><span class="kw">use </span><span class="kw">crate</span>::mamba3::prelude::Mamba3SsdPath;
-<a href=#36 id=36 data-nosnippet>36</a><span class="kw">use </span><span class="kw">crate</span>::mamba3::single_ssd::prelude::<span class="kw-2">*</span>;
-<a href=#37 id=37 data-nosnippet>37</a><span class="kw">use </span><span class="kw">crate</span>::mamba3::single_ssd::ssd::diag::y_diag_correction;
+<a href=#35 id=35 data-nosnippet>35</a><span class="kw">use </span><span class="kw">crate</span>::mamba3::single_ssd::prelude::<span class="kw-2">*</span>;
+<a href=#36 id=36 data-nosnippet>36</a><span class="kw">use </span><span class="kw">crate</span>::mamba3::single_ssd::ssd::diag::y_diag_correction;
+<a href=#37 id=37 data-nosnippet>37</a><span class="kw">use </span><span class="kw">crate</span>::standard_ssd;
 <a href=#38 id=38 data-nosnippet>38</a><span class="kw">use </span>burn::prelude::<span class="kw-2">*</span>;
 <a href=#39 id=39 data-nosnippet>39</a>
 <a href=#40 id=40 data-nosnippet>40</a><span class="kw">impl </span>Mamba3SingleSsdInput {
@@ -59,7 +59,7 @@
 <a href=#59 id=59 data-nosnippet>59</a>        input.sanity();
 <a href=#60 id=60 data-nosnippet>60</a>        <span class="kw">let </span>[batch, nchunks, chunk_len, _mimo_rank, nheads, per_head_dim] = input.v_bnlmhp.dims();
 <a href=#61 id=61 data-nosnippet>61</a>        <span class="kw">let </span>[.., state_rank] = input.b_bnlmhr.dims();
-<a href=#62 id=62 data-nosnippet>62</a>        <span class="kw">let </span>chunk_tokens = Mamba3SsdPath::chunk_tokens(chunk_len, input.read_stride);
+<a href=#62 id=62 data-nosnippet>62</a>        <span class="kw">let </span>chunk_tokens = standard_ssd::chunk_tokens(chunk_len, input.read_stride);
 <a href=#63 id=63 data-nosnippet>63</a>
 <a href=#64 id=64 data-nosnippet>64</a>        <span class="macro">assert!</span>(
 <a href=#65 id=65 data-nosnippet>65</a>            input.init_state_hpr.is_none(),
