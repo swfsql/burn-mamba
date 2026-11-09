@@ -79,7 +79,7 @@
 <a href=#79 id=79 data-nosnippet>79</a><span class="doccomment">/// Backend extension for the Mamba-2 SSD with a recompute backward.
 <a href=#80 id=80 data-nosnippet>80</a>///
 <a href=#81 id=81 data-nosnippet>81</a>/// The default body runs the forward on backend primitives. The `Autodiff&lt;B&gt;`
-<a href=#82 id=82 data-nosnippet>82</a>/// impl (in [`super::backward`]) adds the custom backward node.
+<a href=#82 id=82 data-nosnippet>82</a>/// impl (in [`super::backward`]) adds the recompute node.
 <a href=#83 id=83 data-nosnippet>83</a></span><span class="attr">#[backend_extension(
 <a href=#84 id=84 data-nosnippet>84</a>    <span class="comment">// Every `#[backend_extension]` site of this crate has the same list.
 <a href=#85 id=85 data-nosnippet>85</a>    // Change them together. `build.rs` sets `cube_backend`.

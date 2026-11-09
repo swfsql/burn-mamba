@@ -1,0 +1,9 @@
+(function() {
+    const implementors = Object.fromEntries([["burn_mamba",[["impl&lt;B: Backend + <a class=\"trait\" href=\"burn_mamba/mamba2/ssd/serial_recalculated/serial_recalculated/trait.Mamba2BackendExt.html\" title=\"trait burn_mamba::mamba2::ssd::serial_recalculated::serial_recalculated::Mamba2BackendExt\">Mamba2BackendExt</a>&gt; RecomputeOp&lt;B, 8&gt; for <a class=\"struct\" href=\"burn_mamba/mamba2/ssd/serial_recalculated/backward/struct.SsdRecompute.html\" title=\"struct burn_mamba::mamba2::ssd::serial_recalculated::backward::SsdRecompute\">SsdRecompute</a>",0],["impl&lt;B: Backend + <a class=\"trait\" href=\"burn_mamba/mamba3/double_ssd/ssd/serial_recalculated/serial_recalculated/trait.Mamba3DoubleSsdBackendExt.html\" title=\"trait burn_mamba::mamba3::double_ssd::ssd::serial_recalculated::serial_recalculated::Mamba3DoubleSsdBackendExt\">Mamba3DoubleSsdBackendExt</a>&gt; RecomputeOp&lt;B, 6&gt; for <a class=\"struct\" href=\"burn_mamba/mamba3/double_ssd/ssd/serial_recalculated/backward/struct.SsdRecompute.html\" title=\"struct burn_mamba::mamba3::double_ssd::ssd::serial_recalculated::backward::SsdRecompute\">SsdRecompute</a>",0],["impl&lt;B: Backend + <a class=\"trait\" href=\"burn_mamba/mamba3/single_ssd/ssd/serial_recalculated/serial_recalculated/trait.Mamba3SingleSsdBackendExt.html\" title=\"trait burn_mamba::mamba3::single_ssd::ssd::serial_recalculated::serial_recalculated::Mamba3SingleSsdBackendExt\">Mamba3SingleSsdBackendExt</a>&gt; RecomputeOp&lt;B, 9&gt; for <a class=\"struct\" href=\"burn_mamba/mamba3/single_ssd/ssd/serial_recalculated/backward/struct.SsdRecompute.html\" title=\"struct burn_mamba::mamba3::single_ssd::ssd::serial_recalculated::backward::SsdRecompute\">SsdRecompute</a>",0]]]]);
+    if (window.register_implementors) {
+        window.register_implementors(implementors);
+    } else {
+        window.pending_implementors = implementors;
+    }
+})()
+//{"start":59,"fragment_lengths":[1680]}
