@@ -14,40 +14,40 @@ Every measured iteration ends in a device sync, and each case runs untimed warm-
 
 | case | flex (CPU) | cuda | cuda + fusion + autotune |
 |---|---|---|---|
-| `mamba1` | 119.82 ms | 47.63 ms | 77.64 ms |
-| `mamba2` | 26.69 ms | 3.00 ms | 4.14 ms |
-| `mamba3/siso` | 40.53 ms | 5.35 ms | 7.56 ms |
-| `mamba3/mimo-rank1` | 43.75 ms | 5.72 ms | 7.92 ms |
-| `mamba3/mimo-rank4` | 154.68 ms | 8.61 ms | 8.26 ms |
-| `mamba3/real1d` | 21.10 ms | 3.97 ms | 5.09 ms |
-| `mamba3/quaternion4d` | 74.56 ms | 16.27 ms | 15.01 ms |
-| `mamba3/rotor4d` | 118.38 ms | 18.33 ms | 17.39 ms |
-| `mamba3/siso-double-ssd` | 49.40 ms | 7.15 ms | 8.90 ms |
+| `mamba1` | 120.20 ms | 47.13 ms | 68.75 ms |
+| `mamba2` | 26.49 ms | 3.00 ms | 4.19 ms |
+| `mamba3/siso` | 38.62 ms | 5.34 ms | 7.49 ms |
+| `mamba3/mimo-rank1` | 40.24 ms | 5.53 ms | 7.37 ms |
+| `mamba3/mimo-rank4` | 170.20 ms | 8.69 ms | 9.10 ms |
+| `mamba3/real1d` | 22.35 ms | 3.99 ms | 5.19 ms |
+| `mamba3/quaternion4d` | 70.10 ms | 16.07 ms | 15.97 ms |
+| `mamba3/rotor4d` | 114.46 ms | 18.12 ms | 17.51 ms |
+| `mamba3/siso-double-ssd` | 47.05 ms | 6.71 ms | 9.55 ms |
 
 ## `train` — forward + backward (autodiff device)
 
 | case | flex (CPU) | cuda | cuda + fusion + autotune |
 |---|---|---|---|
-| `mamba1` | 3.44 s | 247.10 ms | 243.14 ms |
-| `mamba2` | 91.93 ms | 13.01 ms | 25.67 ms |
-| `mamba3/siso` | 104.80 ms | 15.99 ms | 25.95 ms |
-| `mamba3/mimo-rank1` | 112.08 ms | 21.95 ms | 26.78 ms |
-| `mamba3/mimo-rank4` | 418.51 ms | 30.46 ms | 43.58 ms |
-| `mamba3/real1d` | 65.97 ms | 15.61 ms | 22.13 ms |
-| `mamba3/quaternion4d` | 259.34 ms | 47.48 ms | 42.46 ms |
-| `mamba3/rotor4d` | 445.33 ms | 55.75 ms | 52.55 ms |
-| `mamba3/siso-double-ssd` | 137.32 ms | 26.35 ms | 38.00 ms |
+| `mamba1` | 3.47 s | 255.38 ms | 248.73 ms |
+| `mamba2` | 107.35 ms | 12.46 ms | 26.42 ms |
+| `mamba3/siso` | 125.90 ms | 20.46 ms | 22.36 ms |
+| `mamba3/mimo-rank1` | 132.05 ms | 21.17 ms | 25.67 ms |
+| `mamba3/mimo-rank4` | 410.56 ms | 30.33 ms | 36.15 ms |
+| `mamba3/real1d` | 70.51 ms | 15.65 ms | 19.87 ms |
+| `mamba3/quaternion4d` | 379.12 ms | 46.48 ms | 48.98 ms |
+| `mamba3/rotor4d` | 688.69 ms | 55.32 ms | 50.00 ms |
+| `mamba3/siso-double-ssd` | 164.45 ms | 26.63 ms | 35.26 ms |
 
 ## `step` — one recurrent decode step
 
 | case | flex (CPU) | cuda | cuda + fusion + autotune |
 |---|---|---|---|
-| `mamba1` | 617 µs | 1.27 ms | 1.41 ms |
-| `mamba2` | 492 µs | 1.41 ms | 1.73 ms |
-| `mamba3/siso` | 707 µs | 3.02 ms | 3.80 ms |
-| `mamba3/mimo-rank1` | 752 µs | 3.42 ms | 3.91 ms |
-| `mamba3/mimo-rank4` | 1.09 ms | 3.72 ms | 4.29 ms |
-| `mamba3/real1d` | 553 µs | 1.98 ms | 2.33 ms |
-| `mamba3/quaternion4d` | 1.11 ms | 6.75 ms | 8.11 ms |
-| `mamba3/rotor4d` | 1.43 ms | 9.09 ms | 9.52 ms |
-| `mamba3/siso-double-ssd` | 756 µs | 3.13 ms | 3.26 ms |
+| `mamba1` | 651 µs | 1.23 ms | 1.33 ms |
+| `mamba2` | 528 µs | 1.32 ms | 1.59 ms |
+| `mamba3/siso` | 717 µs | 3.03 ms | 3.36 ms |
+| `mamba3/mimo-rank1` | 767 µs | 3.58 ms | 3.68 ms |
+| `mamba3/mimo-rank4` | 1.19 ms | 3.73 ms | 3.93 ms |
+| `mamba3/real1d` | 501 µs | 2.02 ms | 2.32 ms |
+| `mamba3/quaternion4d` | 1.06 ms | 7.31 ms | 7.78 ms |
+| `mamba3/rotor4d` | 1.49 ms | 9.67 ms | 10.66 ms |
+| `mamba3/siso-double-ssd` | 746 µs | 3.11 ms | 3.50 ms |
