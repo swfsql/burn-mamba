@@ -19,7 +19,6 @@ use burn_stack::utils::test_helpers::test_device;
 /// layers (5 pairs) over 4 real layers (2 pairs) and checks that (a) `forward` no
 /// longer panics and returns the right shape, and (b) gradients reach **both**
 /// real pairs' merge weights (so both are exercised and shared, not dangling).
-#[cfg(feature = "mamba2")]
 #[test]
 fn virtual_layers_share_per_real_pair_merge() {
     use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};
@@ -81,7 +80,6 @@ fn virtual_layers_share_per_real_pair_merge() {
 
 /// Two identical bidi forward passes must agree (no hidden nondeterminism in the
 /// straight/reverse/merge plumbing), including under virtual scheduling.
-#[cfg(feature = "mamba2")]
 #[test]
 fn virtual_forward_is_deterministic() {
     use crate::mamba2::prelude::{Mamba2Config, Mamba2SsdPath};

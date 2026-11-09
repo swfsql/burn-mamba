@@ -914,6 +914,7 @@ dependencies = [
  "burn-dataset",
  "burn-flex",
  "burn-fusion",
+ "burn-mamba",
  "burn-stack",
  "criterion",
  "image",

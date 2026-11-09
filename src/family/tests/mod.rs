@@ -6,18 +6,22 @@
 //! blocks — forward/step parity, cache threading, gradient reachability across
 //! a `grad_horizon` cut, class-marker placement, and the Muon allowlist.
 
+#[cfg(feature = "mamba2")]
 mod bidi;
 mod block;
 mod capture;
 mod class;
 mod config;
+#[cfg(feature = "mamba3")]
 mod hnet;
+#[cfg(feature = "mamba3")]
 mod layer;
 #[cfg(feature = "mamba3")]
 mod layers;
 mod multi_gate;
 #[cfg(feature = "optim")]
 mod optim;
+#[cfg(any(feature = "mamba2", feature = "mamba3"))]
 mod packed;
 mod reset_align;
 mod untied;

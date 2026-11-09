@@ -69,6 +69,8 @@ fi
 no_warnings cargo check
 for family in mamba1 mamba2 mamba3; do
     no_warnings cargo check --no-default-features --features "$family,backend-flex"
+    # The dev-dependencies change the features of a test build.
+    no_warnings cargo check --tests --no-default-features --features "$family,backend-flex"
 done
 cargo test --lib -- --test-threads=1
 cargo test --examples -j 1 -- --test-threads=1

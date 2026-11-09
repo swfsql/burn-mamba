@@ -16,6 +16,7 @@ use crate::prelude::*;
 use burn::module::{ModuleVisitor, Param};
 use burn::prelude::*;
 use burn::tensor::{Distribution, Gradients};
+#[cfg(feature = "mamba3")]
 use burn_stack::modules::ResidualsConfig;
 use burn_stack::utils::test_helpers::{dtype_tol, max_abs_diff, max_rel_diff};
 use burn_stack::utils::{ClassLatent, Packed};

@@ -6,8 +6,12 @@ use crate::prelude::*;
 use burn::prelude::*;
 use burn_stack::modules::*;
 use burn_stack::utils::class::{class_marker_output_indices, class_prime_plan, class_window_plan};
-use burn_stack::utils::{ClassCursor, ClassCursors};
-use burn_stack::utils::test_helpers::{dtype_tol, test_device};
+use burn_stack::utils::ClassCursor;
+#[cfg(feature = "mamba2")]
+use burn_stack::utils::ClassCursors;
+use burn_stack::utils::test_helpers::test_device;
+#[cfg(feature = "mamba2")]
+use burn_stack::utils::test_helpers::dtype_tol;
 
 #[cfg(feature = "mamba2")]
 #[test]

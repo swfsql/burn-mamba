@@ -19,7 +19,6 @@ use burn_stack::utils::test_helpers::{dtype_tol, max_abs_diff};
 use burn::tensor::Distribution;
 use burn_stack::utils::test_helpers::test_device;
 
-#[cfg(feature = "mamba3")]
 fn block_config(d_model: usize) -> crate::mamba3::prelude::Mamba3Config {
     crate::mamba3::prelude::Mamba3Config::new(d_model)
         .with_expand(2)
@@ -35,7 +34,6 @@ fn block_config(d_model: usize) -> crate::mamba3::prelude::Mamba3Config {
 /// Recomputed here from the layer's own sub-modules, so a delta folded the wrong
 /// way (e.g. feeding the MLP `x` instead of `x + h₁`, or dropping `h₁` from the
 /// returned sum) shows up as a numeric mismatch rather than passing silently.
-#[cfg(feature = "mamba3")]
 #[test]
 fn layer_with_mlp_matches_the_two_residual_reference() {
     use crate::mamba3::prelude::Mamba3SsdPath;
@@ -77,7 +75,6 @@ fn layer_with_mlp_matches_the_two_residual_reference() {
 
 /// `forward` and `step` must still agree once the feed-forward is in the loop —
 /// the MLP is point-wise, so it may not introduce any cross-token coupling.
-#[cfg(feature = "mamba3")]
 #[test]
 fn mlp_layer_forward_step_parity() {
     use crate::mamba3::prelude::Mamba3SsdPath;
@@ -107,7 +104,6 @@ fn mlp_layer_forward_step_parity() {
 
 /// Without an `mlp` the delta is the block output alone. Guards the default
 /// path for Mamba-1/2 and for Mamba-3 checkpoints that carry no feed-forward.
-#[cfg(feature = "mamba3")]
 #[test]
 fn block_only_layer_is_unchanged() {
     use crate::mamba3::prelude::Mamba3SsdPath;
@@ -137,7 +133,6 @@ fn block_only_layer_is_unchanged() {
 /// `norm2` is allocated together with `mlp`, so a hand-built `Layer` that sets
 /// only one of the two is a construction bug. It must fail loudly rather than
 /// silently skipping the feed-forward.
-#[cfg(feature = "mamba3")]
 #[test]
 #[should_panic(expected = "`norm2` is allocated alongside `mlp`")]
 fn mlp_without_norm2_panics() {
@@ -160,7 +155,6 @@ fn mlp_without_norm2_panics() {
 
 /// The feed-forward's pre-norm is a distinct parameter set from the block's, so
 /// the two must not alias — a checkpoint writes different values into each.
-#[cfg(feature = "mamba3")]
 #[test]
 fn norm_and_norm2_are_independent() {
     let device = test_device();

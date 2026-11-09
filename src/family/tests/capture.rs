@@ -24,6 +24,7 @@ fn assert_same<const D: usize>(label: &str, a: &Tensor<D>, b: &Tensor<D>) {
     assert_eq!(d, 0.0, "{label}: differs by {d}");
 }
 
+#[cfg(feature = "mamba3")]
 fn assert_same_option<const D: usize>(label: &str, a: &Option<Tensor<D>>, b: &Option<Tensor<D>>) {
     assert_eq!(a.is_some(), b.is_some(), "{label}: present in one cache only");
     if let (Some(a), Some(b)) = (a, b) {

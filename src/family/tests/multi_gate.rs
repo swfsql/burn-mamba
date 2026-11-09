@@ -6,7 +6,9 @@ use crate::prelude::*;
 use burn::module::Param;
 use burn::prelude::*;
 use burn_stack::modules::multi_gate::MultiGateResidual;
-use burn_stack::utils::test_helpers::{max_abs_diff, max_rel_diff};
+use burn_stack::utils::test_helpers::max_abs_diff;
+#[cfg(feature = "mamba2")]
+use burn_stack::utils::test_helpers::max_rel_diff;
 use burn::tensor::Distribution;
 use burn_stack::utils::test_helpers::{dtype_tol, test_device};
 

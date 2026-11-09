@@ -68,6 +68,10 @@ burn-fusion = { version = "0.22.1", default-features = false, optional = true}
 # burn-fusion = { path = "../burn/crates/burn-fusion", default-features = false, optional = true }
 
 [dev-dependencies]
+# `examples-common` of burn-stack enables `burn-stack/optim`, so each dev build
+# has the Muon items in the traits of burn-stack. This self-dependency enables
+# `optim` in this crate too, so that the impls of these items compile.
+burn-mamba = { path = ".", default-features = false, features = ["optim"] }
 burn-stack = { git = "https://github.com/swfsql/burn-stack.git", rev = "eba3d077c561780fb6cfc576f960d997ff4c97de", default-features = false, features = ["test-helpers", "examples-common"] }
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 rand = "0.10.3"

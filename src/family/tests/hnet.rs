@@ -24,7 +24,6 @@ fn mamba2(d_model: usize) -> MambaBlockConfig {
     )
 }
 
-#[cfg(feature = "mamba3")]
 fn mamba3(d_model: usize) -> MambaBlockConfig {
     MambaBlockConfig::Mamba3(
         Mamba3Config::new(d_model)
@@ -63,6 +62,7 @@ fn tokens(batch: usize, sequence: usize, device: &Device) -> Tensor<3, Int> {
 }
 
 /// The largest relative difference over every tensor pair of two caches.
+#[cfg(feature = "mamba2")]
 fn cache_diff<C: CacheTensors>(a: C, b: C) -> f32 {
     struct MaxDiff(f32);
     impl TensorZip for MaxDiff {
@@ -95,7 +95,7 @@ fn step_unrolled(
 /// Mamba-2 stages around a Mamba-3 main stack (wider than the stage):
 /// `forward` equals `step` unrolled on the logits and the caches, in both
 /// step modes.
-#[cfg(all(feature = "mamba2", feature = "mamba3"))]
+#[cfg(feature = "mamba2")]
 #[test]
 fn mamba2_stages_mamba3_main_forward_equals_step() {
     let device = test_device();
@@ -113,7 +113,6 @@ fn mamba2_stages_mamba3_main_forward_equals_step() {
 
 /// The gradients of `forward` equal those of `step` unrolled, over every
 /// parameter of a Mamba-3 H-Net.
-#[cfg(feature = "mamba3")]
 #[test]
 fn mamba3_forward_and_step_have_the_same_gradients() {
     use burn::module::{ModuleVisitor, Param};
@@ -155,7 +154,6 @@ fn mamba3_forward_and_step_have_the_same_gradients() {
 /// A right-padded batch: each row gives what it gives alone (the logits of
 /// its real tokens, and its caches). A row with no real token (a later window
 /// of a short story) leaves the other rows alone, and its caches stay finite.
-#[cfg(feature = "mamba3")]
 #[test]
 fn mamba3_padded_rows_match_each_row_alone() {
     let device = test_device();
@@ -200,7 +198,7 @@ fn mamba3_padded_rows_match_each_row_alone() {
 /// The scoped Muon plan fits the real weights of every stack (a Muon training
 /// step panics on a column layout of the wrong width), and it gives the fused
 /// `in_proj` of each stack to Muon.
-#[cfg(all(feature = "mamba2", feature = "mamba3", feature = "optim"))]
+#[cfg(all(feature = "mamba2", feature = "optim"))]
 #[test]
 fn the_muon_plan_fits_every_stack() {
     use burn::optim::GradientsParams;
