@@ -14,13 +14,13 @@ One iteration per case is measured rather than a criterion sample. A `cuda` coun
 | case | cuda | cuda + fusion + autotune |
 |---|---|---|
 | `mamba1` | 1321 | 797 |
-| `mamba2` | 105 | 78 |
+| `mamba2` | 107 | 80 |
 | `mamba3/siso` | 201 | 120 |
 | `mamba3/mimo-rank1` | 210 | 126 |
 | `mamba3/mimo-rank4` | 245 | 158 |
 | `mamba3/real1d` | 143 | 88 |
-| `mamba3/quaternion4d` | 652 | 288 |
-| `mamba3/rotor4d` | 734 | 364 |
+| `mamba3/quaternion4d` | 652 | 286–288 |
+| `mamba3/rotor4d` | 734 | 362–364 |
 | `mamba3/siso-double-ssd` | 248 | 161 |
 
 ## `train` — forward + backward (autodiff device)
@@ -28,14 +28,14 @@ One iteration per case is measured rather than a criterion sample. A `cuda` coun
 | case | cuda | cuda + fusion + autotune |
 |---|---|---|
 | `mamba1` | 5259 | 3755–4011 |
-| `mamba2` | 555 | 366 |
+| `mamba2` | 438 | 315 |
 | `mamba3/siso` | 693 | 453 |
 | `mamba3/mimo-rank1` | 715 | 472 |
 | `mamba3/mimo-rank4` | 831 | 577 |
 | `mamba3/real1d` | 554 | 347 |
 | `mamba3/quaternion4d` | 1840 | 749 |
 | `mamba3/rotor4d` | 2104 | 875 |
-| `mamba3/siso-double-ssd` | 922 | 600 |
+| `mamba3/siso-double-ssd` | 922 | 604 |
 
 ## `step` — one recurrent decode step
 
