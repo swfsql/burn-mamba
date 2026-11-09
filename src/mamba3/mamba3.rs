@@ -219,6 +219,9 @@
 //! The `R` of the paper is the `M` of these comments: both are `mimo_rank`. A
 //! shape letter `R` is a relation of `r`, the state rank.
 
+#[cfg(feature = "optim")]
+use crate::mamba3::in_proj_layout::GroupPlace;
+use crate::mamba3::in_proj_layout::{InProjLayout, InProjSettings};
 use crate::mamba3::positive::{Gain, Tropical};
 use crate::mamba3::prelude::*;
 use crate::mamba3::rotation::RotationKind;
@@ -253,8 +256,7 @@ pub struct Mamba3 {
     /// `[z | x·u | b_raw·u | c_raw | dd_dt·u | dd_a_raw·u | lambda_raw·u |
     /// mu_raw·u | rotation·u | kalman_noise·u | tropical_a·u | tropical_b·u]`
     ///
-    /// The sub-projections from `lambda_raw` on are optional, so they are at
-    /// the end:
+    /// The sub-projections from `lambda_raw` on are optional:
     ///
     /// - [`TapPattern::None`] projects no `lambda_raw`,
     /// - a one-tap pattern projects no `mu_raw`,
@@ -264,8 +266,8 @@ pub struct Mamba3 {
     /// - [`Tropical::None`] projects no `tropical_*`.
     ///
     /// The block projects each **per-micro-step** stream `u` times, and
-    /// [`crate::mamba3::product`] folds them into the sequence. The gate `z`
-    /// and the read `C` are per token. At the default `u = 1`, this is the
+    /// [`crate::mamba3::product`] folds them into the sequence. `z` and
+    /// `c_raw` are per token. At the default `u = 1`, this is the
     /// stock `d_model → 2·d_inner + 2·ngroups·state_rank·mimo_rank + 3·nheads
     /// + num_rotation_channels`.
     ///
@@ -274,10 +276,8 @@ pub struct Mamba3 {
     /// as one.
     pub in_proj: Linear,
 
-    /// The trailing per-micro-step sub-projections of `in_proj`,
-    /// `[dd_dt·u | dd_a_raw·u | lambda_raw·u | mu_raw·u | rotation·u |
-    /// kalman_noise·u | tropical_a·u | tropical_b·u]`, when
-    /// [`Mamba3Untied::InProjTail`] unties them: one copy per application,
+    /// The sub-projections from `dd_dt` on, in the layout of [`Self::in_proj`],
+    /// when [`Mamba3Untied::InProjTail`] unties them: one copy per application,
     /// along the output axis. `None` ⇒ `in_proj` holds them.
     pub in_proj_tail: Option<Linear>,
 
@@ -496,85 +496,18 @@ impl Mamba3 {
         self.num_quat_blocks * self.rotation.quat_factors()
     }
 
-    /// Width of the trailing rotation sub-projections of the in-projection:
-    /// the [`Self::num_rotation_channels`] of one micro-step, once per micro-step,
-    /// because each micro-step turns the state by its own rotation.
-    pub fn rotation_channels_total(&self) -> usize {
-        self.micro_steps * self.num_rotation_channels
-    }
-
-    /// Width of the `λ` sub-projections of the in-projection: one channel per
-    /// (head, micro-step), or **`0`** under [`TapPattern::None`], which has no
-    /// `λ`. `helpers::split_trailing` removes their channels from the tail,
-    /// just inside the rotation channels.
-    pub fn lambda_channels_total(&self) -> usize {
-        if self.tap_pattern.has_beta_tap() {
-            self.micro_steps * self.nheads()
-        } else {
-            0
-        }
-    }
-
-    /// Width of the `μ` sub-projections of the in-projection (the mix of the
-    /// two taps): one channel per (head, micro-step) for the two-tap patterns.
-    /// **`0`** for every other pattern, and for a two-tap one at `u = 1`,
-    /// where the taps fold ([`TapPattern::has_two_taps`]).
-    /// `helpers::split_trailing` removes their channels from the tail, just
-    /// inside the `λ` channels.
-    pub fn mu_channels_total(&self) -> usize {
-        if self.tap_pattern.has_two_taps(self.micro_steps) {
-            self.micro_steps * self.nheads()
-        } else {
-            0
-        }
-    }
-
-    /// Width of the Kalman noise sub-projections `r` of the in-projection: one
-    /// channel per (head, micro-step) under [`Gain::KalmanProjectedNoise`],
-    /// **`0`** for every other gain. `split_positive` removes their channels
-    /// from the tail, just inside the tropical channels.
-    pub fn noise_channels_total(&self) -> usize {
-        if self.gain.projects_noise() {
-            self.micro_steps * self.nheads()
-        } else {
-            0
-        }
-    }
-
-    /// Width of the tropical sub-projections `(a, b)` of the in-projection:
-    /// two channels per (head, micro-step) under [`Tropical::MaxPlus`], **`0`**
-    /// otherwise. Their channels are the outermost trailing channels, so
-    /// `split_positive` removes them first.
-    pub fn tropical_channels_total(&self) -> usize {
-        if self.tropical.is_on() {
-            2 * self.micro_steps * self.nheads()
-        } else {
-            0
-        }
-    }
-
-    /// Remove the trailing channels of the positive systems from an
-    /// in-projection whose channel axis is `dim`. Returns
-    /// `(rest, noise, tropical (a, b))`, each `None` when the block does not
-    /// project it. The two tropical halves are still `u`-wide, `a` first.
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn split_positive<const D: usize>(
-        &self,
-        proj: Tensor<D>,
-        dim: usize,
-    ) -> (Tensor<D>, Option<Tensor<D>>, Option<(Tensor<D>, Tensor<D>)>) {
-        let (proj, tropical) = crate::mamba3::helpers::split_trailing(
-            proj,
-            self.tropical_channels_total(),
-            dim,
-        );
-        let (proj, noise) =
-            crate::mamba3::helpers::split_trailing(proj, self.noise_channels_total(), dim);
-        let tropical = tropical.map(|ab| {
-            let half = ab.dims()[dim] / 2;
-            (ab.clone().narrow(dim, 0, half), ab.narrow(dim, half, half))
-        });
-        (proj, noise, tropical)
+    /// The table of the channel groups that this block projects.
+    pub(crate) fn in_proj_layout(&self) -> InProjLayout {
+        InProjLayout::new(InProjSettings {
+            d_inner: self.d_inner(),
+            nheads: self.nheads(),
+            bc_width: self.ngroups * self.state_rank * self.mimo_rank,
+            num_rotation_channels: self.num_rotation_channels,
+            micro_steps: self.micro_steps,
+            tap_pattern: self.tap_pattern,
+            gain: self.gain,
+            tropical: self.tropical,
+        })
     }
 
     /// What the Kalman gain reads in addition to the discretisation. `None`
@@ -797,9 +730,9 @@ impl Mamba3 {
         self.mimo_rank == 1 && self.siso_specialization_decode
     }
 
-    /// The output of the in-projection, in the layout that [`Self::in_proj`]
-    /// documents (`[z | … | tropical_b·u]`): `in_proj` alone, or `in_proj`
-    /// then [`Self::in_proj_tail`] under [`Mamba3Untied::InProjTail`].
+    /// The output of the in-projection, in the layout of [`Self::in_proj`]:
+    /// `in_proj` alone, or `in_proj` then [`Self::in_proj_tail`] under
+    /// [`Mamba3Untied::InProjTail`].
     pub fn project_in<const D: usize>(&self, x: Tensor<D>) -> Tensor<D> {
         match &self.in_proj_tail {
             None => self.in_proj.forward(x),
@@ -854,14 +787,13 @@ impl Mamba3 {
 
 /// A [`Mamba3`] parameter that the block can hold once per application of its
 /// real layer instead of tied across them (see [`burn_stack::utils::untied`]).
-/// The big maps, the `z|x|B|C` head of `in_proj` and `out_proj`, are always
-/// tied.
+/// The big maps, the channel groups `z` to `c_raw` of `in_proj` and
+/// `out_proj`, are always tied.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Mamba3Untied {
-    /// The trailing per-micro-step scalar and rotation sub-projections of
-    /// `in_proj`, `[Δ·u | A·u | λ·u | μ·u | rotation·u | noise·u |
-    /// tropical·2u]`, moved into [`Mamba3::in_proj_tail`] (a second, small
-    /// GEMM).
+    /// The sub-projections from `dd_dt` on, in the layout of
+    /// [`Mamba3::in_proj`], moved into [`Mamba3::in_proj_tail`] (a second,
+    /// small GEMM).
     InProjTail,
     /// The Δ bias [`Mamba3::dt_bias_h`].
     DtBias,
@@ -1257,48 +1189,37 @@ impl Mamba3Config {
         self.num_quat_blocks() * self.rotation.quat_factors()
     }
 
-    /// Total input projection output size.
-    ///
-    /// ```text
-    ///   [ z | x·u | B·u | C | Δ·u | A·u | λ·u | μ·u | rotation·u | r·u | a·u | b·u ]
-    /// ```
-    ///
-    /// That is `d_inner + u·d_inner + u·bc + bc + (2 … 7)·u·nheads +
-    /// u·num_rotation_channels`, with `bc = ngroups·state_rank·mimo_rank` and
-    /// `u` = [`Self::micro_steps`]. Only the **per-micro-step**
-    /// sub-projections occur `u` times. The gate `z` and the read `C` are per
-    /// token (see [`crate::mamba3::product`]). At `u = 1`, the stock block (the
-    /// default tap pattern, no positive system) has
-    /// `2·d_inner + 2·bc + 3·nheads + num_rotation_channels`.
-    ///
-    /// A block can omit every sub-projection from `λ` on (see
-    /// [`Mamba3::in_proj`] for which setting omits which).
-    /// `helpers::split_trailing` removes their channels in the reverse order.
-    pub fn d_in_proj(&self) -> usize {
-        let u = self.micro_steps;
-        let bc = self.ngroups * self.state_rank * self.mimo_rank;
-        self.d_inner() + u * self.d_inner() + u * bc + bc + self.d_in_proj_tail()
+    /// The table of the channel groups that this config projects.
+    pub(crate) fn in_proj_layout(&self) -> InProjLayout {
+        InProjLayout::new(InProjSettings {
+            d_inner: self.d_inner(),
+            nheads: self.nheads(),
+            bc_width: self.ngroups * self.state_rank * self.mimo_rank,
+            num_rotation_channels: self.num_rotation_channels(),
+            micro_steps: self.micro_steps,
+            tap_pattern: self.tap_pattern,
+            gain: self.gain,
+            tropical: self.tropical,
+        })
     }
 
-    /// Width of the trailing per-micro-step sub-projections of the
-    /// in-projection, `[Δ·u | A·u | λ·u | μ·u | rotation·u | noise·u |
-    /// tropical·2u]`: `(2 … 7)·u·nheads + u·num_rotation_channels`.
-    /// [`Mamba3Untied::InProjTail`] moves them into `in_proj_tail`.
+    /// Total output width of the in-projection: the sum of the channel groups
+    /// in the layout of [`Mamba3::in_proj`].
+    pub fn d_in_proj(&self) -> usize {
+        self.in_proj_layout().d_in_proj()
+    }
+
+    /// Width of the channel groups from `dd_dt` on, in the layout of
+    /// [`Mamba3::in_proj`]. [`Mamba3Untied::InProjTail`] moves them into
+    /// `in_proj_tail`.
     pub fn d_in_proj_tail(&self) -> usize {
-        let u = self.micro_steps;
-        let scalars = 2
-            + usize::from(self.tap_pattern.has_beta_tap())
-            + usize::from(self.tap_pattern.has_two_taps(u))
-            + usize::from(self.gain.projects_noise())
-            + 2 * usize::from(self.tropical.is_on());
-        scalars * u * self.nheads() + u * self.num_rotation_channels()
+        self.in_proj_layout().d_in_proj_tail()
     }
 
     /// The block's 2-D weights Muon may own, and their sub-projections.
     ///
-    /// The sub-projections of `in_proj` mirror the `split_into` in the SSD
-    /// pathways (`[z | x·u | B·u | C | Δ·u | A·u | λ·u | μ·u | rotation·u |
-    /// r·u | a·u | b·u]`). The per-head *scalar* channels stay on the fallback
+    /// The sub-projections of `in_proj` follow the layout of
+    /// [`Mamba3::in_proj`]. The per-head *scalar* channels stay on the fallback
     /// optimizer. See [`burn_stack::optim`].
     ///
     /// Each micro-step gets its **own** sub-projection, not a share of one
@@ -1307,7 +1228,7 @@ impl Mamba3Config {
     /// [`MuonPlan::without_sub_projection`] still removes all the micro-steps
     /// of a stream at once.
     ///
-    /// Under [`Mamba3Untied::InProjTail`], the sub-projections from `Δ` on
+    /// Under [`Mamba3Untied::InProjTail`], the sub-projections from `dd_dt` on
     /// belong to `in_proj_tail`, one copy per application
     /// ([`ProjSpec::tiled`]).
     ///
@@ -1315,70 +1236,16 @@ impl Mamba3Config {
     /// [`ProjSpec::tiled`]: burn_stack::optim::ProjSpec::tiled
     #[cfg(feature = "optim")]
     pub fn muon_projections(&self) -> Vec<burn_stack::optim::ProjSpec> {
-        use burn_stack::optim::{ProjSpec, SubProjection as Sub};
-        let d_inner = self.d_inner();
-        let nheads = self.nheads();
-        let bc = self.ngroups * self.state_rank * self.mimo_rank;
-        let rot = self.num_rotation_channels();
-        // One copy of `sub` per micro-step.
-        let per_micro = |sub: Sub| std::iter::repeat_n(sub, self.micro_steps);
-        let head: Vec<Sub> = std::iter::once(Sub::muon("z", d_inner))
-            .chain(per_micro(Sub::muon("x", d_inner)))
-            .chain(per_micro(Sub::muon("b_raw", bc)))
-            .chain(std::iter::once(Sub::muon("c_raw", bc)))
-            .collect();
-        let tail: Vec<Sub> = per_micro(Sub::adamw("dd_dt", nheads))
-            .chain(per_micro(Sub::adamw("dd_a_raw", nheads)))
-            // `TapPattern::None` projects no `λ` (as `Real1D` projects no
-            // rotation). Only a two-tap pattern projects `μ`, the mix of the
-            // second mass.
-            .chain(
-                self.tap_pattern
-                    .has_beta_tap()
-                    .then(|| per_micro(Sub::adamw("lambda_raw", nheads)))
-                    .into_iter()
-                    .flatten(),
-            )
-            .chain(
-                self.tap_pattern
-                    .has_two_taps(self.micro_steps)
-                    .then(|| per_micro(Sub::adamw("mu_raw", nheads)))
-                    .into_iter()
-                    .flatten(),
-            )
-            // `Real1D` has no rotation columns, and a sub-projection cannot
-            // have zero width (see `num_rotation_channels`).
-            .chain(
-                (rot > 0)
-                    .then(|| per_micro(Sub::muon("rotation", rot)))
-                    .into_iter()
-                    .flatten(),
-            )
-            // The channels of the positive systems are per-head scalars, like `Δ`.
-            .chain(
-                self.gain
-                    .projects_noise()
-                    .then(|| per_micro(Sub::adamw("kalman_noise", nheads)))
-                    .into_iter()
-                    .flatten(),
-            )
-            .chain(
-                self.tropical
-                    .is_on()
-                    .then(|| {
-                        per_micro(Sub::adamw("tropical_a", nheads))
-                            .chain(per_micro(Sub::adamw("tropical_b", nheads)))
-                    })
-                    .into_iter()
-                    .flatten(),
-            )
-            .collect();
+        use burn_stack::optim::ProjSpec;
+        let layout = self.in_proj_layout();
+        let tied = layout.sub_projections(GroupPlace::InProj);
+        let tail = layout.sub_projections(GroupPlace::InProjTail);
         let in_proj = match self.untied.contains(&Mamba3Untied::InProjTail) {
             true => vec![
-                ProjSpec::block("in_proj.weight", head),
+                ProjSpec::block("in_proj.weight", tied),
                 ProjSpec::block("in_proj_tail.weight", tail).tiled(),
             ],
-            false => vec![ProjSpec::block("in_proj.weight", [head, tail].concat())],
+            false => vec![ProjSpec::block("in_proj.weight", [tied, tail].concat())],
         };
         in_proj
             .into_iter()

@@ -63,6 +63,10 @@ The factor `α = exp(Δ·A)` of the transition, with `A < 0`. A gain can set it.
 The fused projection at the entry of a block. It gives `x`, the gate and, in
 Mamba-2 and Mamba-3, the data-dependent parameters of the plant.
 
+**Channel group**:
+One named part of the output of the in-projection. A per-micro-step group holds
+`u` sub-projections. A per-token group holds one.
+
 **Learnable initial state**:
 A trained state that each forward adds to the state of its cache. Mamba-2 and
 Mamba-3 have it. Only the `Minimal` SSD path supports it.

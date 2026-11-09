@@ -23,6 +23,7 @@ use super::scan::{self, Affine, Mobius};
 use super::{Gain, LOG_ZERO, Tropical};
 use crate::mamba3::cache::Mamba3Cache;
 use crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCache;
+use crate::mamba3::in_proj_layout::GroupKey;
 use crate::mamba3::mamba3::{Mamba3, Mamba3Config};
 use crate::mamba3::rotation::RotationKind;
 use crate::mamba3::ssd_path::Mamba3SsdPath;
@@ -688,7 +689,10 @@ fn forward_and_step_gradients_agree() {
 /// The same block with its positive systems removed: the in-projection's
 /// trailing (noise, register) rows dropped and the structural fields reset.
 fn as_stock(model: &Mamba3) -> Mamba3 {
-    let extra = model.noise_channels_total() + model.tropical_channels_total();
+    let layout = model.in_proj_layout();
+    let extra = layout.channels_of(GroupKey::KalmanNoise)
+        + layout.channels_of(GroupKey::TropicalA)
+        + layout.channels_of(GroupKey::TropicalB);
     let Linear { weight, bias } = model.in_proj.clone();
     let [d_model, width] = weight.dims();
     let in_proj = Linear {
@@ -792,8 +796,10 @@ fn the_join_has_live_gradients_at_init() {
         live("ω", norm1(model.kalman_read_h.as_ref().unwrap().val().grad(&grads)));
         live("e", norm2(model.tropical_readout_hp.as_ref().unwrap().val().grad(&grads)));
         // The noise rows are the in-projection's; they see `κ`'s gradient.
-        let noise = model.noise_channels_total();
-        let tropical = model.tropical_channels_total();
+        let layout = model.in_proj_layout();
+        let noise = layout.channels_of(GroupKey::KalmanNoise);
+        let tropical =
+            layout.channels_of(GroupKey::TropicalA) + layout.channels_of(GroupKey::TropicalB);
         let w_grad = model.in_proj.weight.val().grad(&grads).unwrap();
         let width = w_grad.dims()[1];
         live(

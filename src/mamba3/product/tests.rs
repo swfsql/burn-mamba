@@ -365,7 +365,7 @@ fn every_micro_step_receives_gradient() {
     let nheads = config.nheads();
     let bc = config.ngroups * config.state_rank * config.mimo_rank;
     let rot = config.num_rotation_channels();
-    // [z | x·u | B·u | C | Δ·u | A·u | λ·u | rotation·u]
+    // The layout of `Mamba3::in_proj`, without the groups that this config omits.
     let mut at = d_inner;
     for (name, width) in [
         ("x", d_inner),

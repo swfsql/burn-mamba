@@ -31,8 +31,9 @@
 
 use crate::mamba3::double_ssd::prelude::Mamba3DoubleSsdCache;
 use crate::mamba3::helpers;
+use crate::mamba3::in_proj_layout::GroupKey;
 use crate::mamba3::mamba3::{Mamba3, Packed};
-use crate::mamba3::product::{last_micro4, unfold_micro_bs};
+use crate::mamba3::product::last_micro4;
 use crate::mamba3::rotation::{RotationState, rotate_bc_forward};
 use crate::mamba3::ssd_path::Mamba3SsdPath;
 use burn::prelude::*;
@@ -434,56 +435,26 @@ impl Mamba3 {
         (out_btd, cache)
     }
 
-    /// Split the output of the in-projection into its channel groups.
-    ///
-    /// This function removes the optional groups from the end first, in reverse
-    /// layout order. A group of width zero would vanish from the fixed-arity
-    /// split. `u` widens each per-micro-step group, and `unfold` reads each one
-    /// as `u` consecutive write positions. See [`crate::mamba3::product`].
+    /// Split the output of the in-projection into its channel groups, in the
+    /// layout of the table in [`crate::mamba3::in_proj_layout`].
     ///
     /// # Shapes
     /// - `proj_btd` : `[batch, tokens, d_in_proj]`
-    #[allow(non_snake_case)]
     pub(crate) fn split_in_proj(&self, proj_btd: Tensor<3>) -> InProjStreams {
-        let d_inner = self.d_inner();
-        let nheads = self.nheads();
-        let bc_size = self.ngroups * self.state_rank * self.mimo_rank;
-        let u = self.micro_steps;
-
-        let (proj_btd, noise_btH, tropical_btH) = self.split_positive(proj_btd, 2);
-        let (proj_btd, rot_btA) =
-            helpers::split_trailing(proj_btd, self.rotation_channels_total(), 2);
-        let (proj_btd, mu_raw_btH) = helpers::split_trailing(proj_btd, self.mu_channels_total(), 2);
-        let (proj_btd, lambda_raw_btH) =
-            helpers::split_trailing(proj_btd, self.lambda_channels_total(), 2);
-        #[rustfmt::skip]
-        let [
-                z_bti, x_btI,
-                b_raw_btMGRU, c_raw_btMGR,
-                dd_dt_btH, dd_a_raw_btH,
-        ] = burn_stack::modules::split_into(
-            proj_btd,
-            [
-                d_inner, u * d_inner,
-                u * bc_size, bc_size,
-                u * nheads, u * nheads,
-            ],
-            2,
-        );
-
+        use GroupKey::*;
+        let mut parts = self.in_proj_layout().split(proj_btd);
         InProjStreams {
-            z_bti,
-            x_bsi: unfold_micro_bs(x_btI, u),
-            b_raw_bsMGR: unfold_micro_bs(b_raw_btMGRU, u),
-            c_raw_btMGR,
-            dd_dt_bsh: unfold_micro_bs(dd_dt_btH, u),
-            dd_a_raw_bsh: unfold_micro_bs(dd_a_raw_btH, u),
-            lambda_raw_bsh: lambda_raw_btH.map(|t| unfold_micro_bs(t, u)),
-            mu_raw_bsh: mu_raw_btH.map(|t| unfold_micro_bs(t, u)),
-            rot_bsa: rot_btA.map(|t| unfold_micro_bs(t, u)),
-            noise_bsh: noise_btH.map(|t| unfold_micro_bs(t, u)),
-            tropical_ab_bsh: tropical_btH
-                .map(|(a_btH, b_btH)| (unfold_micro_bs(a_btH, u), unfold_micro_bs(b_btH, u))),
+            z_bti: parts.take_fixed(Z),
+            x_bsi: parts.take_fixed(X),
+            b_raw_bsMGR: parts.take_fixed(BRaw),
+            c_raw_btMGR: parts.take_fixed(CRaw),
+            dd_dt_bsh: parts.take_fixed(DdDt),
+            dd_a_raw_bsh: parts.take_fixed(DdARaw),
+            lambda_raw_bsh: parts.take(LambdaRaw),
+            mu_raw_bsh: parts.take(MuRaw),
+            rot_bsa: parts.take(Rotation),
+            noise_bsh: parts.take(KalmanNoise),
+            tropical_ab_bsh: parts.take(TropicalA).zip(parts.take(TropicalB)),
         }
     }
 }

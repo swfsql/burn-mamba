@@ -253,10 +253,10 @@ fn assert_muon_plan(label: &str, cfg: Mamba3Config, on: Optional) {
     let tied = vec![("in_proj.weight".to_string(), false, expected_sub_projections(&layout, u))];
     assert_eq!(tied, in_proj_specs(&cfg), "{label}: tied tail");
 
-    let (head, tail): (Vec<Group>, Vec<Group>) =
+    let (always_tied, tail): (Vec<Group>, Vec<Group>) =
         layout.iter().copied().partition(|group| TIED_GROUPS.contains(&group.name));
     let untied = vec![
-        ("in_proj.weight".to_string(), false, expected_sub_projections(&head, u)),
+        ("in_proj.weight".to_string(), false, expected_sub_projections(&always_tied, u)),
         ("in_proj_tail.weight".to_string(), true, expected_sub_projections(&tail, u)),
     ];
     let untied_cfg = cfg.with_untied(vec![Mamba3Untied::InProjTail]);

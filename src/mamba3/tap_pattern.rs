@@ -362,6 +362,7 @@ pub struct TapPatternSpec {
 mod tests {
     use super::*;
     use crate::mamba3::cache::Mamba3Cache;
+    use crate::mamba3::in_proj_layout::GroupKey;
     use crate::mamba3::mamba3::{Mamba3, Mamba3Config};
     use crate::mamba3::rotation::RotationKind;
     use crate::mamba3::ssd_path::Mamba3SsdPath;
@@ -451,8 +452,9 @@ mod tests {
                     config.d_in_proj(),
                     "{label}: in-projection width"
                 );
+                let layout = block.in_proj_layout();
                 assert_eq!(
-                    block.lambda_channels_total() + block.mu_channels_total(),
+                    layout.channels_of(GroupKey::LambdaRaw) + layout.channels_of(GroupKey::MuRaw),
                     (scalars - 2) * micro_steps * config.nheads(),
                     "{label}: mass channels"
                 );
@@ -492,7 +494,7 @@ mod tests {
         );
         let device = test_device();
         let block = without.init(&device);
-        assert_eq!(block.lambda_channels_total(), 0);
+        assert_eq!(block.in_proj_layout().channels_of(GroupKey::LambdaRaw), 0);
         assert_eq!(block.in_proj.weight.dims()[1], without.d_in_proj());
         #[cfg(feature = "optim")]
         {

@@ -96,12 +96,8 @@
 //! ## How it is evaluated
 //!
 //! Not with a new kernel: the micro-steps fold into the **write axis**. The
-//! in-projection widens exactly the per-micro-step channel groups,
-//!
-//! ```text
-//!   [ z | x·u | B·u | C | Δ·u | A·u | λ·u | μ·u | rotation·u | r·u | a·u | b·u ]
-//! ```
-//!
+//! in-projection widens exactly the per-micro-step channel groups (see the
+//! layout of [`Mamba3::in_proj`](crate::mamba3::mamba3::Mamba3::in_proj)),
 //! and [`unfold_micro_bs`] reads each `u`-wide channel group as `u`
 //! consecutive write positions. So the SSD scan, the trapezoid, the rotation scan, the
 //! chunking and the caches all run unchanged on a sequence of length

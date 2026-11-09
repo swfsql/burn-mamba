@@ -10,15 +10,13 @@
 //!    ([`build_v_with_mimo`]).
 //! 4. The rank-summed outer product `Σₘ v[m] ⊗ k[m]` that writes the state
 //!    ([`mimo_outer_sum`], SISO-branched).
-//! 5. [`split_trailing`]: removes an optional trailing channel group from the
-//!    in-projection.
-//! 6. The lag arithmetic of the trapezoid tap: the shift, the gap transport,
+//! 5. The lag arithmetic of the trapezoid tap: the shift, the gap transport,
 //!    the decay that a cached slot carries across a call boundary, and the
 //!    positions where the tap of a tap pattern closes.
-//! 7. [`prefix_sum`]: the blocked inclusive scan that replaces
+//! 6. [`prefix_sum`]: the blocked inclusive scan that replaces
 //!    `Tensor::cumsum` for every cumulative sum over the write axis, and
 //!    [`sub_periods`], its reduction on the circle.
-//! 8. The **read axis** ([`read_positions`], [`read_causal_mask`], and their
+//! 7. The **read axis** ([`read_positions`], [`read_causal_mask`], and their
 //!    primitive twins in [`prim`]).
 //!
 //! Most helpers are generic over the rank `D` of the data tensors, so one
@@ -32,38 +30,6 @@ use burn_stack::modules::gqa_expand_to_heads;
 use burn_stack::modules::softplus;
 use burn::prelude::*;
 use burn::tensor::DType;
-
-/// Remove a **trailing** in-projection channel group of `width` channels
-/// from `proj`. The group is `None` when the block projects none.
-///
-/// It serves the channel groups that a block can omit: the tropical `(a, b)` and the
-/// Kalman noise ([`Mamba3::split_positive`](crate::mamba3::mamba3::Mamba3)),
-/// then the rotation channels
-/// ([`RotationKind::Real1D`](crate::mamba3::rotation::RotationKind::Real1D)
-/// projects none), `μ` (a one-tap pattern projects none) and `λ`
-/// ([`TapPattern::None`](crate::mamba3::tap_pattern::TapPattern::None) projects
-/// none). That is why the in-projection puts them last.
-///
-/// An optional slice cannot be one more entry in the main `split_into`. Burn
-/// has no zero-width tensors, and `split_with_sizes` *drops* a zero-length
-/// part instead of returning an empty one. The destructuring would then
-/// have one part too few.
-///
-/// # Shapes
-/// - `proj` : `[..., w]` along `dim`
-/// - out    : `[..., w − width]` and, if any, `[..., width]`
-pub fn split_trailing<const D: usize>(
-    proj: Tensor<D>,
-    width: usize,
-    dim: usize,
-) -> (Tensor<D>, Option<Tensor<D>>) {
-    if width == 0 {
-        return (proj, None);
-    }
-    let rest = proj.dims()[dim] - width;
-    let tail = proj.clone().narrow(dim, rest, width);
-    (proj.narrow(dim, 0, rest), Some(tail))
-}
 
 /// Shift a per-position stream back by `lag`. The tap slots of the cache fill
 /// the first `lag` positions: `out[p] = stream[p − lag]`, or `prefix[p]` where
