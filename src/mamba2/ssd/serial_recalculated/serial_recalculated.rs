@@ -79,7 +79,7 @@ impl Mamba2SsdInput {
 /// Backend extension for the Mamba-2 SSD with a recompute backward.
 ///
 /// The default body runs the forward on backend primitives. The `Autodiff<B>`
-/// impl (in [`super::backward`]) adds the custom backward node.
+/// impl (in [`super::backward`]) adds the recompute node.
 #[backend_extension(
     // Every `#[backend_extension]` site of this crate has the same list.
     // Change them together. `build.rs` sets `cube_backend`.

@@ -15,7 +15,7 @@
 //! (forward and backward) come from the double-SSD module.
 //!
 //! All the math is on backend **primitives**, through the rank-tagged `F`
-//! wrapper. The custom [`Backward`](burn::backend::autodiff::ops::Backward) node
+//! wrapper. The [recompute node](burn_stack::utils::recompute_node)
 //! runs with a generic backend `B`, where the high-level `Tensor` is not
 //! available, so the math uses the `float_*` ops of `B`.
 

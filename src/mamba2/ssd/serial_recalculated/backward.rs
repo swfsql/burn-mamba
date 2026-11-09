@@ -1,38 +1,96 @@
-//! # Custom autodiff node for the Mamba-2 recompute backward
+//! # `RecomputeOp` of the Mamba-2 SSD
 //!
-//! Implements [`Mamba2BackendExt`] for `Autodiff<B>` with one Burn
-//! [`Backward`](burn::backend::autodiff::ops::Backward) node. The forward
-//! stores only its (small) leaf inputs. The backward replays them through the
-//! K1–K5 kernels and the analytic gradient math in [`combined_backward`]. So
-//! the large intermediate tensors are never kept alive. This is the ~⅓
-//! training-memory saving of the `SerialRecalculated` path.
+//! Implements [`Mamba2BackendExt`] for `Autodiff<B>` with one
+//! [recompute node](burn_stack::utils::recompute_node). The node saves the
+//! inputs of the forward and not its large intermediates. The backward replays
+//! the inputs through the K1–K4 kernels and the analytic gradient math in
+//! [`combined_backward`]. This is the ~⅓ training-memory saving of the
+//! `SerialRecalculated` path.
 //!
-//! [`burn_stack::utils::combined_grad`] flattens the two forward outputs (`y`
-//! and `final_state`) into one tracked 1-D tensor. Thus one `Backward<B, 8>`
-//! node (8 = the number of differentiable inputs) covers both outputs.
-
-#![allow(non_snake_case)]
+//! Without resets, `keep_bn` and `origin_bhpr` are placeholders with one
+//! element, so the node saves them at no real cost.
 
 use crate::mamba2::ssd::serial_recalculated::{
-    Mamba2BackendExt,
-    combined_backward::{self, CombinedGrads},
+    Mamba2BackendExt, combined_backward::combined_backward,
 };
-use burn::backend::autodiff::{
-    Autodiff,
-    checkpoint::{base::Checkpointer, strategy::CheckpointStrategy},
-    grads::Gradients,
-    ops::{Backward, Ops, OpsKind},
-};
+use burn::backend::Backend;
+use burn::backend::autodiff::{Autodiff, checkpoint::strategy::CheckpointStrategy};
 use burn::backend::tensor::FloatTensor;
-use burn::backend::{Backend, BackendTypes};
+use burn_stack::utils::fprim::F;
+use burn_stack::utils::recompute_node::{Prim, RecomputeOp, recompute_pair};
+
+burn_stack::recompute_inputs!(Inputs {
+    x_bnlhp,
+    dt_discretized_bhnl,
+    b_bnlhr,
+    c_bnlhr,
+    d_h,
+    initial_state_bhpr,
+    a_decay_h,
+    origin_bhpr,
+});
+
+/// The values that the op takes with no gradient.
+#[derive(Clone, Debug)]
+struct Extra<B: Backend> {
+    keep_bn: Prim<B>,
+    resets: bool,
+}
+
+/// The [`RecomputeOp`] of the Mamba-2 SSD.
+struct SsdRecompute;
+
+impl<B: Backend + Mamba2BackendExt> RecomputeOp<B, 8> for SsdRecompute {
+    type Inputs<T> = Inputs<T>;
+    type Extra = Extra<B>;
+
+    fn forward(inputs: Inputs<Prim<B>>, extra: &Extra<B>) -> (Prim<B>, Prim<B>) {
+        B::ssd_serial_recalculated(
+            inputs.x_bnlhp,
+            inputs.dt_discretized_bhnl,
+            inputs.b_bnlhr,
+            inputs.c_bnlhr,
+            inputs.d_h,
+            inputs.initial_state_bhpr,
+            inputs.a_decay_h,
+            extra.keep_bn.clone(),
+            inputs.origin_bhpr,
+            extra.resets,
+        )
+    }
+
+    fn backward(
+        d_y_bnlhp: Prim<B>,
+        d_final_state_bhpr: Prim<B>,
+        inputs: Inputs<Prim<B>>,
+        extra: Extra<B>,
+    ) -> Inputs<Option<Prim<B>>> {
+        let grads = combined_backward::<B>(
+            F::new(d_y_bnlhp),
+            F::new(d_final_state_bhpr),
+            F::new(inputs.x_bnlhp),
+            F::new(inputs.dt_discretized_bhnl),
+            F::new(inputs.b_bnlhr),
+            F::new(inputs.c_bnlhr),
+            F::new(inputs.d_h),
+            F::new(inputs.initial_state_bhpr),
+            F::new(inputs.a_decay_h),
+            extra.resets.then(|| (F::new(extra.keep_bn), F::new(inputs.origin_bhpr))),
+        );
+        Inputs {
+            x_bnlhp: Some(grads.d_x_bnlhp.inner()),
+            dt_discretized_bhnl: Some(grads.d_dt_discretized_bhnl.inner()),
+            b_bnlhr: Some(grads.d_b_bnlhr.inner()),
+            c_bnlhr: Some(grads.d_c_bnlhr.inner()),
+            d_h: Some(grads.d_d_h.inner()),
+            initial_state_bhpr: Some(grads.d_initial_state_bhpr.inner()),
+            a_decay_h: Some(grads.d_a_decay_h.inner()),
+            origin_bhpr: grads.d_origin_bhpr.map(F::inner),
+        }
+    }
+}
 
 impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for Autodiff<B, C> {
-    /// Memory-efficient combined forward+backward.
-    ///
-    /// The two output tensors go into one tracked 1-D tensor, so one
-    /// `Backward<B, 8>` node covers both outputs. The caller gets split and
-    /// reshaped slices of that tensor. Burn's autodiff adds their upstream
-    /// gradients into one gradient vector before it runs this backward.
     fn ssd_serial_recalculated(
         x_bnlhp: FloatTensor<Self>,
         dt_discretized_bhnl: FloatTensor<Self>,
@@ -45,307 +103,18 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
         origin_bhpr: FloatTensor<Self>,
         resets: bool,
     ) -> (FloatTensor<Self>, FloatTensor<Self>) {
-        // ── Backward struct ──────────────────────────────────────────────────
-        #[derive(Debug)]
-        struct CombinedKernelsBackward;
-
-        /// State carried across the forward→backward boundary.
-        ///
-        /// Only the 7 original inputs (and, with resets, the constant reset
-        /// factor and the origin state) are saved. The backward recomputes all
-        /// intermediates (cb, intra state, chunk_input_state).
-        #[derive(Clone, Debug)]
-        struct State<B: Backend> {
-            x_bnlhp: <B as BackendTypes>::FloatTensorPrimitive,
-            dt_discretized_bhnl: <B as BackendTypes>::FloatTensorPrimitive,
-            b_bnlhr: <B as BackendTypes>::FloatTensorPrimitive,
-            c_bnlhr: <B as BackendTypes>::FloatTensorPrimitive,
-            d_h: <B as BackendTypes>::FloatTensorPrimitive,
-            initial_state_bhpr: <B as BackendTypes>::FloatTensorPrimitive,
-            a_decay_h: <B as BackendTypes>::FloatTensorPrimitive,
-            // `(keep_bn, origin_bhpr)`, if the call has resets
-            restarts: Option<(
-                <B as BackendTypes>::FloatTensorPrimitive,
-                <B as BackendTypes>::FloatTensorPrimitive,
-            )>,
-            // flat element counts, to split the combined gradient vector
-            flat_len_y_BNLHP: usize,
-            flat_len_final_state_BHPR: usize,
-            // shapes needed to reconstruct tensors in the right ranks
-            shape_x_bnlhp: [usize; 5],
-            shape_dt_discretized_bhnl: [usize; 4],
-            shape_b_bnlhr: [usize; 5],
-            shape_c_bnlhr: [usize; 5],
-            shape_d_h: [usize; 1],
-            shape_initial_state_bhpr: [usize; 4],
-            shape_a_decay_h: [usize; 1],
-            shape_y_bnlhp: [usize; 5],          // (output 1)
-            shape_final_state_bhpr: [usize; 4], // (output 2)
-        }
-
-        #[allow(clippy::type_complexity)]
-        impl<B: Backend + Mamba2BackendExt> Backward<B, 8> for CombinedKernelsBackward {
-            type State = State<B>;
-
-            fn backward(
-                self,
-                ops: Ops<Self::State, 8>,
-                grads: &mut Gradients,
-                _checkpointer: &mut Checkpointer,
-            ) {
-                let [
-                    node_x_bnlhp,
-                    node_dt_discretized_bhnl,
-                    node_b_bnlhr,
-                    node_c_bnlhr,
-                    node_d_h,
-                    node_initial_state_bhpr,
-                    node_a_decay_h,
-                    node_origin_bhpr,
-                ] = ops.parents;
-
-                let d_combined: <B as BackendTypes>::FloatTensorPrimitive =
-                    grads.consume::<B>(&ops.node);
-
-                let State {
-                    x_bnlhp,
-                    dt_discretized_bhnl,
-                    b_bnlhr,
-                    c_bnlhr,
-                    d_h,
-                    initial_state_bhpr,
-                    a_decay_h,
-                    restarts,
-                    //
-                    flat_len_y_BNLHP,
-                    flat_len_final_state_BHPR,
-                    //
-                    shape_x_bnlhp,
-                    shape_dt_discretized_bhnl,
-                    shape_b_bnlhr,
-                    shape_c_bnlhr,
-                    shape_d_h,
-                    shape_initial_state_bhpr,
-                    shape_a_decay_h,
-                    //
-                    shape_y_bnlhp,
-                    shape_final_state_bhpr,
-                } = ops.state;
-
-                // ── Reconstruct saved tensors as rank-tagged primitives ────
-                use burn_stack::utils::fprim::F;
-
-                let x_bnlhp = F::<B, 5>::new(x_bnlhp).reshape(shape_x_bnlhp);
-                let dt_discretized_bhnl =
-                    F::<B, 4>::new(dt_discretized_bhnl).reshape(shape_dt_discretized_bhnl);
-                let b_bnlhr = F::<B, 5>::new(b_bnlhr).reshape(shape_b_bnlhr);
-                let c_bnlhr = F::<B, 5>::new(c_bnlhr).reshape(shape_c_bnlhr);
-                let d_h = F::<B, 1>::new(d_h).reshape(shape_d_h);
-                let initial_state_bhpr =
-                    F::<B, 4>::new(initial_state_bhpr).reshape(shape_initial_state_bhpr);
-                let a_decay_h = F::<B, 1>::new(a_decay_h).reshape(shape_a_decay_h);
-
-                // ── Split incoming combined gradient ───────────────────────
-                let (d_y_bnlhp, d_final_state_bhpr) =
-                    burn_stack::utils::combined_grad::unflatten_pair::<B, 5, 4>(
-                        d_combined,
-                        flat_len_y_BNLHP,
-                        flat_len_final_state_BHPR,
-                        shape_y_bnlhp,
-                        shape_final_state_bhpr,
-                    );
-
-                // ── Core gradient computation ──────────────────────────────
-                let CombinedGrads {
-                    d_x_bnlhp,
-                    d_dt_discretized_bhnl,
-                    d_b_bnlhr,
-                    d_c_bnlhr,
-                    d_d_h,
-                    d_initial_state_bhpr,
-                    d_origin_bhpr,
-                    d_a_decay_h,
-                    ..
-                } = combined_backward::combined_backward(
-                    F::<B, 5>::new(d_y_bnlhp),
-                    F::<B, 4>::new(d_final_state_bhpr),
-                    //
-                    x_bnlhp,
-                    dt_discretized_bhnl,
-                    b_bnlhr,
-                    c_bnlhr,
-                    d_h,
-                    initial_state_bhpr,
-                    a_decay_h,
-                    restarts.map(|(keep_bn, origin_bhpr)| {
-                        (
-                            F::<B, 2>::new(keep_bn),
-                            F::<B, 4>::new(origin_bhpr).reshape(shape_initial_state_bhpr),
-                        )
-                    }),
-                );
-
-                // ── Register gradients ─────────────────────────────────────
-                if let Some(n) = node_x_bnlhp {
-                    grads.register::<B>(n.id, d_x_bnlhp.inner());
-                }
-                if let Some(n) = node_dt_discretized_bhnl {
-                    grads.register::<B>(n.id, d_dt_discretized_bhnl.inner());
-                }
-                if let Some(n) = node_b_bnlhr {
-                    grads.register::<B>(n.id, d_b_bnlhr.inner());
-                }
-                if let Some(n) = node_c_bnlhr {
-                    grads.register::<B>(n.id, d_c_bnlhr.inner());
-                }
-                if let Some(n) = node_d_h {
-                    grads.register::<B>(n.id, d_d_h.inner());
-                }
-                if let Some(n) = node_initial_state_bhpr {
-                    grads.register::<B>(n.id, d_initial_state_bhpr.inner());
-                }
-                if let Some(n) = node_a_decay_h {
-                    grads.register::<B>(n.id, d_a_decay_h.inner());
-                }
-                if let (Some(n), Some(d_origin_bhpr)) = (node_origin_bhpr, d_origin_bhpr) {
-                    grads.register::<B>(n.id, d_origin_bhpr.inner());
-                }
-            }
-        } // end impl Backward
-
-        // ── Shape extraction helpers ───────────────────────────────────────
-        // Read through the AutodiffTensor wrappers (they own both .node and
-        // .primitive).
-        use burn::backend::TensorMetadata;
-        let [batch, nchunks, chunk_len, nheads, per_head_dim] = x_bnlhp.primitive().shape().dims();
-        let [_, _, _, _nheads_b, state_rank] = b_bnlhr.primitive().shape().dims();
-
-        let flat_len_y_BNLHP = batch * nchunks * chunk_len * nheads * per_head_dim;
-        let flat_len_final_state_BHPR = batch * nheads * per_head_dim * state_rank;
-
-        let shape_x_bnlhp: [usize; 5] = [batch, nchunks, chunk_len, nheads, per_head_dim];
-        let shape_dt_discretized_bhnl: [usize; 4] = [batch, nheads, nchunks, chunk_len];
-        let shape_b_bnlhr: [usize; 5] = [batch, nchunks, chunk_len, nheads, state_rank];
-        let shape_c_bnlhr: [usize; 5] = [batch, nchunks, chunk_len, nheads, state_rank];
-        let shape_d_h: [usize; 1] = [nheads];
-        let shape_initial_state_bhpr: [usize; 4] = [batch, nheads, per_head_dim, state_rank];
-        let shape_a_decay_h: [usize; 1] = [nheads];
-        let shape_y_bnlhp: [usize; 5] = [batch, nchunks, chunk_len, nheads, per_head_dim];
-        let shape_final_state_bhpr: [usize; 4] = [batch, nheads, per_head_dim, state_rank];
-
-        // ── Register backward / run forward ───────────────────────────────
-        match CombinedKernelsBackward
-            .prepare::<C>([
-                x_bnlhp.node(),
-                dt_discretized_bhnl.node(),
-                b_bnlhr.node(),
-                c_bnlhr.node(),
-                d_h.node(),
-                initial_state_bhpr.node(),
-                a_decay_h.node(),
-                origin_bhpr.node(),
-            ])
-            .compute_bound()
-            .stateful() // requires compute_bound
-        {
-            OpsKind::Tracked(prep) => {
-                // Run the inner (non-autodiff) forward pass.
-                let (prim_y_bnlhp, prim_final_state_bhpr) = B::ssd_serial_recalculated(
-                    x_bnlhp.primitive().clone(),
-                    dt_discretized_bhnl.primitive().clone(),
-                    b_bnlhr.primitive().clone(),
-                    c_bnlhr.primitive().clone(),
-                    d_h.primitive().clone(),
-                    initial_state_bhpr.primitive().clone(),
-                    a_decay_h.primitive().clone(),
-                    keep_bn.primitive().clone(),
-                    origin_bhpr.primitive().clone(),
-                    resets,
-                );
-
-                // prep.finish takes one tensor, so pack both outputs into one
-                // 1-D tensor. Then one Backward node covers both.
-                let (prim_combined, _, _) = burn_stack::utils::combined_grad::flatten_pair::<B>(
-                    prim_y_bnlhp,
-                    prim_final_state_bhpr,
-                );
-
-                let state = State {
-                    x_bnlhp: x_bnlhp.primitive().clone(),
-                    dt_discretized_bhnl: dt_discretized_bhnl.primitive().clone(),
-                    b_bnlhr: b_bnlhr.primitive().clone(),
-                    c_bnlhr: c_bnlhr.primitive().clone(),
-                    d_h: d_h.primitive().clone(),
-                    initial_state_bhpr: initial_state_bhpr.primitive().clone(),
-                    a_decay_h: a_decay_h.primitive().clone(),
-                    restarts: resets.then(|| {
-                        (keep_bn.primitive().clone(), origin_bhpr.primitive().clone())
-                    }),
-                    //
-                    flat_len_y_BNLHP,
-                    flat_len_final_state_BHPR,
-                    //
-                    shape_x_bnlhp, shape_dt_discretized_bhnl, shape_b_bnlhr, shape_c_bnlhr, shape_d_h, shape_initial_state_bhpr, shape_a_decay_h,
-                    shape_y_bnlhp, shape_final_state_bhpr,
-                };
-                let tracked_combined: FloatTensor<Autodiff<B, C>> =
-                    prep.finish(state, prim_combined);
-
-                // Split the tracked combined tensor back into the two outputs.
-                // The narrow/reshape ops are thin autodiff pass-throughs. Their
-                // backwards add into the combined gradient vector that
-                // `backward` above consumes.
-                let (tracked_y_bnlhp, tracked_final_state_bhpr) =
-                    burn_stack::utils::combined_grad::autodiff_unflatten_pair::<B, C, 5, 4>(
-                    tracked_combined,
-                    flat_len_y_BNLHP,
-                    flat_len_final_state_BHPR,
-                    shape_y_bnlhp,
-                    shape_final_state_bhpr,
-                );
-
-                (
-                    tracked_y_bnlhp,
-                    tracked_final_state_bhpr,
-                )
-            }
-
-            OpsKind::UnTracked(prep) => {
-                // No gradient tracking — just run the bare forward.
-                let (prim_y_bnlhp, prim_final_state_bhpr) = B::ssd_serial_recalculated(
-                    x_bnlhp.into_primitive(),
-                    dt_discretized_bhnl.into_primitive(),
-                    b_bnlhr.into_primitive(),
-                    c_bnlhr.into_primitive(),
-                    d_h.into_primitive(),
-                    initial_state_bhpr.into_primitive(),
-                    a_decay_h.into_primitive(),
-                    keep_bn.into_primitive(),
-                    origin_bhpr.into_primitive(),
-                    resets,
-                );
-
-                let (combined, _, _) = burn_stack::utils::combined_grad::flatten_pair::<B>(
-                    prim_y_bnlhp,
-                    prim_final_state_bhpr,
-                );
-
-                let tracked_combined: FloatTensor<Autodiff<B, C>> =
-                    prep.finish(combined);
-
-                let (tracked_y_bnlhp, tracked_final_state_bhpr) = burn_stack::utils::combined_grad::autodiff_unflatten_pair::<B, C, 5, 4>(
-                    tracked_combined,
-                    flat_len_y_BNLHP,
-                    flat_len_final_state_BHPR,
-                    shape_y_bnlhp,
-                    shape_final_state_bhpr,
-                );
-
-                (
-                    tracked_y_bnlhp,
-                    tracked_final_state_bhpr,
-                )
-            }
-        } // end match
-    } // end fn ssd_serial_recalculated on Autodiff<B, C>
-} // end impl Mamba2BackendExt for Autodiff<B, C>
+        recompute_pair::<B, C, SsdRecompute, _>(
+            Inputs {
+                x_bnlhp,
+                dt_discretized_bhnl,
+                b_bnlhr,
+                c_bnlhr,
+                d_h,
+                initial_state_bhpr,
+                a_decay_h,
+                origin_bhpr,
+            },
+            Extra { keep_bn: keep_bn.into_primitive(), resets },
+        )
+    }
+}
