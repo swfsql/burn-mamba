@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["backwards","cache","double_ssd","helpers","mamba3","positive","prelude","product","quat_scan","rotation","single_ssd","ssd_path","tap_pattern"],"trait":["Mamba3AutodiffBackendExt","Mamba3BackendExt"]};
+window.SIDEBAR_ITEMS = {"mod":["backwards","cache","double_ssd","helpers","mamba3","plant_frame","positive","prelude","product","quat_scan","rotation","single_ssd","ssd_path","tap_pattern"],"trait":["Mamba3AutodiffBackendExt","Mamba3BackendExt"]};
