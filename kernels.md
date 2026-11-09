@@ -15,27 +15,27 @@ Counts are exact and repeatable — they follow from the op graph, not from the 
 |---|---|---|
 | `mamba1` | 1321 | 797 |
 | `mamba2` | 105 | 78 |
-| `mamba3/siso` | 203 | 122 |
-| `mamba3/mimo-rank1` | 212 | 128 |
-| `mamba3/mimo-rank4` | 247 | 160 |
-| `mamba3/real1d` | 144 | 89 |
-| `mamba3/quaternion4d` | 653 | 289 |
-| `mamba3/rotor4d` | 735 | 365 |
-| `mamba3/siso-double-ssd` | 250 | 163 |
+| `mamba3/siso` | 201 | 120 |
+| `mamba3/mimo-rank1` | 210 | 126 |
+| `mamba3/mimo-rank4` | 245 | 158 |
+| `mamba3/real1d` | 143 | 88 |
+| `mamba3/quaternion4d` | 652 | 288 |
+| `mamba3/rotor4d` | 734 | 364 |
+| `mamba3/siso-double-ssd` | 248 | 161 |
 
 ## `train` — forward + backward (autodiff device)
 
 | case | cuda | cuda + fusion + autotune |
 |---|---|---|
-| `mamba1` | 5259 | 4011 |
+| `mamba1` | 5259 | 3755 |
 | `mamba2` | 555 | 366 |
-| `mamba3/siso` | 699 | 463 |
-| `mamba3/mimo-rank1` | 721 | 482 |
-| `mamba3/mimo-rank4` | 837 | 584 |
-| `mamba3/real1d` | 557 | 351 |
-| `mamba3/quaternion4d` | 1845 | 743 |
-| `mamba3/rotor4d` | 2109 | 872 |
-| `mamba3/siso-double-ssd` | 928 | 610 |
+| `mamba3/siso` | 693 | 453 |
+| `mamba3/mimo-rank1` | 715 | 472 |
+| `mamba3/mimo-rank4` | 831 | 577 |
+| `mamba3/real1d` | 554 | 347 |
+| `mamba3/quaternion4d` | 1840 | 749 |
+| `mamba3/rotor4d` | 2104 | 875 |
+| `mamba3/siso-double-ssd` | 922 | 600 |
 
 ## `step` — one recurrent decode step
 
@@ -43,10 +43,10 @@ Counts are exact and repeatable — they follow from the op graph, not from the 
 |---|---|---|
 | `mamba1` | 41 | 20 |
 | `mamba2` | 49 | 35 |
-| `mamba3/siso` | 118 | 58 |
-| `mamba3/mimo-rank1` | 127 | 64 |
-| `mamba3/mimo-rank4` | 133 | 68 |
-| `mamba3/real1d` | 73 | 35 |
-| `mamba3/quaternion4d` | 273 | 172 |
-| `mamba3/rotor4d` | 355 | 249 |
-| `mamba3/siso-double-ssd` | 118 | 58 |
+| `mamba3/siso` | 116 | 56 |
+| `mamba3/mimo-rank1` | 125 | 62 |
+| `mamba3/mimo-rank4` | 131 | 66 |
+| `mamba3/real1d` | 72 | 34 |
+| `mamba3/quaternion4d` | 272 | 171 |
+| `mamba3/rotor4d` | 354 | 248 |
+| `mamba3/siso-double-ssd` | 116 | 56 |
