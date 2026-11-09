@@ -59,7 +59,8 @@
 //! - `BENCH_BATCH`, `BENCH_SEQ`, `BENCH_D_MODEL`, `BENCH_STATE_RANK`,
 //!   `BENCH_HEAD_DIM`: the shape,
 //! - `BENCH_SAMPLES` / `BENCH_TIME_MS`: the sampling of criterion,
-//! - `BENCH_WARMUP_ITERS` / `BENCH_SYNC_EVERY`: the warm-up and drain policy.
+//! - `BENCH_WARMUP_ITERS` / `BENCH_SYNC_EVERY`: the warm-up and drain policy,
+//! - `BENCH_SETTLE_MS`: the wait for the cubecl logger after a measured batch.
 //!
 //! ```bash
 //! BENCH_SEQ=2048 BENCH_D_MODEL=1024 cargo bench --features backend-cuda -- forward
@@ -190,7 +191,21 @@ fn timed<T>(device: &Device, iters: u64, mut work: impl FnMut() -> T) -> Duratio
         }
     }
     sync(device);
-    start.elapsed()
+    let elapsed = start.elapsed();
+    settle_logger();
+    elapsed
+}
+
+/// Wait for the profiling logger of cubecl (`BENCH_SETTLE_MS`, default 0).
+///
+/// cubecl prints its summary tables from a separate task, and a sync does not
+/// wait for that task. So the last table of a case can appear after the banner
+/// of the next case. `kernels.sh` reads the tables of each case, so it sets
+/// this wait. The wait is outside the timed region.
+fn settle_logger() {
+    std::thread::sleep(Duration::from_millis(
+        env_usize("BENCH_SETTLE_MS", 0) as u64
+    ));
 }
 
 /// How many untimed iterations to run before criterion starts measuring.
@@ -202,6 +217,18 @@ fn timed<T>(device: &Device, iters: u64, mut work: impl FnMut() -> T) -> Duratio
 /// iteration. This is the explicit minimum (`BENCH_WARMUP_ITERS`, default 2).
 fn warmup_iters() -> usize {
     env_usize("BENCH_WARMUP_ITERS", 2)
+}
+
+/// Run [`warmup_iters`] untimed iterations of `work`, with a sync after each.
+///
+/// `work` is the closure of the measured iterations. A lazy backend can skip a
+/// result that is dropped before the sync. So a warm-up that keeps a result
+/// alive can launch other kernels than the measured iterations.
+fn warm_up<T>(device: &Device, mut work: impl FnMut() -> T) {
+    for _ in 0..warmup_iters() {
+        black_box(work());
+        sync(device);
+    }
 }
 
 fn configure(group: &mut BenchmarkGroup<'_, WallTime>, tokens: u64) {
@@ -331,18 +358,14 @@ fn run_forward<M, B, C>(
         let block = build(device);
         let x = input_3d(shape, device);
         let seed = cache(device);
+        let work = || {
+            let (y, _cache) = block.block_forward(x.clone(), seed.clone(), path.clone(), None);
+            y
+        };
 
         // Untimed: compile (and autotune) the kernels this case needs.
-        for _ in 0..warmup_iters() {
-            let (_y, _cache) = block.block_forward(x.clone(), seed.clone(), path.clone(), None);
-            sync(device);
-        }
-        b.iter_custom(|iters| {
-            timed(device, iters, || {
-                let (y, _cache) = block.block_forward(x.clone(), seed.clone(), path.clone(), None);
-                y
-            })
-        })
+        warm_up(device, work);
+        b.iter_custom(|iters| timed(device, iters, work))
     });
 }
 
@@ -367,19 +390,14 @@ fn run_train<M, B, C>(
         let block = build(device);
         let x = input_3d(shape, device);
         let seed = cache(device);
+        let work = || {
+            let (y, _cache) = block.block_forward(x.clone(), seed.clone(), path.clone(), None);
+            y.powf_scalar(2.0).mean().backward()
+        };
 
         // Untimed: the backward has kernels of its own to compile and tune.
-        for _ in 0..warmup_iters() {
-            let (y, _cache) = block.block_forward(x.clone(), seed.clone(), path.clone(), None);
-            let _grads = y.powf_scalar(2.0).mean().backward();
-            sync(device);
-        }
-        b.iter_custom(|iters| {
-            timed(device, iters, || {
-                let (y, _cache) = block.block_forward(x.clone(), seed.clone(), path.clone(), None);
-                y.powf_scalar(2.0).mean().backward()
-            })
-        })
+        warm_up(device, work);
+        b.iter_custom(|iters| timed(device, iters, work))
     });
 }
 
@@ -401,21 +419,16 @@ fn run_step<M, B, C>(
         let block = build(device);
         let x = input_2d(shape, device);
         let mut cache = cache(device);
+        let mut work = || {
+            let (y, next) = block.block_step(x.clone(), cache.take());
+            cache = Some(next);
+            y
+        };
 
         // Untimed: warm the decode kernels, and advance the cache as a real
         // decode does (so the measured iterations see the steady state).
-        for _ in 0..warmup_iters() {
-            let (_y, next) = block.block_step(x.clone(), cache.take());
-            cache = Some(next);
-            sync(device);
-        }
-        b.iter_custom(|iters| {
-            timed(device, iters, || {
-                let (y, next) = block.block_step(x.clone(), cache.take());
-                cache = Some(next);
-                y
-            })
-        })
+        warm_up(device, &mut work);
+        b.iter_custom(|iters| timed(device, iters, &mut work))
     });
 }
 
