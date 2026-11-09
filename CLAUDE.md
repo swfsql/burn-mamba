@@ -18,6 +18,8 @@ cargo run --example reset-majority -- --training --inference
 # the user runs the benches, not you:
 ./bench.sh
 ./kernels.sh
+# after these runs, compare the reports with those of a commit (docs/agents/testing.md):
+scripts/compare_reports.py BASE --changed 'GLOB'...
 ```
 
 - **Feature flags select the backend**: `backend-{flex,flex-rayon,cpu,wgpu,
@@ -257,7 +259,7 @@ src/
 build.rs                 the `cube_backend` cfg (the cubecl `backend-*` features)
 benches/layer.rs         single-block benches, run by `bench.sh`/`kernels.sh`
 info/                    derivation notes
-scripts/                 the float64 checks of the `info/` notes, `check.sh` (CI)
+scripts/                 the float64 checks of the `info/` notes, `check.sh` (CI), `compare_reports.py` (bench gates)
 examples/                see `examples/README.md`
 docs/                    `adr/`, `agents/`, `source-terms.md`, `box.tsv`
 ```

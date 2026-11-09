@@ -26,6 +26,13 @@ An expected value comes from a source outside the code under test:
 
 A ticket can gate on the reports of `./bench.sh` and `./kernels.sh`. Only the user runs them.
 
+A ticket with a bench gate states two values:
+
+- `BASE`: the commit that holds the reports before the change.
+- The changed cells: the cells that the change reaches, as globs of `section/case`. An example is `'train/mamba[23]*'`. Quote each glob, because the shell can expand it.
+
+After the user runs the benches, run `scripts/compare_reports.py BASE --changed 'GLOB'...`. Copy its numbers into the **Bench result** of the ticket. Do not write another comparison script. When a ticket needs a comparison that the script does not give, change the script.
+
 - A launch gate reads the `cuda` column of `kernels.md`. A count of that column is exact and repeatable.
 - The `cuda + fusion + autotune` column can change between runs, because the tuner selects by time. `kernels.sh` runs it three times, and a cell `a–b` gives the lowest and the highest count. Two ranges that overlap show no change.
-- A time gate compares a changed family with the families that the change does not touch. The change of those families shows the noise of the run.
+- A time gate compares the changed cells with the other cells. The change does not touch the other cells, so their change shows the noise of the run.

@@ -158,7 +158,8 @@ this brief.
 
 **Benches:** The agent stops after the last commit, because only the user runs the
 benches. The reports in the repo before the first commit of this ticket are the
-baseline.
+baseline. After the runs, compare the reports with
+`scripts/compare_reports.py <the commit before this ticket> --changed '*/mamba[23]*'`.
 
 - No launch count rises in the `cuda` column of `kernels.md`.
 - The time stays within run noise, as the user judges it. After ticket 10, this change

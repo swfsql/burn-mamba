@@ -66,6 +66,8 @@ if [ -z "${CI:-}" ]; then
     check_prose
 fi
 
+python3 scripts/compare_reports.py --selftest
+
 no_warnings cargo check
 for family in mamba1 mamba2 mamba3; do
     no_warnings cargo check --no-default-features --features "$family,backend-flex"
