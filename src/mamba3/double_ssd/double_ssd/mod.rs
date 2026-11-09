@@ -28,7 +28,7 @@
 
 use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::helpers;
-use crate::mamba3::mamba3::Packed;
+use crate::mamba3::plant_frame::{PlantEntry, PlantResets, PlantTail};
 use crate::mamba3::prelude::*;
 use crate::mamba3::rotation::rotate_bc_forward;
 use burn_stack::modules::Silu;
@@ -75,198 +75,42 @@ impl Mamba3 {
         reset_bt: Option<Tensor<2, Bool>>,
     ) -> (Tensor<3>, Mamba3DoubleSsdCache) {
         let [batch, tokens, _d_model] = input_bsm.dims();
-        let d_inner = self.d_inner();
         let nheads = self.nheads();
-        let ngroups = self.ngroups;
         let per_head_dim = self.per_head_dim();
         let state_rank = self.state_rank;
         let mimo_rank = self.mimo_rank;
-        let micro_steps = self.micro_steps;
+        let u = self.micro_steps;
         let device = input_bsm.device();
+        let sequence = tokens * u;
 
-        // MambaProduct: from the split below down to the readout, one sequence
-        // position *is* one micro-step. The `s` in every shape suffix counts
-        // micro-steps, and `tokens` (`t`) is at token resolution. See
-        // [`crate::mamba3::product`].
-        let sequence = tokens * micro_steps;
-
-        assert!(tokens > 0, "sequence length must be at least 1");
-        assert_eq!(nheads % ngroups, 0);
-        san(&input_bsm);
-
-        // A padded token pads all of its micro-steps. `end_b` is one past the
-        // last real position of each row on the write axis, where its cache
-        // fields are read.
-        let pad_bs = pad_bt.map(|pad_bt| crate::padding::repeat_positions(pad_bt, micro_steps));
-        let end_b = pad_bs.as_ref().map(crate::padding::real_end_b);
-
-        // A reset is at the first token of a chunk, which is its first
-        // micro-step on the write axis. See [`crate::packing`].
+        // ── The entry of the plant frame ──────────────────────────────────────
         let chunk_len = ssd_path.chunk_len_or_optimal(self);
-        let segments = reset_bt.map(|reset_bt| {
-            let chunk_tokens = Mamba3SsdPath::chunk_tokens(chunk_len, micro_steps);
-            let reset_bn = crate::packing::chunk_resets(reset_bt, chunk_tokens);
-            crate::packing::Segments::new(reset_bn, chunk_len, sequence)
-        });
-
-        // ── Initialise cache if not provided ──────────────────────────────────
-        let fresh = || {
-            let ssm_bhpr = Tensor::zeros([batch, nheads, per_head_dim, state_rank], &device);
-            let (k_state_bumhr, v_state_buhp) = self.zero_tap_slots(batch, &device);
-            let rotation = self.zero_rotation_state(batch, &device);
-            let (log_precision_bh, tropical_bh) = self.zero_positive_state(batch, &device);
-            Mamba3DoubleSsdCache {
-                ssm_bhpr,
-                k_state_bumhr,
-                v_state_buhp,
-                rotation,
-                log_precision_bh,
-                tropical_bh,
-            }
-        };
-        let mut cache = cache.unwrap_or_else(fresh);
-        // A packed row: the cache that each segment starts from.
-        let packed = segments.map(|segments| Packed {
-            segments,
-            origin: origin.unwrap_or_else(fresh),
-        });
-
-        // ── Step 1: In-projection ─────────────────────────────────────────────
-        let proj_bsd = self.project_in(input_bsm);
-        // The segments of the positive systems are the outermost tail
-        // ([`crate::mamba3::positive`]). The rest is the stock layout.
-        let (proj_bsd, noise_btH, tropical_btH) = self.split_positive(proj_bsd, 2);
-        let bc_size = ngroups * state_rank * mimo_rank;
-
-        // [batch, tokens, *] split along the channel dim. `u` = micro_steps
-        // widens every per-micro-step channel group, and `unfold` reads each of
-        // them as `u` consecutive write positions. `z` (per-token gate) and `C`
-        // (per-token read) do not widen.
-        // b_raw_bsMGR / c_raw_btMGR have channel size `mimo_rank * ngroups * state_rank`.
-        // The three optional channel groups come off the tail first (`Real1D`
-        // projects no rotation, a one-tap pattern no `μ`, `TapPattern::None` no
-        // `λ`), because a zero-width group would silently vanish from the
-        // fixed-arity split below.
-        let u = micro_steps;
-        let (proj_bsd, rot_btA) =
-            helpers::split_trailing(proj_bsd, self.rotation_channels_total(), 2);
-        let (proj_bsd, mu_raw_btH) = helpers::split_trailing(proj_bsd, self.mu_channels_total(), 2);
-        let (proj_bsd, lambda_raw_btH) =
-            helpers::split_trailing(proj_bsd, self.lambda_channels_total(), 2);
-        #[rustfmt::skip]
-        let [
-                z_bsi, x_btI,
-                b_raw_btMGRU, c_raw_btMGR,
-                dd_dt_btH, dd_A_raw_btH,
-        ] = burn_stack::modules::split_into(
-            proj_bsd,
-            [
-                d_inner, u * d_inner,
-                u * bc_size, bc_size,
-                u * nheads, u * nheads,
-            ],
-            2,
-        );
-
-        use crate::mamba3::product::unfold_micro_bs;
-        let x_bsi = unfold_micro_bs(x_btI, u);
-        let b_raw_bsMGR = unfold_micro_bs(b_raw_btMGRU, u);
-        // `C` stays at token resolution: the readout is once per token, at its
-        // last micro-step. See [`Mamba3DoubleSsdInput::c_bntmhr`].
-        let dd_dt_bsh = unfold_micro_bs(dd_dt_btH, u);
-        let dd_A_raw_bsh = unfold_micro_bs(dd_A_raw_btH, u);
-        let lambda_raw_bsh = lambda_raw_btH.map(|t| unfold_micro_bs(t, u));
-        let mu_raw_bsh = mu_raw_btH.map(|t| unfold_micro_bs(t, u));
-        let rot_bsa = rot_btA.map(|t| unfold_micro_bs(t, u));
-        let noise_bsh = noise_btH.map(|t| unfold_micro_bs(t, u));
-
-        san(&z_bsi);
-        san(&x_bsi);
-        san(&dd_dt_bsh);
-
-        // ── Step 2: Discretisation + trapezoidal coefficients ─────────────────
-        // Under a Kalman gain, this call computes the decay before anything
-        // below reads it.
-        let helpers::TrapezoidCoeffs {
-            dt: dt_bsh,
-            da: da_bsh,
-            alpha: alpha_bsh,
-            nu: nu_bsh,
-            nu_interior: nu_interior_bsh,
-            gamma: gamma_bsh,
-            log_precision: log_precision_bsh,
-        } = helpers::trapezoidal_coefficients(
-            dd_dt_bsh,
-            dd_A_raw_bsh,
-            lambda_raw_bsh,
-            mu_raw_bsh,
-            self.dt_bias_h.val(),
-            self.tap_pattern_spec(),
-            self.gain_input(noise_bsh, cache.log_precision_bh.clone(), packed.as_ref()),
-        )
-        .padded(pad_bs.as_ref());
-        // The inputs of the tropical register, on the same write axis.
-        let tropical_ab_bsh = tropical_btH.map(|(a_btH, b_btH)| {
-            (unfold_micro_bs(a_btH, u), unfold_micro_bs(b_btH, u))
-        });
-
-        san(&dt_bsh);
-        san(&da_bsh);
-        for nu_bsh in [&nu_bsh, &nu_interior_bsh].into_iter().flatten() {
-            san(nu_bsh);
-        }
-        san(&gamma_bsh);
-
-        // ── Step 3: Reshape x ─────────────────────────────────────────────────
-        let x_bshp = x_bsi.reshape([batch, sequence, nheads, per_head_dim]);
-
-        // ── Step 4: QK-Norm on B and C  ───────────────────────────────────────
-        // QK-Norm over state_rank, then expand ngroups→nheads, then add per-(head,
-        // mimo-rank) bias [nheads, mimo_rank, state_rank]. Group dim is axis 3 of
-        // `_bsmgr` (D = 5).
-        let b_bsmhr = helpers::qk_norm_expand_bias::<5, 6>(
-            b_raw_bsMGR.reshape([batch, sequence, mimo_rank, ngroups, state_rank]),
-            &self.b_norm,
-            self.b_bias_hmr.val(),
-            3,
-            nheads,
-        );
-        let c_btmhr = helpers::qk_norm_expand_bias::<5, 6>(
-            c_raw_btMGR.reshape([batch, tokens, mimo_rank, ngroups, state_rank]),
-            &self.c_norm,
-            self.c_bias_hmr.val(),
-            3,
-            nheads,
-        );
-        assert_eq!(
-            [batch, sequence, mimo_rank, nheads, state_rank],
-            b_bsmhr.dims()
-        );
-        assert_eq!(
-            [batch, tokens, mimo_rank, nheads, state_rank],
-            c_btmhr.dims()
-        );
-
-        // ── Step 5: Data-dependent transition rotation of B and C ─────────────
-        // Per `RotationKind`: nothing (Real1D), the cumulative angle
-        // (Complex2D), or the cumulative quaternion(s) (Quaternion4D, Rotor4D).
-        // The new cache accumulator goes to the cache update below. See
-        // [`rotate_bc_forward`]. `C` turns at token resolution: it needs the
-        // cumulative rotation of the micro-step where it is read.
-        let (b_bsmhr, c_btmhr, new_rotation) = rotate_bc_forward(
-            rot_bsa,
-            dt_bsh.clone(),
-            cache.rotation.clone(),
+        let PlantEntry {
+            mut cache,
+            packed,
+            end_b,
+            z_bti,
+            x_bshp,
             b_bsmhr,
             c_btmhr,
-            u,
-            self.rotation_spec(),
-            packed.as_ref().map(|p| (&p.segments.start_bs, p.origin.rotation.clone())),
+            da_bsh,
+            alpha_bsh,
+            nu_bsh,
+            nu_interior_bsh,
+            gamma_bsh,
+            log_precision_bsh,
+            tropical_ab_bsh,
+            new_rotation,
+            b_last_bumhr,
+            x_last_buhp,
+        } = self.plant_entry(
+            input_bsm,
+            cache,
+            pad_bt,
+            reset_bt.map(|reset_bt| PlantResets { reset_bt, origin, chunk_len }),
         );
-        san(&b_bsmhr);
-        san(&c_btmhr);
 
-        // ── Steps 6–7: the β term's shifted, β-scaled inputs ──────────────────
+        // ── The β term's shifted, β-scaled inputs ─────────────────────────────
         //
         // "Shift-Before-Chunking": prepend the cached xₜ₋₁ / Bₜ₋₁ at the
         // sequence level (before SSD chunking), so the β term at t=0 sees the
@@ -337,28 +181,11 @@ impl Mamba3 {
             .chain(nu_interior_bsh.map(|nu_bsh| beta_side(nu_bsh, 1)))
             .collect();
 
-        // ── Step 7b: Scale the current-token input by γ ───────────────────────
+        // ── Scale the current-token input by γ ────────────────────────────────
         let gamma_bsh1 = gamma_bsh.unsqueeze_dim::<4>(3);
         let x_gamma_bshp = x_bshp.clone() * gamma_bsh1; // γₜ · xₜ
 
-        // ── Save the B and x of the last `lag` positions for the cache ────────
-        // The last `lag` *micro-steps* are exactly the positions whose taps the
-        // next call must pay. So the trapezoid continues unchanged across a
-        // split prefill (at `lag = u`, that window is exactly the last token).
-        // With no β tap there is nothing to continue, and the slots stay empty.
-        // See [`Self::save_tap_slots`].
-        let (b_last_bumhr, x_last_buhp) = self.save_tap_slots(
-            &b_bsmhr,
-            &x_bshp,
-            &da_bsh,
-            lag,
-            end_b.clone().map(|end_b| {
-                (end_b, cache.k_state_bumhr.clone(), cache.v_state_buhp.clone())
-            }),
-            packed.as_ref(),
-        );
-
-        // ── Step 8: Pad sequence to multiple of chunk_len ─────────────────────
+        // ── Pad sequence to multiple of chunk_len ─────────────────────────────
         let sequence_padded = sequence.next_multiple_of(chunk_len);
         let pad = sequence_padded - sequence;
 
@@ -419,7 +246,7 @@ impl Mamba3 {
         let c_bntmhr =
             c_bTmhr.reshape([batch, nchunks, chunk_tokens, mimo_rank, nheads, state_rank]);
 
-        // ── Step 9: the MIMO-SSD call(s) ─────────────────────────────────────────
+        // ── The MIMO-SSD call(s) ──────────────────────────────────────────────
         // Build the V tensors: insert the mimo_rank axis at position 3 of
         // `_bnlhp`. With a β tap, these are the two standard SSD passes that
         // give the pathway its name (γ-SSM + β-SSM, summed). Under
@@ -484,7 +311,7 @@ impl Mamba3 {
 
         cache.ssm_bhpr = final_state_bhpr;
 
-        // ── Step 10: Unpad ────────────────────────────────────────────────────
+        // ── Unpad ─────────────────────────────────────────────────────────────
         // The SSD returns token resolution: the readout is after all `u`
         // writes, and the kernel computed only that position. From here, `t`
         // (`tokens`) is the time axis again: the read axis.
@@ -494,95 +321,23 @@ impl Mamba3 {
         } else {
             y_bTmhp.narrow(1, 0, tokens)
         };
-        let (y_btmhp, log_precision_bh, tropical_bh) = self.positive_tail(
-            y_btmhp,
-            log_precision_bsh,
-            tropical_ab_bsh,
-            cache.tropical_bh.clone(),
-            end_b.map(|end_b| (end_b, cache.log_precision_bh.clone())),
-            packed.as_ref(),
-        );
-        cache.log_precision_bh = log_precision_bh;
-        cache.tropical_bh = tropical_bh;
-        let x_bthp = crate::mamba3::product::last_micro4(x_bshp.clone(), micro_steps);
 
-        // ── Step 11: D skip + gate + aggregate ranks ──────────────────────────
-        // The D skip uses the raw x * mimo_x_hmp (not gamma-scaled), at the
-        // micro-step of the readout.
-        // Insert the mimo_rank axis at position 2 of `_bthp`.
-        let v_raw_bsmhp = helpers::build_v_with_mimo::<4, 5>(x_bthp, mimo_x_hmp.as_ref(), 2);
-        let y_bsmhp = y_btmhp;
-        let sequence = tokens;
-
-        let d_111h1 = self.d_h.val().unsqueeze_dims::<5>(&[0, 1, 2, 4]);
-        let y_bsmhp = y_bsmhp + d_111h1 * v_raw_bsmhp.clone();
-
-        // ── Gate (or gated norm) and rank aggregation ─────────────────────────
-        // When `out_norm` is set, a per-head gated RMSNorm replaces the SiLU
-        // gate: `RmsNormGated(y, z) = norm(y) * silu(z)`.
-        let y_bsi = if mimo_rank > 1 {
-            let mimo_z_hmp = self.mimo_z_hmp.as_ref().map(|p| p.val()).unwrap();
-            let mimo_o_hmp = self.mimo_o_hmp.as_ref().map(|p| p.val()).unwrap();
-
-            let z_bshp = z_bsi
-                .clone()
-                .reshape([batch, sequence, nheads, per_head_dim]);
-            let z_bsmhp = {
-                let z_bsmhp = z_bshp
-                    .unsqueeze_dim::<5>(2) // z_bs1hp
-                    .expand([batch, sequence, mimo_rank, nheads, per_head_dim]); // z_bsmhp
-                let mimo_z_bsmhp = mimo_z_hmp
-                    .swap_dims(0, 1) // mimo_z_mhp
-                    .unsqueeze_dims::<5>(&[0, 1]) // mimo_z_11mhp
-                    .expand([batch, sequence, mimo_rank, nheads, per_head_dim]); // mimo_z_bsmhp
-                z_bsmhp * mimo_z_bsmhp
-            };
-
-            // gate or gated norm:
-            //   without out_norm: y_r * silu(z_r)
-            //   with    out_norm: norm(y_r) * silu(z_r)  (norm over per_head_dim)
-            let y_combined_bsmhp = match &self.out_norm {
-                Some(norm) => norm.forward(y_bsmhp, z_bsmhp),
-                None => y_bsmhp * Silu::new().forward(z_bsmhp),
-            };
-
-            // Down-project with mimoₒ_hmp: out = sumₘ mimoₒ_hmp[h, r, p] * yᵣ
-            let mimo_o_bsmhp = mimo_o_hmp
-                .swap_dims(0, 1) // mimo_o_mhp
-                .unsqueeze_dims::<5>(&[0, 1]) // mimo_o_11mhp
-                .expand([batch, sequence, mimo_rank, nheads, per_head_dim]); // mimo_o_bsmhp
-            // sum over mimo rank dim
-            let y_bshp: Tensor<4> = (y_combined_bsmhp * mimo_o_bsmhp)
-                .sum_dim(2) // y_bs1hp
-                .squeeze_dim(2); // y_bshp
-            y_bshp.reshape([batch, sequence, d_inner])
-        } else {
-            // SISO: squeeze rank dim, apply gate (or gated norm) over per_head_dim.
-            let y_bshp: Tensor<4> = y_bsmhp.squeeze_dim(2); // mimo_rank == 1
-            let z_bshp = z_bsi.reshape([batch, sequence, nheads, per_head_dim]);
-            let y_combined_bshp = match &self.out_norm {
-                Some(norm) => norm.forward(y_bshp, z_bshp),
-                None => y_bshp * Silu::new().forward(z_bshp),
-            };
-            y_combined_bshp.reshape([batch, sequence, d_inner])
-        };
-        san(&y_bsi);
-
-        // ── Out-projection ────────────────────────────────────────────────────
-        let out_bsm = self.out_proj.forward(y_bsi);
-        san(&out_bsm);
-
-        // ── Update remaining cache fields ─────────────────────────────────────
-        // k_state / v_state = the last `lag` positions of the tap FIFO (both
-        // `None` when the pattern has no β tap).
-        cache.k_state_bumhr = b_last_bumhr;
-        cache.v_state_buhp = x_last_buhp;
-
-        // The cumulative rotation at the last micro-step (the angle wrapped to
-        // [−π, π], or the cumulative quaternions), to continue the sequence.
-        cache.rotation = new_rotation;
-
-        (out_bsm, cache)
+        // ── The tail of the plant frame ───────────────────────────────────────
+        self.plant_tail(
+            PlantTail {
+                y_btmhp,
+                z_bti,
+                x_bshp,
+                log_precision_bsh,
+                tropical_ab_bsh,
+                end_b,
+                packed,
+                new_rotation,
+                b_last_bumhr,
+                x_last_buhp,
+            },
+            cache,
+        )
     }
 }
 

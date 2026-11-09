@@ -218,6 +218,7 @@ src/
 │     └─ serial_recalculated/  the recompute backward (`Mamba2BackendExt`)
 ├─ mamba3/               Mamba-3 block (`mamba3.rs`: the math) + the cache enum
 │  ├─ helpers.rs         shared by both pathways and by forward and step
+│  ├─ plant_frame.rs     the entry and the tail around each scan
 │  ├─ ssd_path.rs        `Mamba3SsdPath` (both pathways), the chunk length
 │  ├─ tap_pattern.rs     the tap pattern (`TapPattern`)
 │  ├─ double_ssd/        double-SSD pathway + its cache

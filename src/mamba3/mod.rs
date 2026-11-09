@@ -74,6 +74,7 @@ pub mod single_ssd;
 pub mod cache;
 pub(crate) mod helpers;
 pub mod mamba3;
+pub(crate) mod plant_frame;
 pub mod positive;
 pub mod product;
 pub mod quat_scan;
