@@ -106,7 +106,7 @@ fn assert_stream(label: &str, layout: &[Group], name: &str, stream: Tensor<3>, t
     }
 }
 
-fn assert_absent(label: &str, name: &str, present: bool, expected: bool) {
+fn assert_presence(label: &str, name: &str, present: bool, expected: bool) {
     assert_eq!(expected, present, "{label}: presence of {name}");
 }
 
@@ -127,11 +127,11 @@ fn assert_split(label: &str, cfg: Mamba3Config, on: Optional) {
     check("C_raw", s.c_raw_btMGR);
     check("dd_dt", s.dd_dt_bsh);
     check("dd_A", s.dd_a_raw_bsh);
-    assert_absent(label, "lambda_raw", s.lambda_raw_bsh.is_some(), on.lambda);
-    assert_absent(label, "mu_raw", s.mu_raw_bsh.is_some(), on.mu);
-    assert_absent(label, "rotation", s.rot_bsa.is_some(), on.rotation);
-    assert_absent(label, "noise", s.noise_bsh.is_some(), on.noise);
-    assert_absent(label, "tropical", s.tropical_ab_bsh.is_some(), on.tropical);
+    assert_presence(label, "lambda_raw", s.lambda_raw_bsh.is_some(), on.lambda);
+    assert_presence(label, "mu_raw", s.mu_raw_bsh.is_some(), on.mu);
+    assert_presence(label, "rotation", s.rot_bsa.is_some(), on.rotation);
+    assert_presence(label, "noise", s.noise_bsh.is_some(), on.noise);
+    assert_presence(label, "tropical", s.tropical_ab_bsh.is_some(), on.tropical);
     s.lambda_raw_bsh.map(|t| check("lambda_raw", t));
     s.mu_raw_bsh.map(|t| check("mu_raw", t));
     s.rot_bsa.map(|t| check("rotation", t));
@@ -229,7 +229,7 @@ fn silu(v: f64) -> f64 {
 /// ```
 ///
 /// A SISO block has no `mimo_*` weights, and each is `1`. The `ε` of the RMS is
-/// about `1e-7`, against `mean(y²) ≈ 1`, so the loop leaves it out. `x` is read
+/// about `1e-7`, against `mean(y²) ≈ 1`, so the loop omits it. `x` is read
 /// at the last micro-step of each token.
 fn assert_tail(mimo_rank: usize, out_norm: bool, u: usize) {
     let label = format!("mimo_rank = {mimo_rank}, out_norm = {out_norm}, u = {u}");
@@ -258,10 +258,10 @@ fn assert_tail(mimo_rank: usize, out_norm: bool, u: usize) {
     let y_btmhp = random([batch, tokens, mimo_rank, nheads, per_head], &device);
     let x_bshp = random([batch, tokens * u, nheads, per_head], &device);
     let z_bti = random([batch, tokens, d_inner], &device);
-    let b_last = random([batch, 1, mimo_rank, nheads, 4], &device);
-    let x_last = random([batch, 1, nheads, per_head], &device);
-    let new_angle = random([batch, nheads, model.num_rotation_angles], &device);
-    let ssm = random([batch, nheads, per_head, 4], &device);
+    let b_last_bumhr = random([batch, 1, mimo_rank, nheads, 4], &device);
+    let x_last_buhp = random([batch, 1, nheads, per_head], &device);
+    let angle_bha = random([batch, nheads, model.num_rotation_angles], &device);
+    let ssm_bhpr = random([batch, nheads, per_head, 4], &device);
 
     let (out_btd, cache) = model.plant_tail(
         PlantTail {
@@ -272,15 +272,15 @@ fn assert_tail(mimo_rank: usize, out_norm: bool, u: usize) {
             tropical_ab_bsh: None,
             end_b: None,
             packed: None,
-            new_rotation: RotationState::Angle(new_angle.clone()),
-            b_last_bumhr: Some(b_last.clone()),
-            x_last_buhp: Some(x_last.clone()),
+            new_rotation: RotationState::Angle(angle_bha.clone()),
+            b_last_bumhr: Some(b_last_bumhr.clone()),
+            x_last_buhp: Some(x_last_buhp.clone()),
         },
         Mamba3DoubleSsdCache {
-            ssm_bhpr: ssm.clone(),
+            ssm_bhpr: ssm_bhpr.clone(),
             k_state_bumhr: None,
             v_state_buhp: None,
-            rotation: RotationState::Angle(new_angle.clone().zeros_like()),
+            rotation: RotationState::Angle(angle_bha.clone().zeros_like()),
             log_precision_bh: None,
             tropical_bh: None,
         },
@@ -336,10 +336,10 @@ fn assert_tail(mimo_rank: usize, out_norm: bool, u: usize) {
     assert!(diff < dtype_tol(1e-4), "{label}: the tail differs from its definition by {diff}");
 
     // The tail fills the fields of the next call, and keeps the state of the scan.
-    assert_eq!(host(ssm), host(cache.ssm_bhpr), "{label}: state");
-    assert_eq!(host(b_last), host(cache.k_state_bumhr.unwrap()), "{label}: B slots");
-    assert_eq!(host(x_last), host(cache.v_state_buhp.unwrap()), "{label}: x slots");
-    assert_eq!(host(new_angle), host(cache.rotation.angle()), "{label}: rotation");
+    assert_eq!(host(ssm_bhpr), host(cache.ssm_bhpr), "{label}: state");
+    assert_eq!(host(b_last_bumhr), host(cache.k_state_bumhr.unwrap()), "{label}: B slots");
+    assert_eq!(host(x_last_buhp), host(cache.v_state_buhp.unwrap()), "{label}: x slots");
+    assert_eq!(host(angle_bha), host(cache.rotation.angle()), "{label}: rotation");
 }
 
 #[test]

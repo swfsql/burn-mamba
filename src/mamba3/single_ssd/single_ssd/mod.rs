@@ -403,7 +403,7 @@ impl Mamba3 {
         };
 
         // ── The tail of the plant frame ───────────────────────────────────────
-        let (out_bsm, cache) = self.plant_tail(
+        let (out_btd, cache) = self.plant_tail(
             PlantTail {
                 y_btmhp,
                 z_bti,
@@ -418,7 +418,7 @@ impl Mamba3 {
             },
             cache,
         );
-        (out_bsm, cache.into())
+        (out_btd, cache.into())
     }
 }
 

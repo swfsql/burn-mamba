@@ -43,27 +43,21 @@ use burn_stack::modules::{Silu, sanity as san};
 /// The gate `z` and the read `C` stay at token resolution.
 #[allow(non_snake_case)]
 pub(crate) struct InProjStreams {
-    /// `[batch, tokens, d_inner]`.
     pub z_bti: Tensor<3>,
-    /// `[batch, tokens·u, d_inner]`.
     pub x_bsi: Tensor<3>,
-    /// `[batch, tokens·u, mimo_rank·ngroups·state_rank]`.
     pub b_raw_bsMGR: Tensor<3>,
-    /// `[batch, tokens, mimo_rank·ngroups·state_rank]`.
     pub c_raw_btMGR: Tensor<3>,
-    /// `[batch, tokens·u, nheads]`.
     pub dd_dt_bsh: Tensor<3>,
-    /// `[batch, tokens·u, nheads]`.
     pub dd_a_raw_bsh: Tensor<3>,
-    /// `[batch, tokens·u, nheads]`. `None` under `TapPattern::None`.
+    /// `None` under `TapPattern::None`.
     pub lambda_raw_bsh: Option<Tensor<3>>,
-    /// `[batch, tokens·u, nheads]`. `None` unless the pattern has two taps.
+    /// `None` unless the pattern has two taps.
     pub mu_raw_bsh: Option<Tensor<3>>,
-    /// `[batch, tokens·u, num_rotation_channels]`. `None` under `Real1D`.
+    /// `None` under `Real1D`.
     pub rot_bsa: Option<Tensor<3>>,
-    /// `[batch, tokens·u, nheads]`. `None` unless the gain projects its noise.
+    /// `None` unless the gain projects its noise.
     pub noise_bsh: Option<Tensor<3>>,
-    /// `(a, b)`, each `[batch, tokens·u, nheads]`. `None` without the register.
+    /// `(a, b)`. `None` without the tropical register.
     pub tropical_ab_bsh: Option<(Tensor<3>, Tensor<3>)>,
 }
 
@@ -80,8 +74,8 @@ pub(crate) struct PlantResets {
 
 /// The result of [`Mamba3::plant_entry`], one field for each stream.
 ///
-/// A pathway moves each field out at once, and it does not hold this struct
-/// across its scan, so that each tensor drops at its last use.
+/// A pathway moves each field out at once. It does not hold this struct across
+/// its scan, so each tensor drops at its last use.
 pub(crate) struct PlantEntry {
     /// The cache of the call: the one that the caller gave, or a fresh one.
     pub cache: Mamba3DoubleSsdCache,
@@ -89,30 +83,29 @@ pub(crate) struct PlantEntry {
     pub packed: Option<Packed>,
     /// One past the last real write position of each row, for a padded call.
     pub end_b: Option<Tensor<1, Int>>,
-    /// The gate, `[batch, tokens, d_inner]`.
+    /// The gate.
     pub z_bti: Tensor<3>,
-    /// The value stream, `[batch, tokens·u, nheads, per_head_dim]`.
+    /// The value stream.
     pub x_bshp: Tensor<4>,
-    /// The rotated `B`, `[batch, tokens·u, mimo_rank, nheads, state_rank]`.
+    /// The rotated `B`.
     pub b_bsmhr: Tensor<5>,
-    /// The rotated `C`, `[batch, tokens, mimo_rank, nheads, state_rank]`.
+    /// The rotated `C`.
     pub c_btmhr: Tensor<5>,
-    /// The log-decay, `[batch, tokens·u, nheads]`.
+    /// The log-decay.
     pub da_bsh: Tensor<3>,
-    /// `α = exp(da)`, `[batch, tokens·u, nheads]`.
+    /// `α = exp(da)`.
     pub alpha_bsh: Tensor<3>,
-    /// The tap mass `ν`, `[batch, tokens·u, nheads]`. `None` under
-    /// `TapPattern::None`.
+    /// The tap mass `ν`. `None` under `TapPattern::None`.
     pub nu_bsh: Option<Tensor<3>>,
     /// The mass of the lag-1 tap of a two-tap pattern.
     pub nu_interior_bsh: Option<Tensor<3>>,
-    /// `γ = λ·Δ`, `[batch, tokens·u, nheads]`.
+    /// `γ = λ·Δ`.
     pub gamma_bsh: Tensor<3>,
     /// `ln Λ` at each write position, under a Kalman gain.
     pub log_precision_bsh: Option<Tensor<3>>,
     /// The `(a, b)` of the tropical register, on the write axis.
     pub tropical_ab_bsh: Option<(Tensor<3>, Tensor<3>)>,
-    /// The rotation accumulator for the next call.
+    /// The cumulative rotation for the next call.
     pub new_rotation: RotationState,
     /// The `B` tap slots for the next call.
     pub b_last_bumhr: Option<Tensor<5>>,
@@ -121,27 +114,18 @@ pub(crate) struct PlantEntry {
 }
 
 /// The input of [`Mamba3::plant_tail`]. The readout comes from the middle of a
-/// pathway, and the other fields come from the entry.
+/// pathway. Each other field is the field of [`PlantEntry`] with the same name.
 pub(crate) struct PlantTail {
-    /// The readout of the scan, `[batch, tokens, mimo_rank, nheads, per_head_dim]`.
+    /// The readout of the scan.
     pub y_btmhp: Tensor<5>,
-    /// The gate, `[batch, tokens, d_inner]`.
     pub z_bti: Tensor<3>,
-    /// The value stream, `[batch, tokens·u, nheads, per_head_dim]`.
     pub x_bshp: Tensor<4>,
-    /// `ln Λ` at each write position, under a Kalman gain.
     pub log_precision_bsh: Option<Tensor<3>>,
-    /// The `(a, b)` of the tropical register, on the write axis.
     pub tropical_ab_bsh: Option<(Tensor<3>, Tensor<3>)>,
-    /// One past the last real write position of each row, for a padded call.
     pub end_b: Option<Tensor<1, Int>>,
-    /// The resets of a packed call.
     pub packed: Option<Packed>,
-    /// The rotation accumulator for the next call.
     pub new_rotation: RotationState,
-    /// The `B` tap slots for the next call.
     pub b_last_bumhr: Option<Tensor<5>>,
-    /// The `x` tap slots for the next call.
     pub x_last_buhp: Option<Tensor<4>>,
 }
 
@@ -452,11 +436,10 @@ impl Mamba3 {
 
     /// Split the output of the in-projection into its channel groups.
     ///
-    /// The optional groups come off the tail first, in reverse layout order: a
-    /// group of width zero would vanish from the fixed-arity split, and the
-    /// destructuring would then have one part too few. `u` widens every
-    /// per-micro-step group, and `unfold` reads each one as `u` consecutive
-    /// write positions. See [`crate::mamba3::product`].
+    /// This function removes the optional groups from the end first, in reverse
+    /// layout order. A group of width zero would vanish from the fixed-arity
+    /// split. `u` widens each per-micro-step group, and `unfold` reads each one
+    /// as `u` consecutive write positions. See [`crate::mamba3::product`].
     ///
     /// # Shapes
     /// - `proj_btd` : `[batch, tokens, d_in_proj]`
