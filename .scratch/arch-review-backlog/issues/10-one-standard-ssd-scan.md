@@ -244,5 +244,4 @@ fusion runs) after `5d2b3125`, against the reports of `d304fccf`. Only `forward`
 - The −15.3% of `train` `mamba2` on `cuda` is not a measured gain. `train` of
   `mamba3/siso` has no code change and moved by −20.4% in the same column. The launch
   count is the reliable number.
-- The 7 cases are slower in `forward` and `step` on both GPU columns. After the run, the
-  governor of `cpu0` read `powersave`. Its value during the run is not known.
+- The 7 cases are slower in `forward` and `step` on both GPU columns.
