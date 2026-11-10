@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba2/ssd/serial_recalculated/serial_recalculated.rs`."><title>serial_recalculated.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-1f5a765c.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.102.0-nightly (5b7b37aef 2026-11-08)" data-channel="nightly" data-search-js="search-69faa2c4.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-9b351432.js" ><script src="../../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-b2682d9c.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-101b5a15.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba2/ssd/serial_recalculated/</div>serial_recalculated.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! # Serial SSD with a custom, memory-efficient backward (Mamba-2)
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba2/ssd/serial_recalculated/serial_recalculated.rs`."><title>serial_recalculated.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-1f5a765c.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.102.0-nightly (ac8310ba6 2026-11-09)" data-channel="nightly" data-search-js="search-69faa2c4.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-9b351432.js" ><script src="../../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-b2682d9c.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-101b5a15.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba2/ssd/serial_recalculated/</div>serial_recalculated.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! # Serial SSD with a custom, memory-efficient backward (Mamba-2)
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! This is the `SerialRecalculated` path. The forward goes through the
 <a href=#4 id=4 data-nosnippet>4</a>//! [`Mamba2BackendExt`] trait. Thus an `Autodiff` backend can use a **custom
@@ -12,11 +12,11 @@
 <a href=#12 id=12 data-nosnippet>12</a>//! `D` skip.
 <a href=#13 id=13 data-nosnippet>13</a>//!
 <a href=#14 id=14 data-nosnippet>14</a>//! Every plain (non-autodiff) backend uses the default body of the trait. The
-<a href=#15 id=15 data-nosnippet>15</a>//! [`burn_stack::impl_backend_ext_for_burn_backends!`] /
-<a href=#16 id=16 data-nosnippet>16</a>//! [`burn_stack::decl_autodiff_backend_ext!`] macros make the per-backend
-<a href=#17 id=17 data-nosnippet>17</a>//! impls and the autodiff marker trait.
-<a href=#18 id=18 data-nosnippet>18</a>
-<a href=#19 id=19 data-nosnippet>19</a></span><span class="kw">use </span><span class="kw">crate</span>::mamba2::prelude::<span class="kw-2">*</span>;
+<a href=#15 id=15 data-nosnippet>15</a>//! [`burn_stack::impl_backend_ext_for_burn_backends!`] macro makes these
+<a href=#16 id=16 data-nosnippet>16</a>//! per-backend impls.
+<a href=#17 id=17 data-nosnippet>17</a>
+<a href=#18 id=18 data-nosnippet>18</a></span><span class="kw">use </span><span class="kw">crate</span>::mamba2::prelude::<span class="kw-2">*</span>;
+<a href=#19 id=19 data-nosnippet>19</a><span class="kw">use </span><span class="kw">crate</span>::packing::OpRestarts;
 <a href=#20 id=20 data-nosnippet>20</a><span class="kw">use </span><span class="kw">crate</span>::standard_ssd;
 <a href=#21 id=21 data-nosnippet>21</a><span class="kw">use </span>burn_stack::utils::fprim::{F, san};
 <a href=#22 id=22 data-nosnippet>22</a><span class="kw">use </span>burn::backend::tensor::FloatTensor;
@@ -55,110 +55,100 @@
 <a href=#55 id=55 data-nosnippet>55</a>
 <a href=#56 id=56 data-nosnippet>56</a>        <span class="comment">// The resets go into the op as a keep factor and the origin state (see
 <a href=#57 id=57 data-nosnippet>57</a>        // `Restarts::op_inputs`).
-<a href=#58 id=58 data-nosnippet>58</a>        </span><span class="kw">let </span>(keep_bn, origin_bhpr, resets) =
-<a href=#59 id=59 data-nosnippet>59</a>            <span class="kw">crate</span>::packing::Restarts::op_inputs(input.restarts, <span class="kw-2">&amp;</span>input.x_bnlhp);
-<a href=#60 id=60 data-nosnippet>60</a>
-<a href=#61 id=61 data-nosnippet>61</a>        <span class="comment">// The custom op forms `da` itself (in forward and backward). It gets
-<a href=#62 id=62 data-nosnippet>62</a>        // `a_decay_h` directly, so `da` is not an autodiff-tracked intermediate
-<a href=#63 id=63 data-nosnippet>63</a>        // that crosses the op boundary.
-<a href=#64 id=64 data-nosnippet>64</a>        </span><span class="kw">let </span>(y_bnlhp, final_state_bhpr) = &lt;Dispatch <span class="kw">as </span>Mamba2BackendExt&gt;::ssd_serial_recalculated(
-<a href=#65 id=65 data-nosnippet>65</a>            input.x_bnlhp.into_dispatch(),
-<a href=#66 id=66 data-nosnippet>66</a>            dt_discretized_bhnl.into_dispatch(),
-<a href=#67 id=67 data-nosnippet>67</a>            input.b_bnlhr.into_dispatch(),
-<a href=#68 id=68 data-nosnippet>68</a>            input.c_bnlhr.into_dispatch(),
-<a href=#69 id=69 data-nosnippet>69</a>            input.d_h.into_dispatch(),
-<a href=#70 id=70 data-nosnippet>70</a>            input.initial_state_bhpr.into_dispatch(),
-<a href=#71 id=71 data-nosnippet>71</a>            input.a_decay_h.into_dispatch(),
-<a href=#72 id=72 data-nosnippet>72</a>            keep_bn.into_dispatch(),
-<a href=#73 id=73 data-nosnippet>73</a>            origin_bhpr.into_dispatch(),
-<a href=#74 id=74 data-nosnippet>74</a>            resets,
-<a href=#75 id=75 data-nosnippet>75</a>        );
-<a href=#76 id=76 data-nosnippet>76</a>        <span class="kw">let </span>y_bnlhp = Tensor::from_dispatch(y_bnlhp);
-<a href=#77 id=77 data-nosnippet>77</a>        <span class="kw">let </span>final_state_bhpr = Tensor::from_dispatch(final_state_bhpr);
-<a href=#78 id=78 data-nosnippet>78</a>        (y_bnlhp, final_state_bhpr)
-<a href=#79 id=79 data-nosnippet>79</a>    }
-<a href=#80 id=80 data-nosnippet>80</a>}
-<a href=#81 id=81 data-nosnippet>81</a>
-<a href=#82 id=82 data-nosnippet>82</a><span class="doccomment">/// Backend extension for the Mamba-2 SSD with a recompute backward.
-<a href=#83 id=83 data-nosnippet>83</a>///
-<a href=#84 id=84 data-nosnippet>84</a>/// The default body runs the forward on backend primitives. The `Autodiff&lt;B&gt;`
-<a href=#85 id=85 data-nosnippet>85</a>/// impl (in [`super::backward`]) adds the recompute node.
-<a href=#86 id=86 data-nosnippet>86</a></span><span class="attr">#[backend_extension(
-<a href=#87 id=87 data-nosnippet>87</a>    <span class="comment">// Every `#[backend_extension]` site of this crate has the same list.
-<a href=#88 id=88 data-nosnippet>88</a>    // Change them together. `build.rs` sets `cube_backend`.
-<a href=#89 id=89 data-nosnippet>89</a>    </span>Cube: cfg(cube_backend),
-<a href=#90 id=90 data-nosnippet>90</a>    Flex:  cfg(feature = <span class="string">"backend-flex"</span>),
-<a href=#91 id=91 data-nosnippet>91</a>    NdArray:  cfg(feature = <span class="string">"backend-ndarray"</span>),
-<a href=#92 id=92 data-nosnippet>92</a>    LibTorch:  cfg(any(feature = <span class="string">"backend-tch-cpu"</span>, feature = <span class="string">"backend-tch-gpu"</span>)),
-<a href=#93 id=93 data-nosnippet>93</a>    Autodiff:  cfg(feature = <span class="string">"autodiff"</span>),
-<a href=#94 id=94 data-nosnippet>94</a>)]
-<a href=#95 id=95 data-nosnippet>95</a></span><span class="kw">pub trait </span>Mamba2BackendExt: Backend {
-<a href=#96 id=96 data-nosnippet>96</a>    <span class="doccomment">/// `keep_bn` (`[batch, nchunks]`) is `0` at a chunk that starts a new
-<a href=#97 id=97 data-nosnippet>97</a>    /// segment of a packed row, and `1` elsewhere. It is a constant: the op
-<a href=#98 id=98 data-nosnippet>98</a>    /// registers no gradient for it. Such a chunk starts from `origin_bhpr`
-<a href=#99 id=99 data-nosnippet>99</a>    /// (`[batch, nheads, per_head_dim, state_rank]`). The op reads both only
-<a href=#100 id=100 data-nosnippet>100</a>    /// when `resets` is `true`.
-<a href=#101 id=101 data-nosnippet>101</a>    ///
-<a href=#102 id=102 data-nosnippet>102</a>    /// Returns:
-<a href=#103 id=103 data-nosnippet>103</a>    /// - `y_bnlhp`.
-<a href=#104 id=104 data-nosnippet>104</a>    /// - `final_state_bhpr`.
-<a href=#105 id=105 data-nosnippet>105</a>    </span><span class="attr">#[allow(clippy::too_many_arguments)]
-<a href=#106 id=106 data-nosnippet>106</a>    </span><span class="kw">fn </span>ssd_serial_recalculated(
-<a href=#107 id=107 data-nosnippet>107</a>        x_bnlhp: FloatTensor&lt;<span class="self">Self</span>&gt;,
-<a href=#108 id=108 data-nosnippet>108</a>        dt_discretized_bhnl: FloatTensor&lt;<span class="self">Self</span>&gt;,
-<a href=#109 id=109 data-nosnippet>109</a>        b_bnlhr: FloatTensor&lt;<span class="self">Self</span>&gt;,
-<a href=#110 id=110 data-nosnippet>110</a>        c_bnlhr: FloatTensor&lt;<span class="self">Self</span>&gt;,
-<a href=#111 id=111 data-nosnippet>111</a>        d_h: FloatTensor&lt;<span class="self">Self</span>&gt;,
-<a href=#112 id=112 data-nosnippet>112</a>        initial_state_bhpr: FloatTensor&lt;<span class="self">Self</span>&gt;,
-<a href=#113 id=113 data-nosnippet>113</a>        a_decay_h: FloatTensor&lt;<span class="self">Self</span>&gt;,
-<a href=#114 id=114 data-nosnippet>114</a>        keep_bn: FloatTensor&lt;<span class="self">Self</span>&gt;,
-<a href=#115 id=115 data-nosnippet>115</a>        origin_bhpr: FloatTensor&lt;<span class="self">Self</span>&gt;,
-<a href=#116 id=116 data-nosnippet>116</a>        resets: bool,
-<a href=#117 id=117 data-nosnippet>117</a>    ) -&gt; (FloatTensor&lt;<span class="self">Self</span>&gt;, FloatTensor&lt;<span class="self">Self</span>&gt;) {
-<a href=#118 id=118 data-nosnippet>118</a>        <span class="comment">// This body runs under a generic `B`, where the high-level `Tensor`
-<a href=#119 id=119 data-nosnippet>119</a>        // (pinned to `Dispatch`) is not available. So the math uses the
-<a href=#120 id=120 data-nosnippet>120</a>        // rank-tagged [`F`] primitive wrapper.
-<a href=#121 id=121 data-nosnippet>121</a>        </span><span class="kw">let </span>x_bnlhp = F::&lt;<span class="self">Self</span>, <span class="number">5</span>&gt;::new(x_bnlhp);
-<a href=#122 id=122 data-nosnippet>122</a>        <span class="kw">let </span>dt_bnlh = F::&lt;<span class="self">Self</span>, <span class="number">4</span>&gt;::new(dt_discretized_bhnl).permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">3</span>, <span class="number">1</span>]);
-<a href=#123 id=123 data-nosnippet>123</a>        <span class="kw">let </span>a_decay_111h = F::&lt;<span class="self">Self</span>, <span class="number">1</span>&gt;::new(a_decay_h).unsqueeze_dims::&lt;<span class="number">4</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>]);
-<a href=#124 id=124 data-nosnippet>124</a>        <span class="kw">let </span>restarts = resets.then(|| (F::&lt;<span class="self">Self</span>, <span class="number">2</span>&gt;::new(keep_bn), F::&lt;<span class="self">Self</span>, <span class="number">4</span>&gt;::new(origin_bhpr)));
-<a href=#125 id=125 data-nosnippet>125</a>
-<a href=#126 id=126 data-nosnippet>126</a>        <span class="kw">let </span>(v_bnlhp, da_bnlh) = scan_inputs(x_bnlhp.clone(), dt_bnlh, a_decay_111h);
-<a href=#127 id=127 data-nosnippet>127</a>        <span class="kw">let </span>(y_bnl1hp, final_state_bhpr) = standard_ssd::forward::&lt;<span class="self">Self</span>&gt;(
-<a href=#128 id=128 data-nosnippet>128</a>            v_bnlhp.unsqueeze_dim::&lt;<span class="number">6</span>&gt;(<span class="number">3</span>),
-<a href=#129 id=129 data-nosnippet>129</a>            da_bnlh,
-<a href=#130 id=130 data-nosnippet>130</a>            F::&lt;<span class="self">Self</span>, <span class="number">5</span>&gt;::new(b_bnlhr).unsqueeze_dim::&lt;<span class="number">6</span>&gt;(<span class="number">3</span>),
-<a href=#131 id=131 data-nosnippet>131</a>            F::&lt;<span class="self">Self</span>, <span class="number">5</span>&gt;::new(c_bnlhr).unsqueeze_dim::&lt;<span class="number">6</span>&gt;(<span class="number">3</span>),
-<a href=#132 id=132 data-nosnippet>132</a>            F::new(initial_state_bhpr),
-<a href=#133 id=133 data-nosnippet>133</a>            <span class="number">1</span>,
-<a href=#134 id=134 data-nosnippet>134</a>            restarts,
-<a href=#135 id=135 data-nosnippet>135</a>        );
-<a href=#136 id=136 data-nosnippet>136</a>
-<a href=#137 id=137 data-nosnippet>137</a>        <span class="comment">// ── SKIP: D[h] · x[l,p] ─────────────────────────────────────────────────
-<a href=#138 id=138 data-nosnippet>138</a>        </span><span class="kw">let </span>skip_bnlhp = x_bnlhp * F::&lt;<span class="self">Self</span>, <span class="number">1</span>&gt;::new(d_h).unsqueeze_dims::&lt;<span class="number">5</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">4</span>]);
-<a href=#139 id=139 data-nosnippet>139</a>        <span class="kw">let </span>y_bnlhp = y_bnl1hp.squeeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">3</span>) + skip_bnlhp;
-<a href=#140 id=140 data-nosnippet>140</a>        san(<span class="kw-2">&amp;</span>y_bnlhp);
-<a href=#141 id=141 data-nosnippet>141</a>
-<a href=#142 id=142 data-nosnippet>142</a>        (y_bnlhp.inner(), final_state_bhpr.inner())
-<a href=#143 id=143 data-nosnippet>143</a>    }
-<a href=#144 id=144 data-nosnippet>144</a>}
-<a href=#145 id=145 data-nosnippet>145</a>
-<a href=#146 id=146 data-nosnippet>146</a><span class="doccomment">/// The inputs of the standard SSD scan: `v = Δ·x` and `da = Δ·A`.
-<a href=#147 id=147 data-nosnippet>147</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>scan_inputs&lt;B: Backend&gt;(
-<a href=#148 id=148 data-nosnippet>148</a>    x_bnlhp: F&lt;B, <span class="number">5</span>&gt;,
-<a href=#149 id=149 data-nosnippet>149</a>    dt_bnlh: F&lt;B, <span class="number">4</span>&gt;,
-<a href=#150 id=150 data-nosnippet>150</a>    a_decay_111h: F&lt;B, <span class="number">4</span>&gt;,
-<a href=#151 id=151 data-nosnippet>151</a>) -&gt; (F&lt;B, <span class="number">5</span>&gt;, F&lt;B, <span class="number">4</span>&gt;) {
-<a href=#152 id=152 data-nosnippet>152</a>    <span class="kw">let </span>v_bnlhp = x_bnlhp * dt_bnlh.clone().unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">4</span>);
-<a href=#153 id=153 data-nosnippet>153</a>    <span class="kw">let </span>da_bnlh = dt_bnlh * a_decay_111h;
-<a href=#154 id=154 data-nosnippet>154</a>    (v_bnlhp, da_bnlh)
-<a href=#155 id=155 data-nosnippet>155</a>}
-<a href=#156 id=156 data-nosnippet>156</a>
-<a href=#157 id=157 data-nosnippet>157</a><span class="comment">// Per-backend impls: each one uses the default body of the trait. The custom
-<a href=#158 id=158 data-nosnippet>158</a>// autodiff backward is a separate impl in `super::backward`.
-<a href=#159 id=159 data-nosnippet>159</a>//
-<a href=#160 id=160 data-nosnippet>160</a>// TODO: find a way to keep the backend-* features out of the library.
-<a href=#161 id=161 data-nosnippet>161</a></span><span class="macro">burn_stack::impl_backend_ext_for_burn_backends!</span>(Mamba2BackendExt);
-<a href=#162 id=162 data-nosnippet>162</a>
-<a href=#163 id=163 data-nosnippet>163</a><span class="macro">burn_stack::decl_autodiff_backend_ext!</span>(Mamba2AutodiffBackendExt, Mamba2BackendExt);
+<a href=#58 id=58 data-nosnippet>58</a>        </span><span class="kw">let </span>restarts = <span class="kw">crate</span>::packing::Restarts::op_inputs(input.restarts, <span class="kw-2">&amp;</span>input.x_bnlhp);
+<a href=#59 id=59 data-nosnippet>59</a>
+<a href=#60 id=60 data-nosnippet>60</a>        <span class="comment">// The custom op forms `da` itself (in forward and backward). It gets
+<a href=#61 id=61 data-nosnippet>61</a>        // `a_decay_h` directly, so `da` is not an autodiff-tracked intermediate
+<a href=#62 id=62 data-nosnippet>62</a>        // that crosses the op boundary.
+<a href=#63 id=63 data-nosnippet>63</a>        </span><span class="kw">let </span>(y_bnlhp, final_state_bhpr) = &lt;Dispatch <span class="kw">as </span>Mamba2BackendExt&gt;::ssd_serial_recalculated(
+<a href=#64 id=64 data-nosnippet>64</a>            input.x_bnlhp.into_dispatch(),
+<a href=#65 id=65 data-nosnippet>65</a>            dt_discretized_bhnl.into_dispatch(),
+<a href=#66 id=66 data-nosnippet>66</a>            input.b_bnlhr.into_dispatch(),
+<a href=#67 id=67 data-nosnippet>67</a>            input.c_bnlhr.into_dispatch(),
+<a href=#68 id=68 data-nosnippet>68</a>            input.d_h.into_dispatch(),
+<a href=#69 id=69 data-nosnippet>69</a>            input.initial_state_bhpr.into_dispatch(),
+<a href=#70 id=70 data-nosnippet>70</a>            input.a_decay_h.into_dispatch(),
+<a href=#71 id=71 data-nosnippet>71</a>            restarts,
+<a href=#72 id=72 data-nosnippet>72</a>        );
+<a href=#73 id=73 data-nosnippet>73</a>        <span class="kw">let </span>y_bnlhp = Tensor::from_dispatch(y_bnlhp);
+<a href=#74 id=74 data-nosnippet>74</a>        <span class="kw">let </span>final_state_bhpr = Tensor::from_dispatch(final_state_bhpr);
+<a href=#75 id=75 data-nosnippet>75</a>        (y_bnlhp, final_state_bhpr)
+<a href=#76 id=76 data-nosnippet>76</a>    }
+<a href=#77 id=77 data-nosnippet>77</a>}
+<a href=#78 id=78 data-nosnippet>78</a>
+<a href=#79 id=79 data-nosnippet>79</a><span class="doccomment">/// Backend extension for the Mamba-2 SSD with a recompute backward.
+<a href=#80 id=80 data-nosnippet>80</a>///
+<a href=#81 id=81 data-nosnippet>81</a>/// The default body runs the forward on backend primitives. The `Autodiff&lt;B&gt;`
+<a href=#82 id=82 data-nosnippet>82</a>/// impl (in [`super::backward`]) adds the recompute node.
+<a href=#83 id=83 data-nosnippet>83</a></span><span class="attr">#[backend_extension(
+<a href=#84 id=84 data-nosnippet>84</a>    <span class="comment">// Every `#[backend_extension]` site of this crate has the same list.
+<a href=#85 id=85 data-nosnippet>85</a>    // Change them together. `build.rs` sets `cube_backend`.
+<a href=#86 id=86 data-nosnippet>86</a>    </span>Cube: cfg(cube_backend),
+<a href=#87 id=87 data-nosnippet>87</a>    Flex:  cfg(feature = <span class="string">"backend-flex"</span>),
+<a href=#88 id=88 data-nosnippet>88</a>    NdArray:  cfg(feature = <span class="string">"backend-ndarray"</span>),
+<a href=#89 id=89 data-nosnippet>89</a>    LibTorch:  cfg(any(feature = <span class="string">"backend-tch-cpu"</span>, feature = <span class="string">"backend-tch-gpu"</span>)),
+<a href=#90 id=90 data-nosnippet>90</a>    Autodiff:  cfg(feature = <span class="string">"autodiff"</span>),
+<a href=#91 id=91 data-nosnippet>91</a>)]
+<a href=#92 id=92 data-nosnippet>92</a></span><span class="kw">pub trait </span>Mamba2BackendExt: Backend {
+<a href=#93 id=93 data-nosnippet>93</a>    <span class="doccomment">/// `restarts` gives the chunks that start a new segment of a packed row,
+<a href=#94 id=94 data-nosnippet>94</a>    /// and the state that they start from ([`OpRestarts`]).
+<a href=#95 id=95 data-nosnippet>95</a>    ///
+<a href=#96 id=96 data-nosnippet>96</a>    /// Returns:
+<a href=#97 id=97 data-nosnippet>97</a>    /// - `y_bnlhp`.
+<a href=#98 id=98 data-nosnippet>98</a>    /// - `final_state_bhpr`.
+<a href=#99 id=99 data-nosnippet>99</a>    </span><span class="attr">#[allow(clippy::too_many_arguments)]
+<a href=#100 id=100 data-nosnippet>100</a>    </span><span class="kw">fn </span>ssd_serial_recalculated(
+<a href=#101 id=101 data-nosnippet>101</a>        x_bnlhp: FloatTensor&lt;<span class="self">Self</span>&gt;,
+<a href=#102 id=102 data-nosnippet>102</a>        dt_discretized_bhnl: FloatTensor&lt;<span class="self">Self</span>&gt;,
+<a href=#103 id=103 data-nosnippet>103</a>        b_bnlhr: FloatTensor&lt;<span class="self">Self</span>&gt;,
+<a href=#104 id=104 data-nosnippet>104</a>        c_bnlhr: FloatTensor&lt;<span class="self">Self</span>&gt;,
+<a href=#105 id=105 data-nosnippet>105</a>        d_h: FloatTensor&lt;<span class="self">Self</span>&gt;,
+<a href=#106 id=106 data-nosnippet>106</a>        initial_state_bhpr: FloatTensor&lt;<span class="self">Self</span>&gt;,
+<a href=#107 id=107 data-nosnippet>107</a>        a_decay_h: FloatTensor&lt;<span class="self">Self</span>&gt;,
+<a href=#108 id=108 data-nosnippet>108</a>        <span class="attr">#[extension_type] </span>restarts: OpRestarts&lt;<span class="self">Self</span>&gt;,
+<a href=#109 id=109 data-nosnippet>109</a>    ) -&gt; (FloatTensor&lt;<span class="self">Self</span>&gt;, FloatTensor&lt;<span class="self">Self</span>&gt;) {
+<a href=#110 id=110 data-nosnippet>110</a>        <span class="comment">// This body runs under a generic `B`, where the high-level `Tensor`
+<a href=#111 id=111 data-nosnippet>111</a>        // (pinned to `Dispatch`) is not available. So the math uses the
+<a href=#112 id=112 data-nosnippet>112</a>        // rank-tagged [`F`] primitive wrapper.
+<a href=#113 id=113 data-nosnippet>113</a>        </span><span class="kw">let </span>x_bnlhp = F::&lt;<span class="self">Self</span>, <span class="number">5</span>&gt;::new(x_bnlhp);
+<a href=#114 id=114 data-nosnippet>114</a>        <span class="kw">let </span>dt_bnlh = F::&lt;<span class="self">Self</span>, <span class="number">4</span>&gt;::new(dt_discretized_bhnl).permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">3</span>, <span class="number">1</span>]);
+<a href=#115 id=115 data-nosnippet>115</a>        <span class="kw">let </span>a_decay_111h = F::&lt;<span class="self">Self</span>, <span class="number">1</span>&gt;::new(a_decay_h).unsqueeze_dims::&lt;<span class="number">4</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>]);
+<a href=#116 id=116 data-nosnippet>116</a>        <span class="kw">let </span>restarts = restarts.into_option();
+<a href=#117 id=117 data-nosnippet>117</a>
+<a href=#118 id=118 data-nosnippet>118</a>        <span class="kw">let </span>(v_bnlhp, da_bnlh) = scan_inputs(x_bnlhp.clone(), dt_bnlh, a_decay_111h);
+<a href=#119 id=119 data-nosnippet>119</a>        <span class="kw">let </span>(y_bnl1hp, final_state_bhpr) = standard_ssd::forward::&lt;<span class="self">Self</span>&gt;(
+<a href=#120 id=120 data-nosnippet>120</a>            v_bnlhp.unsqueeze_dim::&lt;<span class="number">6</span>&gt;(<span class="number">3</span>),
+<a href=#121 id=121 data-nosnippet>121</a>            da_bnlh,
+<a href=#122 id=122 data-nosnippet>122</a>            F::&lt;<span class="self">Self</span>, <span class="number">5</span>&gt;::new(b_bnlhr).unsqueeze_dim::&lt;<span class="number">6</span>&gt;(<span class="number">3</span>),
+<a href=#123 id=123 data-nosnippet>123</a>            F::&lt;<span class="self">Self</span>, <span class="number">5</span>&gt;::new(c_bnlhr).unsqueeze_dim::&lt;<span class="number">6</span>&gt;(<span class="number">3</span>),
+<a href=#124 id=124 data-nosnippet>124</a>            F::new(initial_state_bhpr),
+<a href=#125 id=125 data-nosnippet>125</a>            <span class="number">1</span>,
+<a href=#126 id=126 data-nosnippet>126</a>            restarts,
+<a href=#127 id=127 data-nosnippet>127</a>        );
+<a href=#128 id=128 data-nosnippet>128</a>
+<a href=#129 id=129 data-nosnippet>129</a>        <span class="comment">// ── SKIP: D[h] · x[l,p] ─────────────────────────────────────────────────
+<a href=#130 id=130 data-nosnippet>130</a>        </span><span class="kw">let </span>skip_bnlhp = x_bnlhp * F::&lt;<span class="self">Self</span>, <span class="number">1</span>&gt;::new(d_h).unsqueeze_dims::&lt;<span class="number">5</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>, <span class="number">4</span>]);
+<a href=#131 id=131 data-nosnippet>131</a>        <span class="kw">let </span>y_bnlhp = y_bnl1hp.squeeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">3</span>) + skip_bnlhp;
+<a href=#132 id=132 data-nosnippet>132</a>        san(<span class="kw-2">&amp;</span>y_bnlhp);
+<a href=#133 id=133 data-nosnippet>133</a>
+<a href=#134 id=134 data-nosnippet>134</a>        (y_bnlhp.inner(), final_state_bhpr.inner())
+<a href=#135 id=135 data-nosnippet>135</a>    }
+<a href=#136 id=136 data-nosnippet>136</a>}
+<a href=#137 id=137 data-nosnippet>137</a>
+<a href=#138 id=138 data-nosnippet>138</a><span class="doccomment">/// The inputs of the standard SSD scan: `v = Δ·x` and `da = Δ·A`.
+<a href=#139 id=139 data-nosnippet>139</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>scan_inputs&lt;B: Backend&gt;(
+<a href=#140 id=140 data-nosnippet>140</a>    x_bnlhp: F&lt;B, <span class="number">5</span>&gt;,
+<a href=#141 id=141 data-nosnippet>141</a>    dt_bnlh: F&lt;B, <span class="number">4</span>&gt;,
+<a href=#142 id=142 data-nosnippet>142</a>    a_decay_111h: F&lt;B, <span class="number">4</span>&gt;,
+<a href=#143 id=143 data-nosnippet>143</a>) -&gt; (F&lt;B, <span class="number">5</span>&gt;, F&lt;B, <span class="number">4</span>&gt;) {
+<a href=#144 id=144 data-nosnippet>144</a>    <span class="kw">let </span>v_bnlhp = x_bnlhp * dt_bnlh.clone().unsqueeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">4</span>);
+<a href=#145 id=145 data-nosnippet>145</a>    <span class="kw">let </span>da_bnlh = dt_bnlh * a_decay_111h;
+<a href=#146 id=146 data-nosnippet>146</a>    (v_bnlhp, da_bnlh)
+<a href=#147 id=147 data-nosnippet>147</a>}
+<a href=#148 id=148 data-nosnippet>148</a>
+<a href=#149 id=149 data-nosnippet>149</a><span class="comment">// Per-backend impls: each one uses the default body of the trait. The custom
+<a href=#150 id=150 data-nosnippet>150</a>// autodiff backward is a separate impl in `super::backward`.
+<a href=#151 id=151 data-nosnippet>151</a>//
+<a href=#152 id=152 data-nosnippet>152</a>// TODO: find a way to keep the backend-* features out of the library.
+<a href=#153 id=153 data-nosnippet>153</a></span><span class="macro">burn_stack::impl_backend_ext_for_burn_backends!</span>(Mamba2BackendExt);
 </code></pre></div></section></main></body></html>

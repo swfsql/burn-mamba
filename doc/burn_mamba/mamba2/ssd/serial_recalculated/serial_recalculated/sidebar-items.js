@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["scan_inputs"],"trait":["Mamba2AutodiffBackendExt","Mamba2BackendExt"]};
+window.SIDEBAR_ITEMS = {"fn":["scan_inputs"],"trait":["Mamba2BackendExt"]};
