@@ -26,6 +26,21 @@
 # Each build keeps its own `CARGO_TARGET_DIR`. So a second run of this script
 # rebuilds nothing, and the criterion baseline histories stay separate.
 #
+# The allocator of the flex run
+# -----------------------------
+# Flex allocates each tensor from the global allocator and has no buffer pool.
+# Under the defaults of glibc, the `mmap` threshold moves with the frees of the
+# process, and the top of the heap goes back to the system. So the cost of an
+# allocation depends on the earlier allocations of the process. That dependence
+# can move a `train` cell by more than the change under test. So the flex run
+# keeps its freed pages:
+#
+#   MALLOC_TRIM_THRESHOLD_=17179869184  keep the top of the heap
+#   MALLOC_MMAP_MAX_=0                  use the heap for a large allocation
+#
+# A flex cell does not show the cost of the default allocator. The two GPU runs
+# keep the defaults.
+#
 # Usage
 # -----
 #   ./bench.sh                    # all three configurations
@@ -74,6 +89,13 @@ for entry in "${CONFIGS[@]}"; do
     if [[ ",$SKIP," == *",$label,"* ]]; then
         echo "==> skipping $label"
         continue
+    fi
+
+    # See "The allocator of the flex run" above.
+    if [[ "$label" == flex ]]; then
+        export MALLOC_TRIM_THRESHOLD_=17179869184 MALLOC_MMAP_MAX_=0
+    else
+        unset MALLOC_TRIM_THRESHOLD_ MALLOC_MMAP_MAX_
     fi
 
     echo "==> $label — BURN_DEVICE=$device, features: default${features:+,$features}"
@@ -158,6 +180,13 @@ lines = [
     "the samples.",
     "",
 ]
+
+if "flex" in present:
+    lines += [
+        "The `flex` run keeps its freed pages (`MALLOC_TRIM_THRESHOLD_=17179869184`, "
+        "`MALLOC_MMAP_MAX_=0`). The header of `bench.sh` gives the reason.",
+        "",
+    ]
 
 if config_lines:
     lines += ["| run | configuration |", "|---|---|"]
