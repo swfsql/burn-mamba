@@ -56,7 +56,12 @@
 // A build without Mamba-3 reads only a part of this module.
 #![cfg_attr(not(feature = "mamba3"), allow(dead_code))]
 
+use burn::backend::tensor::FloatTensor;
+use burn::backend::{Backend, Dispatch, ExtensionType};
+#[cfg(feature = "autodiff")]
+use burn::backend::{Autodiff, autodiff::checkpoint::strategy::CheckpointStrategy};
 use burn::prelude::*;
+use burn_stack::utils::fprim::F;
 
 /// The resets of a packed row as an SSD pass takes them: the chunks that
 /// restart, and the state that they restart from.
@@ -70,35 +75,98 @@ pub struct Restarts {
 }
 
 impl Restarts {
-    /// The restarts as a recompute op takes them. The extension macro takes
-    /// no `Option` tensor, so the op gets `(keep_bn, origin_bhpr, resets)`:
-    ///
-    /// - `keep_bn`: `0` at a chunk that starts a new segment, `1` elsewhere.
-    ///   It is a constant (no gradient), with the dtype of `like`.
-    /// - `origin_bhpr`: the state that those chunks start from.
-    /// - `resets`: `false` for `None`. Then the two tensors are placeholders
-    ///   (each dimension 1) that the op does not read.
-    ///
-    /// `like` is `[batch, nchunks, …]`.
+    /// The restarts as an SSD op takes them ([`OpRestarts`]). `keep_bn` gets
+    /// the dtype of `like`, and `like` is `[batch, nchunks, …]`.
     pub(crate) fn op_inputs<const D: usize>(
         restarts: Option<Self>,
         like: &Tensor<D>,
-    ) -> (Tensor<2>, Tensor<4>, bool) {
+    ) -> OpRestarts<Dispatch> {
+        let Some(Restarts { reset_bn, origin_bhpr }) = restarts else {
+            return OpRestarts::None;
+        };
         let dims = like.dims();
         let options = (&like.device(), like.dtype());
-        match restarts {
-            Some(Restarts { reset_bn, origin_bhpr }) => (
-                Tensor::ones([dims[0], dims[1]], options).mask_fill(reset_bn, 0.0),
-                origin_bhpr,
-                true,
-            ),
-            None => (
-                Tensor::ones([1, 1], options),
-                Tensor::zeros([1, 1, 1, 1], options),
-                false,
-            ),
+        let keep_bn = Tensor::<2>::ones([dims[0], dims[1]], options).mask_fill(reset_bn, 0.0);
+        OpRestarts::Some {
+            keep_bn: keep_bn.into_dispatch(),
+            origin_bhpr: origin_bhpr.into_dispatch(),
         }
     }
+}
+
+/// The restarts of a packed row as an SSD op takes them, on the primitives of
+/// `B`. An op argument of this type has `#[extension_type]`.
+///
+/// This enum takes the place of an `Option` of the two tensors. Burn has no
+/// `ExtensionType` for `Option`, and the orphan rule stops this crate from
+/// adding one.
+#[derive(ExtensionType)]
+pub enum OpRestarts<B: Backend> {
+    /// No chunk of the call restarts.
+    None,
+    /// The chunks that restart, and the state that they restart from.
+    Some {
+        /// `[batch, nchunks]`: `0` at a chunk that starts a new segment, `1`
+        /// elsewhere. It is a constant: the op registers no gradient for it.
+        keep_bn: FloatTensor<B>,
+        /// `[batch, nheads, per_head_dim, state_rank]`: the state that each
+        /// such chunk starts from.
+        origin_bhpr: FloatTensor<B>,
+    },
+}
+
+impl<B: Backend> OpRestarts<B> {
+    /// The pair `(keep_bn, origin_bhpr)` that the standard SSD scan takes.
+    pub(crate) fn into_option(self) -> Option<(F<B, 2>, F<B, 4>)> {
+        match self {
+            OpRestarts::None => None,
+            OpRestarts::Some { keep_bn, origin_bhpr } => {
+                Some((F::new(keep_bn), F::new(origin_bhpr)))
+            }
+        }
+    }
+
+    /// The restarts from the two parts that a recompute node keeps (see
+    /// [`OpRestarts::into_recompute`]). `origin_bhpr` stays unread when
+    /// `keep_bn` is `None`.
+    #[cfg(feature = "autodiff")]
+    pub(crate) fn from_recompute(keep_bn: Option<FloatTensor<B>>, origin_bhpr: FloatTensor<B>) -> Self {
+        match keep_bn {
+            Some(keep_bn) => OpRestarts::Some { keep_bn, origin_bhpr },
+            None => OpRestarts::None,
+        }
+    }
+}
+
+#[cfg(feature = "autodiff")]
+impl<B: Backend, C: CheckpointStrategy> OpRestarts<Autodiff<B, C>> {
+    /// The restarts as the `Autodiff` impl of an SSD op gives them to its
+    /// recompute node:
+    ///
+    /// - `keep_bn`, on the primitives of `B`: a constant, with no gradient.
+    /// - `origin_bhpr`: a tracked input. For `None`, it is a [`placeholder`].
+    pub(crate) fn into_recompute(
+        self,
+        like: &FloatTensor<Autodiff<B, C>>,
+    ) -> (Option<FloatTensor<B>>, FloatTensor<Autodiff<B, C>>) {
+        match self {
+            OpRestarts::Some { keep_bn, origin_bhpr } => (Some(keep_bn.into_primitive()), origin_bhpr),
+            OpRestarts::None => (None, placeholder::<B, C, 4>(like)),
+        }
+    }
+}
+
+/// The placeholder of a missing tracked input of a recompute node: the
+/// `origin_bhpr` or the `seed_bnhpr` of a call with no resets. The node takes
+/// a fixed set of tracked inputs. So the `Autodiff` impl of an SSD op gives it
+/// this tensor, which the op does not read. Each dimension is 1, and the
+/// device and the dtype are those of `like`.
+#[cfg(feature = "autodiff")]
+pub(crate) fn placeholder<B: Backend, C: CheckpointStrategy, const D: usize>(
+    like: &FloatTensor<Autodiff<B, C>>,
+) -> FloatTensor<Autodiff<B, C>> {
+    use burn::backend::TensorMetadata;
+    F::<Autodiff<B, C>, D>::zeros([1; D], &like.device(), like.dtype().into()).inner()
 }
 
 /// `cache`, where each row with a reset takes the row of `origin` instead:

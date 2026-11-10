@@ -6,10 +6,11 @@
 //! the serial kernels and the gradient math of the
 //! [standard SSD scan](crate::standard_ssd).
 //!
-//! Without resets, `keep_bn` and `origin_bhpr` are placeholders with one
-//! element, so the node saves them at no real cost.
+//! Without resets, `origin_bhpr` is a placeholder with one element
+//! (`packing::placeholder`), which the node saves at no real cost.
 
 use crate::mamba3::double_ssd::ssd::serial_recalculated::Mamba3DoubleSsdBackendExt;
+use crate::packing::OpRestarts;
 use crate::standard_ssd::combined_backward;
 use burn::backend::Backend;
 use burn::backend::autodiff::{Autodiff, checkpoint::strategy::CheckpointStrategy};
@@ -30,8 +31,8 @@ burn_stack::recompute_inputs!(Inputs {
 #[derive(Clone, Debug)]
 struct Extra<B: Backend> {
     read_stride: usize,
-    keep_bn: Prim<B>,
-    resets: bool,
+    /// `None` without resets.
+    keep_bn: Option<Prim<B>>,
 }
 
 /// The [`RecomputeOp`] of the Mamba-3 double-SSD.
@@ -49,9 +50,7 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt> RecomputeOp<B, 6> for SsdRecompute 
             inputs.c_bntmhr,
             inputs.initial_state_bhpr,
             extra.read_stride,
-            extra.keep_bn.clone(),
-            inputs.origin_bhpr,
-            extra.resets,
+            OpRestarts::from_recompute(extra.keep_bn.clone(), inputs.origin_bhpr),
         )
     }
 
@@ -70,7 +69,7 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt> RecomputeOp<B, 6> for SsdRecompute 
             F::new(inputs.c_bntmhr),
             F::new(inputs.initial_state_bhpr),
             extra.read_stride,
-            extra.resets.then(|| (F::new(extra.keep_bn), F::new(inputs.origin_bhpr))),
+            OpRestarts::from_recompute(extra.keep_bn, inputs.origin_bhpr).into_option(),
         );
         Inputs {
             v_bnlmhp: Some(grads.d_v_bnlmhp.inner()),
@@ -93,13 +92,12 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3Double
         c_bntmhr: FloatTensor<Self>,
         initial_state_bhpr: FloatTensor<Self>,
         read_stride: usize,
-        keep_bn: FloatTensor<Self>,
-        origin_bhpr: FloatTensor<Self>,
-        resets: bool,
+        restarts: OpRestarts<Self>,
     ) -> (FloatTensor<Self>, FloatTensor<Self>) {
+        let (keep_bn, origin_bhpr) = restarts.into_recompute(&v_bnlmhp);
         recompute_pair::<B, C, SsdRecompute, _>(
             Inputs { v_bnlmhp, da_bnlh, b_bnlmhr, c_bntmhr, initial_state_bhpr, origin_bhpr },
-            Extra { read_stride, keep_bn: keep_bn.into_primitive(), resets },
+            Extra { read_stride, keep_bn },
         )
     }
 }

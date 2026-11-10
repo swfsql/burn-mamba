@@ -17,4 +17,4 @@ pub mod combined_backward;
 pub mod diag;
 mod serial_recalculated;
 
-pub use serial_recalculated::Mamba3SingleSsdBackendExt;
+pub use serial_recalculated::{Mamba3SingleSsdBackendExt, OpSeeds};

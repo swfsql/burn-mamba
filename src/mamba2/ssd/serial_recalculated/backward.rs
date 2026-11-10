@@ -7,12 +7,13 @@
 //! [standard SSD scan](crate::standard_ssd). This is the ~⅓ training-memory
 //! saving of the `SerialRecalculated` path.
 //!
-//! Without resets, `keep_bn` and `origin_bhpr` are placeholders with one
-//! element, so the node saves them at no real cost.
+//! Without resets, `origin_bhpr` is a placeholder with one element
+//! (`packing::placeholder`), which the node saves at no real cost.
 
 use crate::mamba2::ssd::serial_recalculated::{
     Mamba2BackendExt, combined_backward::combined_backward,
 };
+use crate::packing::OpRestarts;
 use burn::backend::Backend;
 use burn::backend::autodiff::{Autodiff, checkpoint::strategy::CheckpointStrategy};
 use burn::backend::tensor::FloatTensor;
@@ -33,8 +34,8 @@ burn_stack::recompute_inputs!(Inputs {
 /// The values that the op takes with no gradient.
 #[derive(Clone, Debug)]
 struct Extra<B: Backend> {
-    keep_bn: Prim<B>,
-    resets: bool,
+    /// `None` without resets.
+    keep_bn: Option<Prim<B>>,
 }
 
 /// The [`RecomputeOp`] of the Mamba-2 SSD.
@@ -53,9 +54,7 @@ impl<B: Backend + Mamba2BackendExt> RecomputeOp<B, 8> for SsdRecompute {
             inputs.d_h,
             inputs.initial_state_bhpr,
             inputs.a_decay_h,
-            extra.keep_bn.clone(),
-            inputs.origin_bhpr,
-            extra.resets,
+            OpRestarts::from_recompute(extra.keep_bn.clone(), inputs.origin_bhpr),
         )
     }
 
@@ -75,7 +74,7 @@ impl<B: Backend + Mamba2BackendExt> RecomputeOp<B, 8> for SsdRecompute {
             F::new(inputs.d_h),
             F::new(inputs.initial_state_bhpr),
             F::new(inputs.a_decay_h),
-            extra.resets.then(|| (F::new(extra.keep_bn), F::new(inputs.origin_bhpr))),
+            OpRestarts::from_recompute(extra.keep_bn, inputs.origin_bhpr).into_option(),
         );
         Inputs {
             x_bnlhp: Some(grads.d_x_bnlhp.inner()),
@@ -99,10 +98,9 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
         d_h: FloatTensor<Self>,
         initial_state_bhpr: FloatTensor<Self>,
         a_decay_h: FloatTensor<Self>,
-        keep_bn: FloatTensor<Self>,
-        origin_bhpr: FloatTensor<Self>,
-        resets: bool,
+        restarts: OpRestarts<Self>,
     ) -> (FloatTensor<Self>, FloatTensor<Self>) {
+        let (keep_bn, origin_bhpr) = restarts.into_recompute(&x_bnlhp);
         recompute_pair::<B, C, SsdRecompute, _>(
             Inputs {
                 x_bnlhp,
@@ -114,7 +112,7 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
                 a_decay_h,
                 origin_bhpr,
             },
-            Extra { keep_bn: keep_bn.into_primitive(), resets },
+            Extra { keep_bn },
         )
     }
 }

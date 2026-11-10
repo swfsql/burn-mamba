@@ -22,6 +22,7 @@
 
 use crate::mamba3::single_ssd::prelude::*;
 use crate::mamba3::single_ssd::ssd::serial_recalculated::diag::y_diag_correction;
+use crate::packing::OpRestarts;
 use crate::standard_ssd::kernels::{
     k1_ssd_chunk_cumsum, k2_ssd_bmm, k3_ssd_chunk_state, k4_ssd_state_passing,
 };
@@ -29,7 +30,9 @@ use crate::standard_ssd::kernels::{expand_causal_mask, k5_da_cumsum_on_chunk_axe
 use crate::standard_ssd::read_axis::{read_causal_mask, read_positions};
 use burn_stack::utils::fprim::{F, san};
 use burn::backend::tensor::FloatTensor;
-use burn::backend::{Backend, Dispatch, backend_extension};
+use burn::backend::{Backend, Dispatch, ExtensionType, backend_extension};
+#[cfg(feature = "autodiff")]
+use burn::backend::{Autodiff, autodiff::checkpoint::strategy::CheckpointStrategy};
 use burn::tensor::Tensor;
 
 impl Mamba3SingleSsdInput {
@@ -51,14 +54,11 @@ impl Mamba3SingleSsdInput {
             "init_state_hpr not yet implemented for single_ssd_serial_recalculated"
         );
 
-        let (keep_bn, origin_bhpr, resets) =
-            crate::packing::Restarts::op_inputs(input.restarts, &input.v_bnlmhp);
-        // The seeds, or a placeholder that the op does not read (as `keep`).
-        let seeded = input.seed_bnhpr.is_some();
-        let seed_bnhpr = input.seed_bnhpr.unwrap_or_else(|| {
-            let options = (&input.v_bnlmhp.device(), input.v_bnlmhp.dtype());
-            Tensor::zeros([1, 1, 1, 1, 1], options)
-        });
+        let restarts = crate::packing::Restarts::op_inputs(input.restarts, &input.v_bnlmhp);
+        let seeds = match input.seed_bnhpr {
+            Some(seed_bnhpr) => OpSeeds::Some { seed_bnhpr: seed_bnhpr.into_dispatch() },
+            None => OpSeeds::None,
+        };
         let (y_bntmhp, final_state_bhpr) =
             <Dispatch as Mamba3SingleSsdBackendExt>::single_ssd_serial_recalculated(
                 input.v_bnlmhp.into_dispatch(),
@@ -70,11 +70,8 @@ impl Mamba3SingleSsdInput {
                 input.initial_state_bhpr.into_dispatch(),
                 input.read_stride,
                 input.siso_specialization,
-                keep_bn.into_dispatch(),
-                origin_bhpr.into_dispatch(),
-                resets,
-                seed_bnhpr.into_dispatch(),
-                seeded,
+                restarts,
+                seeds,
             );
         let y_bntmhp = Tensor::from_dispatch(y_bntmhp);
         let final_state_bhpr = Tensor::from_dispatch(final_state_bhpr);
@@ -115,15 +112,10 @@ pub trait Mamba3SingleSsdBackendExt: Backend {
     /// - `siso_specialization`: allow the specialized `mimo_rank == 1`
     ///   γ-correction (performance-only; see
     ///   [`Mamba3Config::siso_specialization`](crate::mamba3::mamba3::Mamba3Config::siso_specialization))
-    /// - `keep_bn`:            `[batch, nchunks]`, `0` at a chunk that starts
-    ///   a new segment of a packed row. Read only when `resets` is `true`.
-    /// - `origin_bhpr`:        `[batch, nheads, per_head_dim, state_rank]`, the
-    ///   accumulator that such a chunk starts from (before its seed). Read only
-    ///   when `resets` is `true`.
-    /// - `seed_bnhpr`:         `[batch, nchunks, nheads, per_head_dim,
-    ///   state_rank]`, the boundary seed of each chunk (see
-    ///   [`Mamba3SingleSsdInput::seed_bnhpr`]). Read only when `seeded` is
-    ///   `true`.
+    /// - `restarts`:           the chunks that start a new segment of a packed
+    ///   row, and the accumulator that they start from, before their seed
+    ///   ([`OpRestarts`])
+    /// - `seeds`:              the boundary seed of each chunk ([`OpSeeds`])
     ///
     /// # Returns
     /// - `y_bntmhp`:         `[batch, nchunks, chunk_tokens, mimo_rank, nheads, per_head_dim]`
@@ -139,11 +131,8 @@ pub trait Mamba3SingleSsdBackendExt: Backend {
         initial_state_bhpr: FloatTensor<Self>,
         read_stride: usize,
         siso_specialization: bool,
-        keep_bn: FloatTensor<Self>,
-        origin_bhpr: FloatTensor<Self>,
-        resets: bool,
-        seed_bnhpr: FloatTensor<Self>,
-        seeded: bool,
+        #[extension_type] restarts: OpRestarts<Self>,
+        #[extension_type] seeds: OpSeeds<Self>,
     ) -> (FloatTensor<Self>, FloatTensor<Self>) {
         // Default impl: replicate the single-ssd form K1–K5 on primitives.
         let v_bnlmhp = F::<Self, 6>::new(v_bnlmhp);
@@ -153,8 +142,8 @@ pub trait Mamba3SingleSsdBackendExt: Backend {
         let gamma_bnth = F::<Self, 4>::new(gamma_bnth);
         let scale_bnlh = F::<Self, 4>::new(scale_bnlh);
         let initial_state_bhpr = F::<Self, 4>::new(initial_state_bhpr);
-        let restarts = resets.then(|| (F::<Self, 2>::new(keep_bn), F::<Self, 4>::new(origin_bhpr)));
-        let seed_bnhpr = seeded.then(|| F::<Self, 5>::new(seed_bnhpr));
+        let restarts = restarts.into_option();
+        let seed_bnhpr = seeds.into_option();
 
         // K1 — chunk cumulative decay.
         let (da_cumsum_bhnl, da_chunk_end_bhn) = k1_ssd_chunk_cumsum::<Self>(da_bnlh);
@@ -198,6 +187,57 @@ pub trait Mamba3SingleSsdBackendExt: Backend {
         san(&y_bntmhp);
 
         (y_bntmhp.inner(), final_state_bhpr.inner())
+    }
+}
+
+/// The boundary seeds of a single-SSD op, on the primitives of `B`. An op
+/// argument of this type has `#[extension_type]`. This enum takes the place of
+/// an `Option`, for the reason of [`OpRestarts`].
+#[derive(ExtensionType)]
+pub enum OpSeeds<B: Backend> {
+    /// No seeds: the call has no resets.
+    None,
+    /// The seeds of a call with resets.
+    Some {
+        /// `[batch, nchunks, nheads, per_head_dim, state_rank]`: the boundary
+        /// seed of each chunk (see [`Mamba3SingleSsdInput::seed_bnhpr`]).
+        seed_bnhpr: FloatTensor<B>,
+    },
+}
+
+impl<B: Backend> OpSeeds<B> {
+    /// The seeds that K4 takes.
+    pub(crate) fn into_option(self) -> Option<F<B, 5>> {
+        match self {
+            OpSeeds::None => None,
+            OpSeeds::Some { seed_bnhpr } => Some(F::new(seed_bnhpr)),
+        }
+    }
+
+    /// The seeds from the two parts that a recompute node keeps (see
+    /// [`OpSeeds::into_recompute`]). `seed_bnhpr` stays unread when `seeded`
+    /// is `false`.
+    #[cfg(feature = "autodiff")]
+    pub(crate) fn from_recompute(seeded: bool, seed_bnhpr: FloatTensor<B>) -> Self {
+        if seeded { OpSeeds::Some { seed_bnhpr } } else { OpSeeds::None }
+    }
+}
+
+#[cfg(feature = "autodiff")]
+impl<B: Backend, C: CheckpointStrategy> OpSeeds<Autodiff<B, C>> {
+    /// The seeds as the `Autodiff` impl gives them to its recompute node:
+    ///
+    /// - `seeded`: `false` for `None`.
+    /// - `seed_bnhpr`: a tracked input. For `None`, it is a
+    ///   [`placeholder`](crate::packing::placeholder).
+    pub(crate) fn into_recompute(
+        self,
+        like: &FloatTensor<Autodiff<B, C>>,
+    ) -> (bool, FloatTensor<Autodiff<B, C>>) {
+        match self {
+            OpSeeds::Some { seed_bnhpr } => (true, seed_bnhpr),
+            OpSeeds::None => (false, crate::packing::placeholder::<B, C, 5>(like)),
+        }
     }
 }
 

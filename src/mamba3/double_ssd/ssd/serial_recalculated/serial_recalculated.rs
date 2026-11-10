@@ -11,6 +11,7 @@
 //! trapezoid.
 
 use crate::mamba3::double_ssd::prelude::*;
+use crate::packing::OpRestarts;
 use crate::standard_ssd;
 use burn_stack::utils::fprim::F;
 use burn::backend::tensor::FloatTensor;
@@ -35,8 +36,7 @@ impl Mamba3DoubleSsdInput {
             "init_state_hpr not yet implemented for ssd_serial_recalculated"
         );
 
-        let (keep_bn, origin_bhpr, resets) =
-            crate::packing::Restarts::op_inputs(input.restarts, &input.v_bnlmhp);
+        let restarts = crate::packing::Restarts::op_inputs(input.restarts, &input.v_bnlmhp);
         let (y_bntmhp, final_state_bhpr) =
             <Dispatch as Mamba3DoubleSsdBackendExt>::double_ssd_serial_recalculated(
                 input.v_bnlmhp.into_dispatch(),
@@ -45,9 +45,7 @@ impl Mamba3DoubleSsdInput {
                 input.c_bntmhr.into_dispatch(),
                 input.initial_state_bhpr.into_dispatch(),
                 input.read_stride,
-                keep_bn.into_dispatch(),
-                origin_bhpr.into_dispatch(),
-                resets,
+                restarts,
             );
         let y_bntmhp = Tensor::from_dispatch(y_bntmhp);
         let final_state_bhpr = Tensor::from_dispatch(final_state_bhpr);
@@ -80,16 +78,12 @@ pub trait Mamba3DoubleSsdBackendExt: Backend {
     /// - `initial_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
     /// - `read_stride`:        `micro_steps` — write positions per read position, so
     ///   `chunk_tokens = chunk_len / read_stride`
-    /// - `keep_bn`:            `[batch, nchunks]`, `0` at a chunk that starts
-    ///   a new segment of a packed row. Read only when `resets` is `true`.
-    /// - `origin_bhpr`:        `[batch, nheads, per_head_dim, state_rank]`, the
-    ///   state that such a chunk starts from. Read only when `resets` is
-    ///   `true`.
+    /// - `restarts`:           the chunks that start a new segment of a packed
+    ///   row, and the state that they start from ([`OpRestarts`])
     ///
     /// # Returns
     /// - `y_bntmhp`:         `[batch, nchunks, chunk_tokens, mimo_rank, nheads, per_head_dim]`
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
-    #[allow(clippy::too_many_arguments)]
     fn double_ssd_serial_recalculated(
         v_bnlmhp: FloatTensor<Self>,
         da_bnlh: FloatTensor<Self>,
@@ -97,11 +91,8 @@ pub trait Mamba3DoubleSsdBackendExt: Backend {
         c_bntmhr: FloatTensor<Self>,
         initial_state_bhpr: FloatTensor<Self>,
         read_stride: usize,
-        keep_bn: FloatTensor<Self>,
-        origin_bhpr: FloatTensor<Self>,
-        resets: bool,
+        #[extension_type] restarts: OpRestarts<Self>,
     ) -> (FloatTensor<Self>, FloatTensor<Self>) {
-        let restarts = resets.then(|| (F::<Self, 2>::new(keep_bn), F::<Self, 4>::new(origin_bhpr)));
         let (y_bntmhp, final_state_bhpr) = standard_ssd::forward::<Self>(
             F::new(v_bnlmhp),
             F::new(da_bnlh),
@@ -109,7 +100,7 @@ pub trait Mamba3DoubleSsdBackendExt: Backend {
             F::new(c_bntmhr),
             F::new(initial_state_bhpr),
             read_stride,
-            restarts,
+            restarts.into_option(),
         );
         (y_bntmhp.inner(), final_state_bhpr.inner())
     }

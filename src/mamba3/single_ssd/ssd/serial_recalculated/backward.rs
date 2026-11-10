@@ -6,13 +6,13 @@
 //! the serial kernels and the gradient math in
 //! [`super::combined_backward`](crate::mamba3::single_ssd::ssd::serial_recalculated::combined_backward).
 //!
-//! Without resets, `keep_bn` and `origin_bhpr` are placeholders with one
-//! element. Without seeds, `seed_bnhpr` is also a placeholder with one element.
-//! So the node saves them at no real cost.
+//! Without resets, `origin_bhpr` and `seed_bnhpr` are placeholders with one
+//! element (`packing::placeholder`), which the node saves at no real cost.
 
 use crate::mamba3::single_ssd::ssd::serial_recalculated::{
-    Mamba3SingleSsdBackendExt, combined_backward::combined_backward,
+    Mamba3SingleSsdBackendExt, OpSeeds, combined_backward::combined_backward,
 };
+use crate::packing::OpRestarts;
 use burn::backend::Backend;
 use burn::backend::autodiff::{Autodiff, checkpoint::strategy::CheckpointStrategy};
 use burn::backend::tensor::FloatTensor;
@@ -36,8 +36,9 @@ burn_stack::recompute_inputs!(Inputs {
 struct Extra<B: Backend> {
     read_stride: usize,
     siso_specialization: bool,
-    keep_bn: Prim<B>,
-    resets: bool,
+    /// `None` without resets.
+    keep_bn: Option<Prim<B>>,
+    /// `false` without seeds.
     seeded: bool,
 }
 
@@ -59,11 +60,8 @@ impl<B: Backend + Mamba3SingleSsdBackendExt> RecomputeOp<B, 9> for SsdRecompute 
             inputs.initial_state_bhpr,
             extra.read_stride,
             extra.siso_specialization,
-            extra.keep_bn.clone(),
-            inputs.origin_bhpr,
-            extra.resets,
-            inputs.seed_bnhpr,
-            extra.seeded,
+            OpRestarts::from_recompute(extra.keep_bn.clone(), inputs.origin_bhpr),
+            OpSeeds::from_recompute(extra.seeded, inputs.seed_bnhpr),
         )
     }
 
@@ -85,8 +83,8 @@ impl<B: Backend + Mamba3SingleSsdBackendExt> RecomputeOp<B, 9> for SsdRecompute 
             F::new(inputs.initial_state_bhpr),
             extra.read_stride,
             extra.siso_specialization,
-            extra.resets.then(|| (F::new(extra.keep_bn), F::new(inputs.origin_bhpr))),
-            extra.seeded.then(|| F::new(inputs.seed_bnhpr)),
+            OpRestarts::from_recompute(extra.keep_bn, inputs.origin_bhpr).into_option(),
+            OpSeeds::from_recompute(extra.seeded, inputs.seed_bnhpr).into_option(),
         );
         Inputs {
             v_bnlmhp: Some(grads.d_v_bnlmhp.inner()),
@@ -115,12 +113,11 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
         initial_state_bhpr: FloatTensor<Self>,
         read_stride: usize,
         siso_specialization: bool,
-        keep_bn: FloatTensor<Self>,
-        origin_bhpr: FloatTensor<Self>,
-        resets: bool,
-        seed_bnhpr: FloatTensor<Self>,
-        seeded: bool,
+        restarts: OpRestarts<Self>,
+        seeds: OpSeeds<Self>,
     ) -> (FloatTensor<Self>, FloatTensor<Self>) {
+        let (keep_bn, origin_bhpr) = restarts.into_recompute(&v_bnlmhp);
+        let (seeded, seed_bnhpr) = seeds.into_recompute(&v_bnlmhp);
         recompute_pair::<B, C, SsdRecompute, _>(
             Inputs {
                 v_bnlmhp,
@@ -133,13 +130,7 @@ impl<B: Backend + Mamba3SingleSsdBackendExt, C: CheckpointStrategy> Mamba3Single
                 seed_bnhpr,
                 origin_bhpr,
             },
-            Extra {
-                read_stride,
-                siso_specialization,
-                keep_bn: keep_bn.into_primitive(),
-                resets,
-                seeded,
-            },
+            Extra { read_stride, siso_specialization, keep_bn, seeded },
         )
     }
 }
