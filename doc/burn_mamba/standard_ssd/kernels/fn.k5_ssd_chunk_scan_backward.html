@@ -1,0 +1,41 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Backward of K5: BLUE and the intra-chunk term, one chunk group at a time."><title>k5_ssd_chunk_scan_backward in burn_mamba::standard_ssd::kernels - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-1f5a765c.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.102.0-nightly (5b7b37aef 2026-11-08)" data-channel="nightly" data-search-js="search-69faa2c4.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-9b351432.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="sidebar-items.js"></script><script defer src="../../../static.files/main-b2682d9c.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-101b5a15.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc fn"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">k5_ssd_chunk_scan_backward</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../burn_mamba/index.html">burn_<wbr>mamba</a><span class="version">0.76.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">k5_<wbr>ssd_<wbr>chunk_<wbr>scan_<wbr>backward</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#arguments" title="Arguments">Arguments</a></li><li><a href="#returns" title="Returns">Returns</a></li></ul></section><div id="rustdoc-modnav"><h2><a href="index.html">In burn_<wbr>mamba::<wbr>standard_<wbr>ssd::<wbr>kernels</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../index.html">burn_mamba</a>::<wbr><a href="../index.html">standard_ssd</a>::<wbr><a href="index.html">kernels</a></div><h1>Function <span class="fn">k5_<wbr>ssd_<wbr>chunk_<wbr>scan_<wbr>backward</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../src/burn_mamba/standard_ssd/kernels.rs.html#786-981">Source</a> </span></div><pre class="rust item-decl"><code>pub(crate) fn k5_ssd_chunk_scan_backward&lt;B: Backend&gt;(
+    d_y_bnhTMp: F&lt;B, 5&gt;,
+    v_bnlmhp: F&lt;B, 6&gt;,
+    c_bntmhr: F&lt;B, 6&gt;,
+    cb_bnhTMLM: F&lt;B, 5&gt;,
+    da_cumsum_bhnLM: F&lt;B, 4&gt;,
+    da_cumsum_bhnTM: F&lt;B, 4&gt;,
+    chunk_input_state_bnhpr: F&lt;B, 5&gt;,
+    scale_bnlh: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;F&lt;B, 4&gt;&gt;,
+    mask_diagonal: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.i64.html">i64</a>,
+    read_stride: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+) -&gt; (<a class="struct" href="struct.K5Grads.html" title="struct burn_mamba::standard_ssd::kernels::K5Grads">K5Grads</a>&lt;B&gt;, <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;F&lt;B, 4&gt;&gt;)</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Backward of K5: BLUE and the intra-chunk term, one chunk group at a time.</p>
+<p>Neither term is recurrent. Each needs only the slices of its chunk and
+the input state of that chunk, which the recomputed K4 gave batched. The
+group size sets the memory of the score <code>[b, group, h, TM, LM]</code> against the
+peak of the forward (see <code>backward_chunk_group</code>). On single-SSD, the state
+of this function is the accumulator of that pathway.</p>
+<p>The intra-chunk term serves both K5 forwards:</p>
+<div class="example-wrap"><pre class="language-text"><code>w[TM, LM]    = cb[TM, LM] · decay[TM, LM] · scale[LM]
+intra[TM, p] = Σ_LM w[TM, LM] · v[LM, p]</code></pre></div>
+<ul>
+<li>ORANGE: <code>scale_bnlh</code> is <code>None</code> and <code>mask_diagonal</code> is <code>1</code>. The sum includes
+the same position.</li>
+<li>LOWER: <code>scale_bnlh</code> is <code>Some</code> and <code>mask_diagonal</code> is <code>0</code>. The sum excludes
+the same position.</li>
+</ul>
+<p>Without a scale, the statements below form no tensor for it. <code>prod</code> is <code>w</code>,
+and <code>d_prod</code> is <code>d_w</code>.</p>
+<h2 id="arguments"><a class="doc-anchor" href="#arguments">§</a>Arguments</h2>
+<ul>
+<li><code>d_y_bnhTMp</code>: the gradient of the terms, on the read axis</li>
+<li><code>v_bnlmhp</code>, <code>c_bntmhr</code>, <code>cb_bnhTMLM</code>, <code>chunk_input_state_bnhpr</code>: the K5 inputs</li>
+<li><code>da_cumsum_bhnLM</code>, <code>da_cumsum_bhnTM</code>: see <a href="fn.k5_da_cumsum_on_chunk_axes.html" title="fn burn_mamba::standard_ssd::kernels::k5_da_cumsum_on_chunk_axes"><code>k5_da_cumsum_on_chunk_axes</code></a></li>
+<li><code>scale_bnlh</code>: the scale per source position, or <code>None</code></li>
+<li><code>mask_diagonal</code>: the diagonal of <a href="../read_axis/fn.read_causal_mask.html" title="fn burn_mamba::standard_ssd::read_axis::read_causal_mask"><code>read_causal_mask</code></a></li>
+<li><code>read_stride</code>: write positions per read position</li>
+</ul>
+<h2 id="returns"><a class="doc-anchor" href="#returns">§</a>Returns</h2>
+<p>The gradients of the two terms, and <code>d_scale_bhnl</code>: the intra-chunk part of
+<code>d_scale</code>, or <code>None</code> without a scale.</p>
+</div></details></section></div></main></body></html>
