@@ -12,6 +12,3 @@ pub mod backward;
 mod serial_recalculated;
 
 pub use serial_recalculated::Mamba3DoubleSsdBackendExt;
-
-#[cfg(feature = "autodiff")]
-pub use serial_recalculated::Mamba3DoubleSsdAutodiffBackendExt;

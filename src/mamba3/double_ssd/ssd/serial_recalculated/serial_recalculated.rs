@@ -115,8 +115,6 @@ pub trait Mamba3DoubleSsdBackendExt: Backend {
     }
 }
 
-burn_stack::decl_autodiff_backend_ext!(Mamba3DoubleSsdAutodiffBackendExt, Mamba3DoubleSsdBackendExt);
-
 // ---------------------------------------------------------------------------
 // Per-backend impls: each one uses the default (K1-K5) body of the trait. The
 // custom autodiff backward is a separate impl in `super::backward`.

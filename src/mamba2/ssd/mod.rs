@@ -23,7 +23,5 @@ pub mod serial_recalculated;
 /// The [`Mamba2SsdPath`] selector and [`Mamba2SsdInput`] dispatch bundle.
 pub mod ssd_path;
 
-#[cfg(feature = "autodiff")]
-pub use serial_recalculated::Mamba2AutodiffBackendExt;
 pub use serial_recalculated::Mamba2BackendExt;
 pub use ssd_path::{Mamba2SsdInput, Mamba2SsdPath};

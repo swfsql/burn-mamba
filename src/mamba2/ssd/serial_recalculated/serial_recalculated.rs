@@ -12,9 +12,8 @@
 //! `D` skip.
 //!
 //! Every plain (non-autodiff) backend uses the default body of the trait. The
-//! [`burn_stack::impl_backend_ext_for_burn_backends!`] /
-//! [`burn_stack::decl_autodiff_backend_ext!`] macros make the per-backend
-//! impls and the autodiff marker trait.
+//! [`burn_stack::impl_backend_ext_for_burn_backends!`] macro makes these
+//! per-backend impls.
 
 use crate::mamba2::prelude::*;
 use crate::standard_ssd;
@@ -159,5 +158,3 @@ pub(crate) fn scan_inputs<B: Backend>(
 //
 // TODO: find a way to keep the backend-* features out of the library.
 burn_stack::impl_backend_ext_for_burn_backends!(Mamba2BackendExt);
-
-burn_stack::decl_autodiff_backend_ext!(Mamba2AutodiffBackendExt, Mamba2BackendExt);

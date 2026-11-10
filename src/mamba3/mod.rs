@@ -83,46 +83,8 @@ pub mod rotation;
 pub mod ssd_path;
 pub mod tap_pattern;
 
-use crate::mamba3::double_ssd::prelude::*;
-use crate::mamba3::single_ssd::prelude::*;
-use burn::backend::Backend;
-
-/// Backend capability required to run Mamba-3.
-///
-/// Aggregates the per-pathway extension traits ([`Mamba3DoubleSsdBackendExt`]
-/// and [`Mamba3SingleSsdBackendExt`]). Every plain Burn backend satisfies it
-/// through the default implementations. `Autodiff<B>` also gets the custom
-/// memory-efficient backward.
-pub trait Mamba3BackendExt:
-    Backend + Mamba3DoubleSsdBackendExt + Mamba3SingleSsdBackendExt
-{
-}
-
-burn_stack::decl_autodiff_backend_ext!(
-    Mamba3AutodiffBackendExt,
-    Mamba3BackendExt,
-    Mamba3DoubleSsdAutodiffBackendExt,
-    Mamba3SingleSsdAutodiffBackendExt
-);
-burn_stack::impl_backend_ext_for_burn_backends!(Mamba3BackendExt);
-
-/// Blanket [`Mamba3BackendExt`] implementation for autodiff backends.
-#[cfg(feature = "autodiff")]
-pub mod backwards {
-    use super::*;
-    use burn::backend::autodiff::{Autodiff, checkpoint::strategy::CheckpointStrategy};
-
-    impl<B: Backend + Mamba3DoubleSsdBackendExt + Mamba3SingleSsdBackendExt, C: CheckpointStrategy>
-        Mamba3BackendExt for Autodiff<B, C>
-    {
-    }
-}
-
 /// Public re-exports for Mamba-3.
 pub mod prelude {
-    #[cfg(feature = "autodiff")]
-    pub use super::Mamba3AutodiffBackendExt;
-    pub use super::Mamba3BackendExt;
     use super::*;
 
     pub use cache::{Mamba3Cache, Mamba3Caches};

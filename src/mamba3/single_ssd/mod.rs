@@ -37,8 +37,6 @@ pub mod prelude {
         Mamba3SingleSsdCache, Mamba3SingleSsdCacheConfig, Mamba3SingleSsdCaches,
         Mamba3SingleSsdCachesConfig,
     };
-    #[cfg(feature = "autodiff")]
-    pub use ssd::Mamba3SingleSsdAutodiffBackendExt;
     pub use ssd::Mamba3SingleSsdBackendExt;
     pub use ssd::Mamba3SingleSsdInput;
 }

@@ -15,7 +15,5 @@ pub mod serial_recalculated;
 /// The [`Mamba3DoubleSsdInput`] bundle and its `run()` dispatch.
 pub mod ssd_path;
 
-#[cfg(feature = "autodiff")]
-pub use serial_recalculated::Mamba3DoubleSsdAutodiffBackendExt;
 pub use serial_recalculated::Mamba3DoubleSsdBackendExt;
 pub use ssd_path::Mamba3DoubleSsdInput;
