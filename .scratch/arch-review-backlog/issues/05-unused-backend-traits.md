@@ -240,5 +240,5 @@ The tensors that a call with no resets makes for its optional inputs:
   `burn_mamba::packing::OpRestarts` and
   `burn_mamba::mamba3::single_ssd::ssd::serial_recalculated::OpSeeds`.
 
-**Benches:** the gates of the brief wait for the user. Then run
-`scripts/compare_reports.py 8302ec8c --changed '*/mamba[23]*'`.
+**Benches:** the maintainer did not run them. The change is unlikely to cost speed: a
+missing input makes fewer tensors than before, and a `Some` input takes the same path.
