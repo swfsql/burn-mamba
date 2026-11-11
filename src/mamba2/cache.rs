@@ -46,41 +46,6 @@ pub struct Mamba2Caches {
     pub caches: Vec<Mamba2Cache>,
 }
 
-/// Configuration / factory for [`Mamba2Caches`].
-#[derive(Config, Debug)]
-pub struct Mamba2CachesConfig {
-    /// Number of layer caches: the number of virtual layers in the network (one
-    /// cache per layer, also when layers share weights).
-    pub n_caches: usize,
-
-    /// Shared configuration that determines the shape of each individual
-    /// cache tensor.
-    pub cache: Mamba2CacheConfig,
-}
-
-impl Mamba2CachesConfig {
-    /// Convenience constructor that derives cache shapes directly from a
-    /// [`Mamba2Config`] block configuration.
-    pub fn new_from_block_config(
-        n_caches: usize,
-        batch: usize,
-        block_config: Mamba2Config,
-    ) -> Self {
-        Self {
-            n_caches,
-            cache: Mamba2CacheConfig::new_from_block_config(batch, block_config),
-        }
-    }
-
-    /// Allocate all cache tensors (zero-initialised) on `device`.
-    pub fn init(&self, device: &Device) -> Mamba2Caches {
-        let caches = (0..self.n_caches)
-            .map(|_| self.cache.clone().init(device))
-            .collect();
-        Mamba2Caches { caches }
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Mamba2Cache  (cache for a single block)
 // ---------------------------------------------------------------------------
@@ -122,49 +87,10 @@ impl Mamba2Cache {
     }
 }
 
-/// Configuration / factory for a single [`Mamba2Cache`].
-#[derive(Config, Debug)]
-pub struct Mamba2CacheConfig {
-    /// Batch size.
-    pub batch: usize,
-
-    /// `state_rank` — the size of the `r` axis of the state. Corresponds to
-    /// `state_rank` in [`Mamba2Config`].
-    #[config(default = 128)]
-    pub state_rank: usize,
-
-    /// Causal convolution window length.  Corresponds to `conv_kernel` in
-    /// [`Mamba2Config`].
-    #[config(default = 4)]
-    pub conv_kernel: usize,
-
-    /// Number of channels entering (and leaving) the depthwise convolution.
-    /// Equal to `d_inner + 2 · ngroups · state_rank`.
-    pub conv_dim: usize,
-
-    /// Head dimension `per_head_dim`.  Corresponds to `per_head_dim` in [`Mamba2Config`].
-    #[config(default = 64)]
-    pub per_head_dim: usize,
-
-    /// Number of SSM heads `nheads`.
-    pub nheads: usize,
-}
-
-impl Mamba2CacheConfig {
-    /// Derive cache shapes from a Mamba-2 block configuration plus a batch
-    /// size.
-    pub fn new_from_block_config(batch: usize, block_config: Mamba2Config) -> Self {
-        Self {
-            batch,
-            state_rank: block_config.state_rank,
-            conv_kernel: block_config.conv_kernel,
-            conv_dim: block_config.conv_dim(),
-            per_head_dim: block_config.per_head_dim,
-            nheads: block_config.nheads(),
-        }
-    }
-
-    /// Allocate zero-initialised cache tensors on `device`.
+impl Mamba2 {
+    /// The cache of a fresh sequence, for `batch` rows. A `forward` or a
+    /// `step` without a cache starts from it, and so does each segment of a
+    /// packed call without an origin. The shapes come from the block.
     ///
     /// Zeros are correct:
     /// - A zero convolution cache means "no previous tokens" (the causal zero
@@ -172,13 +98,11 @@ impl Mamba2CacheConfig {
     /// - A zero state is the standard initial condition `h₀ = 0`. If the
     ///   block has a learnable initial state, [`Mamba2::forward`] adds it to
     ///   this state.
-    pub fn init(&self, device: &Device) -> Mamba2Cache {
-        let conv_bvk = Tensor::zeros(
-            Shape::new([self.batch, self.conv_dim, self.conv_kernel]),
-            device,
-        );
+    pub fn zero_cache(&self, batch: usize, device: &Device) -> Mamba2Cache {
+        let [conv_dim, _, conv_kernel] = self.conv1d.weight.dims();
+        let conv_bvk = Tensor::zeros(Shape::new([batch, conv_dim, conv_kernel]), device);
         let ssm_bhpr = Tensor::zeros(
-            Shape::new([self.batch, self.nheads, self.per_head_dim, self.state_rank]),
+            Shape::new([batch, self.nheads(), self.per_head_dim(), self.state_rank]),
             device,
         );
         Mamba2Cache { conv_bvk, ssm_bhpr }

@@ -395,15 +395,10 @@ impl Mamba1 {
         let [batch, sequence, d_model] = x.dims();
         let [d_inner] = self.d.dims();
         let [_, _, conv_kernel] = self.conv1d.weight.dims();
-        let [_d_inner, state_rank] = self.a_log.dims();
         let device = x.device();
         assert!(sequence > 0, "sequence length must be at least 1");
 
-        // Zero-initialise the cache (conv window + state) when not provided.
-        let mut cache = cache.unwrap_or_else(|| Mamba1Cache {
-            conv_bik: Tensor::zeros([batch, d_inner, conv_kernel], &device),
-            ssm_bir: Tensor::zeros([batch, d_inner, state_rank], &device),
-        });
+        let mut cache = cache.unwrap_or_else(|| self.zero_cache(batch, &device));
         cache.sanity();
 
         // layer 1 (in_proj): projects the input d_model into 2 * d_inner.
@@ -673,15 +668,9 @@ mod step {
             let [batch, d_model] = x.dims();
             let [d_inner] = self.d.dims();
             let [_, _, conv_kernel] = self.conv1d.weight.dims();
-            let [_d_inner, state_rank] = self.a_log.dims();
             let device = x.device();
 
-            // Zero-initialise the cache (conv window + state) when not
-            // provided, as `forward` and the Mamba-2/3 blocks do.
-            let mut cache = cache.unwrap_or_else(|| Mamba1Cache {
-                conv_bik: Tensor::zeros([batch, d_inner, conv_kernel], &device),
-                ssm_bir: Tensor::zeros([batch, d_inner, state_rank], &device),
-            });
+            let mut cache = cache.unwrap_or_else(|| self.zero_cache(batch, &device));
             cache.sanity();
 
             // layer 1 (in_proj): projects the input d_model into 2 * d_inner.

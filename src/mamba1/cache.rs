@@ -51,46 +51,19 @@ impl Mamba1Cache {
     }
 }
 
-/// Configuration / factory for a single [`Mamba1Cache`].
-#[derive(Config, Debug)]
-pub struct Mamba1CacheConfig {
-    /// Batch size.
-    pub batch: usize,
-
-    /// State rank — the size of the `r` axis of the state.
-    /// Corresponds to `state_rank` in [`Mamba1Config`].
-    #[config(default = 16)]
-    pub state_rank: usize,
-
-    /// Causal convolution window length.  Corresponds to `conv_kernel` in
-    /// [`Mamba1Config`].
-    #[config(default = 4)]
-    pub conv_kernel: usize,
-
-    /// Inner (expanded) channel width `d_inner`.
-    pub d_inner: usize,
-}
-
-impl Mamba1CacheConfig {
-    /// Derive cache shapes from a Mamba-1 block configuration plus a batch
-    /// size.
-    pub fn new_from_block_config(batch: usize, block_config: Mamba1Config) -> Self {
-        Self {
-            batch,
-            state_rank: block_config.state_rank,
-            conv_kernel: block_config.conv_kernel,
-            d_inner: block_config.d_inner(),
-        }
-    }
-
-    /// Allocate zero-initialised cache tensors on `device`.
+impl Mamba1 {
+    /// The cache of a fresh sequence, for `batch` rows. A `forward` or a
+    /// `step` without a cache starts from it. The shapes come from the
+    /// weights of the block.
     ///
     /// Zeros are correct: a zero convolution window means "no previous tokens"
     /// (the causal zero padding), and a zero state is the standard initial
     /// condition `h₀ = 0`.
-    pub fn init(&self, device: &Device) -> Mamba1Cache {
-        let conv_bik = Tensor::zeros([self.batch, self.d_inner, self.conv_kernel], device);
-        let ssm_bir = Tensor::zeros([self.batch, self.d_inner, self.state_rank], device);
+    pub fn zero_cache(&self, batch: usize, device: &Device) -> Mamba1Cache {
+        let [d_inner, state_rank] = self.a_log.dims();
+        let [_, _, conv_kernel] = self.conv1d.weight.dims();
+        let conv_bik = Tensor::zeros([batch, d_inner, conv_kernel], device);
+        let ssm_bir = Tensor::zeros([batch, d_inner, state_rank], device);
         Mamba1Cache { conv_bik, ssm_bir }
     }
 }
@@ -112,41 +85,6 @@ pub struct Mamba1Caches {
     /// weights (a layer schedule), it can be larger than the number of *real*
     /// weight layers.
     pub caches: Vec<Mamba1Cache>,
-}
-
-/// Configuration / factory for [`Mamba1Caches`].
-#[derive(Config, Debug)]
-pub struct Mamba1CachesConfig {
-    /// Number of layer caches: the number of virtual layers in the network (one
-    /// cache per layer, also when layers share weights).
-    pub n_caches: usize,
-
-    /// Shared configuration that determines the shape of each individual
-    /// cache tensor.
-    pub cache: Mamba1CacheConfig,
-}
-
-impl Mamba1CachesConfig {
-    /// Convenience constructor that derives cache shapes directly from a
-    /// [`Mamba1Config`] block configuration.
-    pub fn new_from_block_config(
-        n_caches: usize,
-        batch: usize,
-        block_config: Mamba1Config,
-    ) -> Self {
-        Self {
-            n_caches,
-            cache: Mamba1CacheConfig::new_from_block_config(batch, block_config),
-        }
-    }
-
-    /// Allocate all cache tensors (zero-initialised) on `device`.
-    pub fn init(&self, device: &Device) -> Mamba1Caches {
-        let caches = (0..self.n_caches)
-            .map(|_| self.cache.clone().init(device))
-            .collect();
-        Mamba1Caches { caches }
-    }
 }
 
 impl Mamba1Caches {

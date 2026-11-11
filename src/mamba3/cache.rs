@@ -4,7 +4,8 @@
 //! of a cache (`DoubleSsd` | `SingleSsd`). The variant given to
 //! [`Mamba3::forward`](crate::mamba3::mamba3::Mamba3::forward) /
 //! [`Mamba3::step`](crate::mamba3::mamba3::Mamba3::step) selects the pathway
-//! at runtime. A missing cache selects `SingleSsd`.
+//! at runtime. A missing cache selects `SingleSsd`:
+//! [`Mamba3::zero_cache`] builds each fresh cache, of that pathway.
 //!
 //! The accumulator of single-SSD and the state of double-SSD are different
 //! **mid-sequence**, so the cache types are distinct: this prevents a silent
@@ -13,7 +14,9 @@
 //! between them by a lossless field-by-field move (see the note there).
 
 use crate::mamba3::double_ssd::prelude::*;
+use crate::mamba3::mamba3::Mamba3;
 use crate::mamba3::single_ssd::prelude::*;
+use burn::prelude::*;
 
 /// A pathway-tagged bundle of per-layer caches, so one dispatch entry can
 /// take and return either cache family.
@@ -137,6 +140,40 @@ impl Mamba3Cache {
         match self {
             Self::DoubleSsd(_cache) => None,
             Self::SingleSsd(cache) => Some(cache),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The fresh cache
+// ---------------------------------------------------------------------------
+
+impl Mamba3 {
+    /// The cache of a fresh sequence, for `batch` rows. It holds a zero state,
+    /// a zero tap FIFO, the identity rotation and the fresh registers of the
+    /// positive systems. A `forward` or a `step` without a cache starts from it, and
+    /// so does each segment of a packed call without an origin. The shapes come
+    /// from the block.
+    ///
+    /// It is a single-SSD cache, because a missing cache selects that pathway.
+    /// A caller that needs a fresh double-SSD cache converts it with `.into()`.
+    /// A fresh cache is at a call boundary, so this move is lossless (see the
+    /// note on the conversions below).
+    pub fn zero_cache(&self, batch: usize, device: &Device) -> Mamba3SingleSsdCache {
+        let ssm_bhpr = Tensor::zeros(
+            [batch, self.nheads(), self.per_head_dim(), self.state_rank],
+            device,
+        );
+        let (k_state_bumhr, v_state_buhp) = self.zero_tap_slots(batch, device);
+        let rotation = self.zero_rotation_state(batch, device);
+        let (log_precision_bh, tropical_bh) = self.zero_positive_state(batch, device);
+        Mamba3SingleSsdCache {
+            ssm_bhpr,
+            k_state_bumhr,
+            v_state_buhp,
+            rotation,
+            log_precision_bh,
+            tropical_bh,
         }
     }
 }

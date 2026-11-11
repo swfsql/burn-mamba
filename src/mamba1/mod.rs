@@ -17,6 +17,6 @@ pub mod mamba1;
 /// Public re-exports for Mamba-1.
 pub mod prelude {
     use super::*;
-    pub use cache::{Mamba1Cache, Mamba1CacheConfig, Mamba1Caches, Mamba1CachesConfig};
+    pub use cache::{Mamba1Cache, Mamba1Caches};
     pub use mamba1::{Mamba1, Mamba1Config, Mamba1Untied};
 }

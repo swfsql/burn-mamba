@@ -1600,7 +1600,7 @@ impl Mamba3 {
         // ── Initialise cache if not provided ──────────────────────────────────
         // A missing cache selects the single-ssd pathway (every rotation kind
         // runs on it).
-        let cache = cache.unwrap_or_else(|| self.zero_cache(batch, &device));
+        let cache = cache.unwrap_or_else(|| self.zero_cache(batch, &device).into());
 
         // ── SSD Pathway Selection ─────────────────────────────────────────────
         // The two cache types have the same fields, so `origin` converts to
@@ -1637,27 +1637,6 @@ impl Mamba3 {
                 (out_bsm, cache.into())
             }
         }
-    }
-
-    /// Build the default per-call cache (single-ssd pathway, for every rotation
-    /// kind). The rotation accumulator is the matching [`RotationState`] variant.
-    fn zero_cache(&self, batch: usize, device: &Device) -> Mamba3Cache {
-        let nheads = self.nheads();
-        let per_head_dim = self.per_head_dim();
-        let state_rank = self.state_rank;
-        let ssm_bhpr = Tensor::zeros([batch, nheads, per_head_dim, state_rank], device);
-        let (k_state_bumhr, v_state_buhp) = self.zero_tap_slots(batch, device);
-        let rotation = self.zero_rotation_state(batch, device);
-        let (log_precision_bh, tropical_bh) = self.zero_positive_state(batch, device);
-        crate::mamba3::single_ssd::cache::Mamba3SingleSsdCache {
-            ssm_bhpr,
-            k_state_bumhr,
-            v_state_buhp,
-            rotation,
-            log_precision_bh,
-            tropical_bh,
-        }
-        .into()
     }
 
     /// How far back the `β` tap of this block reaches, in write positions:
@@ -1855,7 +1834,7 @@ mod step {
 
             // ── Initialise cache if not provided ──────────────────────────────────
             // A missing cache selects the single-ssd pathway.
-            let cache = cache.unwrap_or_else(|| self.zero_cache(batch, &device));
+            let cache = cache.unwrap_or_else(|| self.zero_cache(batch, &device).into());
 
             // ── SSD Pathway Selection ─────────────────────────────────────────────
             match cache {

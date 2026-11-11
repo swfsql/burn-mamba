@@ -315,11 +315,10 @@ fn mamba3_cases(shape: Shape) -> Vec<(&'static str, Mamba3Config)> {
 }
 
 /// A zero double-SSD cache. It selects the double-SSD pathway, because a
-/// missing cache selects single-SSD.
+/// missing cache selects single-SSD. The block of `config` gives its shapes.
 fn double_ssd_cache(config: &Mamba3Config, batch: usize, device: &Device) -> Mamba3Cache {
-    Mamba3DoubleSsdCacheConfig::new_from_block_config(batch, config.clone())
-        .init(device)
-        .into()
+    let block = config.init(device);
+    Mamba3DoubleSsdCache::from(block.zero_cache(batch, device)).into()
 }
 
 // ---------------------------------------------------------------------------

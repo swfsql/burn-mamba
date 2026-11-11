@@ -23,7 +23,7 @@ pub mod ssd;
 /// Public re-exports for Mamba-2.
 pub mod prelude {
     use super::*;
-    pub use cache::{Mamba2Cache, Mamba2CacheConfig, Mamba2Caches, Mamba2CachesConfig};
+    pub use cache::{Mamba2Cache, Mamba2Caches};
     pub use mamba2::{Mamba2, Mamba2Config, Mamba2Untied};
     pub use ssd::Mamba2BackendExt;
     pub use ssd::{Mamba2SsdInput, Mamba2SsdPath};

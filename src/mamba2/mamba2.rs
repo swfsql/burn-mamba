@@ -758,14 +758,7 @@ impl Mamba2 {
         );
 
         // ── Initialise cache if not provided ──────────────────────────────────
-        let fresh = || {
-            let conv_bvk = Tensor::zeros(Shape::new([batch, conv_dim, conv_kernel]), &device);
-            let ssm_bhpr = Tensor::zeros(
-                Shape::new([batch, nheads, per_head_dim, state_rank]),
-                &device,
-            );
-            Mamba2Cache { conv_bvk, ssm_bhpr }
-        };
+        let fresh = || self.zero_cache(batch, &device);
         let mut cache = cache.unwrap_or_else(fresh);
         cache.sanity();
         // The cache that each segment of a packed row starts from.
@@ -1134,15 +1127,7 @@ mod step {
             assert_eq!(conv_dim, _conv_dim);
             assert_eq!(nheads % ngroups, 0);
 
-            let mut cache = cache.unwrap_or_else(|| {
-                let device = &input_bm.device();
-                let conv_bvk = Tensor::zeros(Shape::new([batch, conv_dim, conv_kernel]), device);
-                let ssm_bhpr = Tensor::zeros(
-                    Shape::new([batch, nheads, per_head_dim, state_rank]),
-                    device,
-                );
-                Mamba2Cache { conv_bvk, ssm_bhpr }
-            });
+            let mut cache = cache.unwrap_or_else(|| self.zero_cache(batch, &input_bm.device()));
 
             // ── In-projection ─────────────────────────────────────────────────
             let (z_gate_bi, xbc_bv, dt_raw_bh) = {

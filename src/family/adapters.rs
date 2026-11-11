@@ -14,9 +14,7 @@ use burn_stack::utils::UntiedParam;
 #[cfg(feature = "mamba1")]
 mod impl_mamba1 {
     use super::*;
-    use crate::mamba1::prelude::{
-        Mamba1, Mamba1Cache, Mamba1CacheConfig, Mamba1Caches, Mamba1CachesConfig, Mamba1Config,
-    };
+    use crate::mamba1::prelude::{Mamba1, Mamba1Cache, Mamba1Caches, Mamba1Config};
 
     impl CacheStack for Mamba1Caches {
         type Cache = Mamba1Cache;
@@ -80,15 +78,9 @@ mod impl_mamba1 {
     }
 
     impl Mamba1 {
-        fn cache_config(&self, batch: usize) -> Mamba1CacheConfig {
-            let [d_inner, state_rank] = self.a_log.dims();
-            let [_, _, conv_kernel] = self.conv1d.weight.dims();
-            Mamba1CacheConfig::new(batch, d_inner)
-                .with_state_rank(state_rank)
-                .with_conv_kernel(conv_kernel)
-        }
         fn make_zero(&self, batch: usize, n_virtual: usize, device: &Device) -> Mamba1Caches {
-            Mamba1CachesConfig::new(n_virtual, self.cache_config(batch)).init(device)
+            let caches = (0..n_virtual).map(|_| self.zero_cache(batch, device)).collect();
+            Mamba1Caches { caches }
         }
     }
 
@@ -110,10 +102,7 @@ mod impl_mamba1 {
 #[cfg(feature = "mamba2")]
 mod impl_mamba2 {
     use super::*;
-    use crate::mamba2::prelude::{
-        Mamba2, Mamba2Cache, Mamba2CacheConfig, Mamba2Caches, Mamba2CachesConfig, Mamba2Config,
-        Mamba2SsdPath,
-    };
+    use crate::mamba2::prelude::{Mamba2, Mamba2Cache, Mamba2Caches, Mamba2Config, Mamba2SsdPath};
 
     impl CacheStack for Mamba2Caches {
         type Cache = Mamba2Cache;
@@ -195,19 +184,8 @@ mod impl_mamba2 {
 
     impl Mamba2 {
         fn make_zero(&self, batch: usize, n_virtual: usize, device: &Device) -> Mamba2Caches {
-            let [conv_dim, _, conv_kernel] = self.conv1d.weight.dims();
-            Mamba2CachesConfig::new(
-                n_virtual,
-                Mamba2CacheConfig {
-                    batch,
-                    state_rank: self.state_rank,
-                    conv_kernel,
-                    conv_dim,
-                    per_head_dim: self.per_head_dim(),
-                    nheads: self.nheads(),
-                },
-            )
-            .init(device)
+            let caches = (0..n_virtual).map(|_| self.zero_cache(batch, device)).collect();
+            Mamba2Caches { caches }
         }
     }
 
@@ -231,10 +209,7 @@ mod impl_mamba3 {
     use super::*;
     use crate::mamba3::double_ssd::prelude::Mamba3DoubleSsdCache;
     use crate::mamba3::prelude::{Mamba3, Mamba3Cache, Mamba3Caches, Mamba3Config, Mamba3SsdPath};
-    use crate::mamba3::single_ssd::prelude::{
-        Mamba3SingleSsdCache, Mamba3SingleSsdCacheConfig, Mamba3SingleSsdCaches,
-        Mamba3SingleSsdCachesConfig,
-    };
+    use crate::mamba3::single_ssd::prelude::{Mamba3SingleSsdCache, Mamba3SingleSsdCaches};
 
     /// Zero single-ssd caches for a batch of `batch`. (A missing cache selects
     /// the single-ssd pathway, with ≈½ the SSD memory of double-ssd, for every
@@ -245,24 +220,8 @@ mod impl_mamba3 {
         n_virtual: usize,
         device: &Device,
     ) -> Mamba3SingleSsdCaches {
-        Mamba3SingleSsdCachesConfig::new(
-            n_virtual,
-            Mamba3SingleSsdCacheConfig {
-                batch,
-                state_rank: mamba_block.state_rank,
-                num_rotation_angles: mamba_block.num_rotation_angles,
-                per_head_dim: mamba_block.per_head_dim(),
-                nheads: mamba_block.nheads(),
-                mimo_rank: mamba_block.mimo_rank,
-                rotation: mamba_block.rotation,
-                num_quat_blocks: mamba_block.num_quat_blocks,
-                tap_pattern: mamba_block.tap_pattern,
-                micro_steps: mamba_block.micro_steps,
-                gain: mamba_block.gain,
-                tropical: mamba_block.tropical,
-            },
-        )
-        .init(device)
+        let caches = (0..n_virtual).map(|_| mamba_block.zero_cache(batch, device)).collect();
+        Mamba3SingleSsdCaches { caches }
     }
 
     impl CacheStack for Mamba3Caches {

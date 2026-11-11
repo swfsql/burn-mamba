@@ -1157,8 +1157,8 @@ fn quaternion_split_prefill_matches_full_kind(kind: RotationKind) {
         "{kind:?} split-prefill output mismatch: {d_out:.6}"
     );
 
-    // Final state must also match. A fresh cache now defaults to the
-    // single-ssd pathway for Quaternion4D too (forward_single_ssd supports it).
+    // The final state must also match. A fresh cache selects the single-ssd
+    // pathway for Quaternion4D too (forward_single_ssd supports it).
     let s_full = cache_full.single_ssd().unwrap().ssm_bhpr;
     let s_split = cache_split.single_ssd().unwrap().ssm_bhpr;
     let d_state = max_abs_diff(s_full, s_split);

@@ -33,10 +33,7 @@ pub mod token_band;
 /// Public re-exports for the single-SSD pathway.
 pub mod prelude {
     use super::*;
-    pub use cache::{
-        Mamba3SingleSsdCache, Mamba3SingleSsdCacheConfig, Mamba3SingleSsdCaches,
-        Mamba3SingleSsdCachesConfig,
-    };
+    pub use cache::{Mamba3SingleSsdCache, Mamba3SingleSsdCaches};
     pub use ssd::Mamba3SingleSsdBackendExt;
     pub use ssd::Mamba3SingleSsdInput;
 }

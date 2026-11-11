@@ -172,20 +172,7 @@ impl Mamba3 {
         let end_b = pad_bs.as_ref().map(crate::padding::real_end_b);
 
         // ── Initialise the caches that the caller did not give ────────────────
-        let fresh = || {
-            let ssm_bhpr = Tensor::zeros([batch, nheads, per_head_dim, state_rank], &device);
-            let (k_state_bumhr, v_state_buhp) = self.zero_tap_slots(batch, &device);
-            let rotation = self.zero_rotation_state(batch, &device);
-            let (log_precision_bh, tropical_bh) = self.zero_positive_state(batch, &device);
-            Mamba3DoubleSsdCache {
-                ssm_bhpr,
-                k_state_bumhr,
-                v_state_buhp,
-                rotation,
-                log_precision_bh,
-                tropical_bh,
-            }
-        };
+        let fresh = || Mamba3DoubleSsdCache::from(self.zero_cache(batch, &device));
         let cache = cache.unwrap_or_else(fresh);
         // A reset is at the first token of a chunk, which is its first
         // micro-step on the write axis. See [`crate::packing`].

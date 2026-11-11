@@ -30,10 +30,7 @@ pub mod ssd;
 /// Public re-exports for the double-SSD pathway.
 pub mod prelude {
     use super::*;
-    pub use cache::{
-        Mamba3DoubleSsdCache, Mamba3DoubleSsdCacheConfig, Mamba3DoubleSsdCaches,
-        Mamba3DoubleSsdCachesConfig,
-    };
+    pub use cache::{Mamba3DoubleSsdCache, Mamba3DoubleSsdCaches};
     pub use ssd::Mamba3DoubleSsdBackendExt;
     pub use ssd::Mamba3DoubleSsdInput;
 }
