@@ -34,6 +34,7 @@ use crate::mamba3::single_ssd::prelude::Mamba3SingleSsdCache;
 use burn::module::{ModuleVisitor, Param};
 use burn::prelude::*;
 use burn::tensor::{Distribution, Gradients, TensorData};
+use burn_stack::modules::{CacheTensors, TensorZip};
 use burn_stack::utils::test_helpers::{dtype_tol, max_abs_diff};
 use burn_stack::utils::test_helpers::test_device;
 
@@ -202,20 +203,26 @@ trait FieldVisit {
     }
 }
 
-trait TestCache: Clone {
-    fn map(self, f: &impl FieldMap) -> Self;
+/// A cache of these tests. Its traversal ([`CacheTensors`]) gives the map.
+/// `visit` is by hand, because only it treats the rotation angle as an angle.
+trait TestCache: CacheTensors {
+    /// `f` applied to every tensor of the cache. A map is the zip of the cache
+    /// with its clone.
+    fn map(self, f: &impl FieldMap) -> Self {
+        struct Map<'a, F>(&'a F);
+        impl<F: FieldMap> TensorZip for Map<'_, F> {
+            fn zip<const D: usize>(&mut self, a: Tensor<D>, _clone: Tensor<D>) -> Tensor<D> {
+                self.0.map(a)
+            }
+        }
+        self.clone().zip_tensors(self, &mut Map(f))
+    }
+
     fn visit(&self, v: &mut impl FieldVisit);
 }
 
 #[cfg(feature = "mamba2")]
 impl TestCache for Mamba2Cache {
-    fn map(self, f: &impl FieldMap) -> Self {
-        Mamba2Cache {
-            conv_bvk: f.map(self.conv_bvk),
-            ssm_bhpr: f.map(self.ssm_bhpr),
-        }
-    }
-
     fn visit(&self, v: &mut impl FieldVisit) {
         v.visit(&self.conv_bvk);
         v.visit(&self.ssm_bhpr);
@@ -227,24 +234,6 @@ impl TestCache for Mamba2Cache {
 macro_rules! impl_mamba3_cache {
     ($cache:ty) => {
         impl TestCache for $cache {
-            fn map(self, f: &impl FieldMap) -> Self {
-                Self {
-                    ssm_bhpr: f.map(self.ssm_bhpr),
-                    tap_fifo: self.tap_fifo.map(|fifo| TapFifo {
-                        b_bumhr: f.map(fifo.b_bumhr),
-                        x_buhp: f.map(fifo.x_buhp),
-                    }),
-                    rotation: match self.rotation {
-                        RotationState::Real(r) => RotationState::Real(r),
-                        RotationState::Angle(t) => RotationState::Angle(f.map(t)),
-                        RotationState::Quaternion(t) => RotationState::Quaternion(f.map(t)),
-                        RotationState::Rotor(t) => RotationState::Rotor(f.map(t)),
-                    },
-                    log_precision_bh: self.log_precision_bh.map(|t| f.map(t)),
-                    tropical_bh: self.tropical_bh.map(|t| f.map(t)),
-                }
-            }
-
             fn visit(&self, v: &mut impl FieldVisit) {
                 v.visit(&self.ssm_bhpr);
                 if let Some(fifo) = &self.tap_fifo {
