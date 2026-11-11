@@ -363,13 +363,11 @@ fn assert_tail(mimo_rank: usize, out_norm: bool, u: usize) {
             end_b: None,
             packed: None,
             new_rotation: RotationState::Angle(angle_bha.clone()),
-            b_last_bumhr: Some(b_last_bumhr.clone()),
-            x_last_buhp: Some(x_last_buhp.clone()),
+            new_tap_fifo: Some(TapFifo { b_bumhr: b_last_bumhr.clone(), x_buhp: x_last_buhp.clone() }),
         },
         Mamba3DoubleSsdCache {
             ssm_bhpr: ssm_bhpr.clone(),
-            k_state_bumhr: None,
-            v_state_buhp: None,
+            tap_fifo: None,
             rotation: RotationState::Angle(angle_bha.clone().zeros_like()),
             log_precision_bh: None,
             tropical_bh: None,
@@ -427,8 +425,9 @@ fn assert_tail(mimo_rank: usize, out_norm: bool, u: usize) {
 
     // The tail fills the fields of the next call, and keeps the state of the scan.
     assert_eq!(host(ssm_bhpr), host(cache.ssm_bhpr), "{label}: state");
-    assert_eq!(host(b_last_bumhr), host(cache.k_state_bumhr.unwrap()), "{label}: B slots");
-    assert_eq!(host(x_last_buhp), host(cache.v_state_buhp.unwrap()), "{label}: x slots");
+    let fifo = cache.tap_fifo.unwrap();
+    assert_eq!(host(b_last_bumhr), host(fifo.b_bumhr), "{label}: tap FIFO B");
+    assert_eq!(host(x_last_buhp), host(fifo.x_buhp), "{label}: tap FIFO x");
     assert_eq!(host(angle_bha), host(cache.rotation.angle()), "{label}: rotation");
 }
 

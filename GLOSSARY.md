@@ -78,7 +78,7 @@ _Avoid_: gate (for the gain, or for a tap that closes at token boundaries)
 
 **Plant frame**:
 The work of a Mamba-3 block around the plant. The entry ends at the rotated `B`
-and `C`, the masses and the tap slots. The tail starts after the readout and
+and `C`, the masses and the tap FIFO. The tail starts after the readout and
 ends at `out_proj`.
 
 ### SSD evaluation

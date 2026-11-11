@@ -62,10 +62,12 @@ mod mamba3 {
             }
         };
         let (a, b) = (fields(a), fields(b));
-        assert!(a.k_state_bumhr.is_some() && a.log_precision_bh.is_some() && a.tropical_bh.is_some());
+        assert!(a.tap_fifo.is_some() && a.log_precision_bh.is_some() && a.tropical_bh.is_some());
         assert_same(&format!("{label} ssm"), &a.ssm_bhpr, &b.ssm_bhpr);
-        assert_same_option(&format!("{label} k slots"), &a.k_state_bumhr, &b.k_state_bumhr);
-        assert_same_option(&format!("{label} v slots"), &a.v_state_buhp, &b.v_state_buhp);
+        let fifo = |c: &Mamba3DoubleSsdCache| c.tap_fifo.clone().map(|f| (f.b_bumhr, f.x_buhp)).unzip();
+        let ((a_b, a_x), (b_b, b_x)) = (fifo(&a), fifo(&b));
+        assert_same_option(&format!("{label} tap FIFO B"), &a_b, &b_b);
+        assert_same_option(&format!("{label} tap FIFO x"), &a_x, &b_x);
         assert_same_option(&format!("{label} ln Λ"), &a.log_precision_bh, &b.log_precision_bh);
         assert_same_option(&format!("{label} tropical"), &a.tropical_bh, &b.tropical_bh);
         match (&a.rotation, &b.rotation) {

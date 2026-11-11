@@ -144,22 +144,20 @@ fn forward_matches_step_double(kind: RotationKind, micro_steps: usize) {
         max_abs_diff(cache_fwd.ssm_bhpr, cache_step.ssm_bhpr) < dtype_tol(1e-4),
         "{label}: final state"
     );
-    // The tap slots are absent under `TapPattern::None`, in both caches.
+    // The tap FIFO is absent under `TapPattern::None`, in both caches.
     assert_eq!(
-        cache_fwd.k_state_bumhr.is_some(),
-        cache_step.k_state_bumhr.is_some(),
-        "{label}: the two paths disagree on whether a tap slot exists"
+        cache_fwd.tap_fifo.is_some(),
+        cache_step.tap_fifo.is_some(),
+        "{label}: the two paths disagree on whether a tap FIFO exists"
     );
-    if let (Some(fwd), Some(step)) = (cache_fwd.k_state_bumhr, cache_step.k_state_bumhr) {
+    if let (Some(fwd), Some(step)) = (cache_fwd.tap_fifo, cache_step.tap_fifo) {
         assert!(
-            max_abs_diff(fwd, step) < dtype_tol(1e-4),
-            "{label}: final k_state (the tap FIFO's B)"
+            max_abs_diff(fwd.b_bumhr, step.b_bumhr) < dtype_tol(1e-4),
+            "{label}: final B of the tap FIFO"
         );
-    }
-    if let (Some(fwd), Some(step)) = (cache_fwd.v_state_buhp, cache_step.v_state_buhp) {
         assert!(
-            max_abs_diff(fwd, step) < dtype_tol(1e-4),
-            "{label}: final v_state (the tap FIFO's x)"
+            max_abs_diff(fwd.x_buhp, step.x_buhp) < dtype_tol(1e-4),
+            "{label}: final x of the tap FIFO"
         );
     }
 }

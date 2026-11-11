@@ -230,8 +230,10 @@ macro_rules! impl_mamba3_cache {
             fn map(self, f: &impl FieldMap) -> Self {
                 Self {
                     ssm_bhpr: f.map(self.ssm_bhpr),
-                    k_state_bumhr: self.k_state_bumhr.map(|t| f.map(t)),
-                    v_state_buhp: self.v_state_buhp.map(|t| f.map(t)),
+                    tap_fifo: self.tap_fifo.map(|fifo| TapFifo {
+                        b_bumhr: f.map(fifo.b_bumhr),
+                        x_buhp: f.map(fifo.x_buhp),
+                    }),
                     rotation: match self.rotation {
                         RotationState::Real(r) => RotationState::Real(r),
                         RotationState::Angle(t) => RotationState::Angle(f.map(t)),
@@ -245,8 +247,10 @@ macro_rules! impl_mamba3_cache {
 
             fn visit(&self, v: &mut impl FieldVisit) {
                 v.visit(&self.ssm_bhpr);
-                self.k_state_bumhr.iter().for_each(|t| v.visit(t));
-                self.v_state_buhp.iter().for_each(|t| v.visit(t));
+                if let Some(fifo) = &self.tap_fifo {
+                    v.visit(&fifo.b_bumhr);
+                    v.visit(&fifo.x_buhp);
+                }
                 match &self.rotation {
                     RotationState::Real(_) => {}
                     RotationState::Angle(t) => v.visit_angle(t),

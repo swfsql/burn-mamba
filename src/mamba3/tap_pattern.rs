@@ -61,7 +61,7 @@
 /// - the shift(s) that the chunkwise pathways apply before chunking,
 /// - the width of the single-SSD γ-correction band,
 /// - whether the in-projection has `λ` and `μ` channels,
-/// - how many `(B, x)` tap slots the cache holds ([`tap_slots`](Self::tap_slots)).
+/// - how many slots the tap FIFO of the cache holds ([`tap_slots`](Self::tap_slots)).
 ///
 /// The lattice is the product of the settings of the two taps. The lag-1 tap
 /// is absent, closed at token boundaries, or unrestricted (the `Horizontal…`
@@ -95,7 +95,7 @@ pub enum TapPattern {
     ///
     /// - the in-projection has no `λ` channels (so Muon sees no `λ`
     ///   sub-projection),
-    /// - no `β` is formed, and the tap slots of the caches are `None`,
+    /// - no `β` is formed, and the tap FIFO of each cache is `None`,
     /// - `forward` makes **one** SSD call, and `step` has no second outer
     ///   product.
     ///
@@ -243,7 +243,7 @@ pub enum TapPattern {
 impl TapPattern {
     /// Whether the pattern has a second (`β`) tap. `false` only for
     /// [`None`](Self::None). Every site branches on this predicate: no tap
-    /// means no `λ` channels, no `β` coefficient, no tap slots in the cache,
+    /// means no `λ` channels, no `β` coefficient, no tap FIFO in the cache,
     /// and no previous-sample term in the recurrence.
     pub fn has_beta_tap(self) -> bool {
         self != TapPattern::None
@@ -317,11 +317,11 @@ impl TapPattern {
         self == TapPattern::VerticalPlusHorizontalCarryOver
     }
 
-    /// How many `(B, x)` tap slots a cache holds for this pattern at
-    /// `micro_steps`: the depth of the FIFO that the tap reads, so exactly
-    /// [`tap_lag`](Self::tap_lag). A lag-`L` tap needs the last `L` positions.
-    /// The state is always one matrix. Only the tap buffer of the trapezoid
-    /// changes.
+    /// The number of slots in the tap FIFO of a cache, for this pattern at
+    /// `micro_steps`. It is the depth of the FIFO that the tap reads, so
+    /// exactly [`tap_lag`](Self::tap_lag). A lag-`L` tap needs the last `L`
+    /// positions.
+    /// The state is always one matrix. Only the tap FIFO changes.
     ///
     /// A slot is a *layout*. It does not mean that something crosses the call
     /// boundary through it: [`HorizontalReset`](Self::HorizontalReset) shares
@@ -557,9 +557,8 @@ mod tests {
                     max_abs_diff(cache_single.ssm_bhpr, cache_step.ssm_bhpr.clone()) < dtype_tol(1e-4),
                     "{label}: final state"
                 );
-                // Nothing to carry: the slots are absent, not zeroed.
-                assert!(cache_step.k_state_bumhr.is_none(), "{label}");
-                assert!(cache_step.v_state_buhp.is_none(), "{label}");
+                // Nothing to carry: the tap FIFO is absent, not zeroed.
+                assert!(cache_step.tap_fifo.is_none(), "{label}");
             }
         }
     }
@@ -728,10 +727,9 @@ mod tests {
                 }
 
                 // The tap FIFO is the previous token, `u` slots deep.
-                let k = cache_step.k_state_bumhr.expect("a β tap keeps its slots");
-                let v = cache_step.v_state_buhp.expect("a β tap keeps its slots");
-                assert_eq!(k.dims()[1], micro_steps, "{label}");
-                assert_eq!(v.dims()[1], micro_steps, "{label}");
+                let fifo = cache_step.tap_fifo.expect("a β tap keeps its tap FIFO");
+                assert_eq!(fifo.b_bumhr.dims()[1], micro_steps, "{label}");
+                assert_eq!(fifo.x_buhp.dims()[1], micro_steps, "{label}");
             }
         }
     }
@@ -829,15 +827,11 @@ mod tests {
                 assert!(d < dtype_tol(1e-4), "{label}: forward after step: {d:.3e}");
                 let d = max_abs_diff(cache_fwd.ssm_bhpr, cache_all.ssm_bhpr);
                 assert!(d < dtype_tol(1e-4), "{label}: final state: {d:.3e}");
-                let d = max_abs_diff(
-                    cache_fwd.k_state_bumhr.expect("slots"),
-                    cache_all.k_state_bumhr.expect("slots"),
-                );
+                let (fifo_fwd, fifo_all) =
+                    (cache_fwd.tap_fifo.expect("fifo"), cache_all.tap_fifo.expect("fifo"));
+                let d = max_abs_diff(fifo_fwd.b_bumhr, fifo_all.b_bumhr);
                 assert!(d < dtype_tol(1e-4), "{label}: tap FIFO B: {d:.3e}");
-                let d = max_abs_diff(
-                    cache_fwd.v_state_buhp.expect("slots"),
-                    cache_all.v_state_buhp.expect("slots"),
-                );
+                let d = max_abs_diff(fifo_fwd.x_buhp, fifo_all.x_buhp);
                 assert!(d < dtype_tol(1e-4), "{label}: tap FIFO x (decay convention): {d:.3e}");
             }
         }
@@ -979,8 +973,8 @@ mod tests {
                     }
 
                     let slots = pattern.tap_slots(micro_steps);
-                    let k = cache_step.k_state_bumhr.expect("a β tap keeps its slots");
-                    assert_eq!(k.dims()[1], slots, "{label}");
+                    let fifo = cache_step.tap_fifo.expect("a β tap keeps its tap FIFO");
+                    assert_eq!(fifo.b_bumhr.dims()[1], slots, "{label}");
                 }
             }
         }
@@ -1082,8 +1076,8 @@ mod tests {
                 let d = max_abs_diff(cache_fwd.ssm_bhpr, cache_all.ssm_bhpr);
                 assert!(d < dtype_tol(1e-4), "{label}: final state: {d:.3e}");
                 let d = max_abs_diff(
-                    cache_fwd.v_state_buhp.expect("slots"),
-                    cache_all.v_state_buhp.expect("slots"),
+                    cache_fwd.tap_fifo.expect("fifo").x_buhp,
+                    cache_all.tap_fifo.expect("fifo").x_buhp,
                 );
                 assert!(d < dtype_tol(1e-4), "{label}: tap FIFO x (decay convention): {d:.3e}");
             }

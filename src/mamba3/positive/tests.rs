@@ -562,8 +562,9 @@ fn assert_field(label: &str, name: &str, a: &Option<Tensor<2>>, b: &Option<Tenso
 fn assert_caches_match(label: &str, a: &Mamba3DoubleSsdCache, b: &Mamba3DoubleSsdCache) {
     let d = max_abs_diff(a.ssm_bhpr.clone(), b.ssm_bhpr.clone());
     assert!(d < dtype_tol(1e-4), "{label}: state differs by {d}");
-    if let (Some(a), Some(b)) = (&a.v_state_buhp, &b.v_state_buhp) {
-        assert!(max_abs_diff(a.clone(), b.clone()) < dtype_tol(1e-4), "{label}: tap slots");
+    if let (Some(a), Some(b)) = (&a.tap_fifo, &b.tap_fifo) {
+        let d = max_abs_diff(a.x_buhp.clone(), b.x_buhp.clone());
+        assert!(d < dtype_tol(1e-4), "{label}: the x of the tap FIFO");
     }
     assert_field(label, "ln Λ", &a.log_precision_bh, &b.log_precision_bh, 1e-4);
     assert_field(label, "tropical c", &a.tropical_bh, &b.tropical_bh, 1e-3);

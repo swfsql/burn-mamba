@@ -4,21 +4,19 @@
 //!
 //! 1. **State**: `hₜ ∈ ℝ^{per_head_dim×state_rank}` per head, the
 //!    compressed context.
-//! 2. **Previous K state**: the `B` of the last `lag` positions, oldest first,
-//!    `[batch, lag, mimo_rank, nheads, state_rank]`. The β term of the
-//!    trapezoidal recurrence needs it.
-//! 3. **Previous V state**: the matching `x`, `[batch, lag, nheads,
-//!    per_head_dim]`. With k_state, it rebuilds `β Bₚ₋ₗₐ₉ ⊗ xₚ₋ₗₐ₉`.
-//!    Items 2 and 3 are the **tap slots** of the trapezoid. They exist only
-//!    when the [`TapPattern`](crate::mamba3::tap_pattern::TapPattern) of the block
-//!    has a β tap. The FIFO is as deep as its
+//! 2. **Tap FIFO** ([`TapFifo`](crate::mamba3::cache::TapFifo)): the `B` and
+//!    the `x` of the last `lag` positions, oldest first. With them, the β term
+//!    of the trapezoidal recurrence rebuilds `β Bₚ₋ₗₐ₉ ⊗ xₚ₋ₗₐ₉`. The FIFO
+//!    exists only when the
+//!    [`TapPattern`](crate::mamba3::tap_pattern::TapPattern) of the block has a
+//!    β tap. It is as deep as its
 //!    [`tap_lag`](crate::mamba3::tap_pattern::TapPattern::tap_lag) (`1` for the
 //!    default, `u` for
 //!    [`TapPattern::Vertical`](crate::mamba3::tap_pattern::TapPattern::Vertical)).
-//! 4. **Cumulative rotation**
+//! 3. **Cumulative rotation**
 //!    ([`RotationState`](crate::mamba3::rotation::RotationState)): the rotation accumulated up
 //!    to position `t`, to continue the data-dependent rotation.
-//! 5. **Positive-system fields**: `ln Λ` of a Kalman gain and `c` of a tropical
+//! 4. **Positive-system fields**: `ln Λ` of a Kalman gain and `c` of a tropical
 //!    register, when the block has them.
 //!
 //! Mamba-3 has **no conv cache**. It removes the short 1-D convolution of
@@ -60,31 +58,12 @@ pub struct Mamba3DoubleSsdCache {
     /// Shape: `[batch, nheads, per_head_dim, state_rank]`
     pub ssm_bhpr: Tensor<4>,
 
-    /// **The B of the tap FIFO**, one slot per lagged position, **oldest
-    /// first**.
+    /// **The tap FIFO** ([`TapFifo`]), which rebuilds the β term of the next
+    /// call: `β * sumₘ Bₚ₋ₗₐ₉[m] ⊗ (xₚ₋ₗₐ₉ * mimo_x[m])`.
     ///
-    /// It rebuilds the β term: `β * sumₘ Bₚ₋ₗₐ₉[m] ⊗ (xₚ₋ₗₐ₉ * mimo_x[m])`.
-    /// Stored **as rotated**, at its own position: the relative-rotation
-    /// factoring `C̄ₜᵀB̄ₛ` then rebuilds the transport, so the next call applies
-    /// no rotation again.
-    ///
-    /// The tap slots of the trapezoid are `None` (not allocated, not zeroed)
-    /// under [`TapPattern::None`], which has no β term. Present exactly when
-    /// [`Self::v_state_buhp`] is (see [`TapPattern::tap_slots`]).
-    ///
-    /// Shape: `[batch, tap_slots, mimo_rank, nheads, state_rank]`
-    pub k_state_bumhr: Option<Tensor<5>>,
-
-    /// **The x of the tap FIFO**, matching [`Self::k_state_bumhr`] slot for
-    /// slot, and `None` with it.
-    ///
-    /// Each slot is **pre-scaled by the decay accumulated since its own
-    /// position** (`helpers::tail_decay`). This carries the gap transport of a
-    /// lag-`u` tap across the call boundary. At `lag = 1` that product is
-    /// empty, so the slot is the plain `xₜ₋₁`.
-    ///
-    /// Shape: `[batch, tap_slots, nheads, per_head_dim]`
-    pub v_state_buhp: Option<Tensor<4>>,
+    /// `None` (not allocated, not zeroed) under [`TapPattern::None`], which has
+    /// no β term.
+    pub tap_fifo: Option<TapFifo>,
 
     /// **Cumulative data-dependent rotation** up to the current position
     /// ([`RotationState`]): nothing for `Real1D`, the abelian rotation angle
@@ -120,16 +99,8 @@ impl Mamba3DoubleSsdCache {
     /// Run the [`NaN`/`Inf` guards](burn_stack::modules::misc::sanity) on every cached tensor.
     pub fn sanity(&self) {
         san(&self.ssm_bhpr);
-        assert_eq!(
-            self.k_state_bumhr.is_some(),
-            self.v_state_buhp.is_some(),
-            "the trapezoid's tap slots are present or absent together"
-        );
-        if let Some(k_state_bumhr) = &self.k_state_bumhr {
-            san(k_state_bumhr);
-        }
-        if let Some(v_state_buhp) = &self.v_state_buhp {
-            san(v_state_buhp);
+        if let Some(tap_fifo) = &self.tap_fifo {
+            tap_fifo.sanity();
         }
         self.rotation.sanity();
         for field in [&self.log_precision_bh, &self.tropical_bh].into_iter().flatten() {

@@ -58,7 +58,7 @@
 //! token can add doubt without evidence (a gap).
 //!
 //! Only the decay changes. `dₜ` replaces `αₜ` where `αₜ` is formed, before any
-//! consumer reads it. So the transports of the trapezoid, the tap slots and
+//! consumer reads it. So the transports of the trapezoid, the tap FIFO and
 //! the single-SSD key scale all follow. At `κ = 0` the block is stock, bit for
 //! bit (`log1p(0) = 0`). Two facts carry the design:
 //!

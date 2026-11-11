@@ -12,11 +12,16 @@
 //! mix inside a chunked pass. They are equal at call boundaries, where caches
 //! are produced and consumed. So the `From` impls at the bottom convert
 //! between them by a lossless field-by-field move (see the note there).
+//!
+//! [`TapFifo`] is a field of both cache types: the tap FIFO of the trapezoid.
+//! It owns its layout: the slot order, the zeros and the decay pre-scale of
+//! `x`.
 
 use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::mamba3::Mamba3;
 use crate::mamba3::single_ssd::prelude::*;
 use burn::prelude::*;
+use burn_stack::modules::sanity as san;
 
 /// A pathway-tagged bundle of per-layer caches, so one dispatch entry can
 /// take and return either cache family.
@@ -145,6 +150,81 @@ impl Mamba3Cache {
 }
 
 // ---------------------------------------------------------------------------
+// The tap FIFO
+// ---------------------------------------------------------------------------
+
+/// The tap FIFO of the trapezoid: the `B` and the `x` of the last write
+/// positions. A cache keeps them for the `β` taps of the next call. One slot
+/// holds one write position, and the slots are **oldest first**.
+///
+/// Both cache types hold an `Option<TapFifo>`. It is `None` (not allocated,
+/// not zeroed) under
+/// [`TapPattern::None`](crate::mamba3::tap_pattern::TapPattern::None), which
+/// has no `β` tap. Otherwise it has
+/// [`tap_slots`](crate::mamba3::tap_pattern::TapPattern::tap_slots) slots:
+/// `1` for the default, `u` for
+/// [`TapPattern::Vertical`](crate::mamba3::tap_pattern::TapPattern::Vertical).
+#[derive(Module, Debug)]
+pub struct TapFifo {
+    /// **The `B` of each slot**, after its bias and its rotation.
+    ///
+    /// It is stored **as rotated**, at its own position. The relative-rotation
+    /// factoring `C̄ₜᵀB̄ₛ` then rebuilds the transport, so the next call
+    /// applies no rotation again.
+    ///
+    /// Shape: `[batch, tap_slots, mimo_rank, nheads, state_rank]`
+    pub b_bumhr: Tensor<5>,
+
+    /// **The `x` of each slot**, pre-scaled by the decay accumulated since its
+    /// own position (`helpers::tail_decay`). This carries the gap transport of
+    /// a lag-`u` tap across the call boundary. At `lag = 1` that product is
+    /// empty, so the slot is the plain `xₜ₋₁`.
+    ///
+    /// Shape: `[batch, tap_slots, nheads, per_head_dim]`
+    pub x_buhp: Tensor<4>,
+}
+
+impl TapFifo {
+    /// The FIFO of a fresh sequence: `slots` zero slots. A zero slot adds
+    /// nothing to a tap.
+    pub fn zeros(
+        batch: usize,
+        slots: usize,
+        mimo_rank: usize,
+        nheads: usize,
+        state_rank: usize,
+        per_head_dim: usize,
+        device: &Device,
+    ) -> Self {
+        Self {
+            b_bumhr: Tensor::zeros([batch, slots, mimo_rank, nheads, state_rank], device),
+            x_buhp: Tensor::zeros([batch, slots, nheads, per_head_dim], device),
+        }
+    }
+
+    /// The newest `slots` slots, oldest first: the prefix of a tap that reads
+    /// `slots` write positions back. The tap at
+    /// [`tap_lag`](crate::mamba3::tap_pattern::TapPattern::tap_lag) reads the
+    /// whole FIFO. The lag-1 tap of a two-tap pattern reads only the newest
+    /// slot, which has the empty decay product. So a two-tap pattern reads one
+    /// FIFO twice.
+    pub(crate) fn newest(&self, slots: usize) -> Self {
+        let start = self.x_buhp.dims()[1] - slots;
+        Self {
+            b_bumhr: self.b_bumhr.clone().narrow(1, start, slots),
+            x_buhp: self.x_buhp.clone().narrow(1, start, slots),
+        }
+    }
+
+    /// Run the [`NaN`/`Inf` guards](burn_stack::modules::misc::sanity) on both
+    /// tensors.
+    pub fn sanity(&self) {
+        san(&self.b_bumhr);
+        san(&self.x_buhp);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // The fresh cache
 // ---------------------------------------------------------------------------
 
@@ -164,13 +244,12 @@ impl Mamba3 {
             [batch, self.nheads(), self.per_head_dim(), self.state_rank],
             device,
         );
-        let (k_state_bumhr, v_state_buhp) = self.zero_tap_slots(batch, device);
+        let tap_fifo = self.zero_tap_slots(batch, device);
         let rotation = self.zero_rotation_state(batch, device);
         let (log_precision_bh, tropical_bh) = self.zero_positive_state(batch, device);
         Mamba3SingleSsdCache {
             ssm_bhpr,
-            k_state_bumhr,
-            v_state_buhp,
+            tap_fifo,
             rotation,
             log_precision_bh,
             tropical_bh,
@@ -208,16 +287,15 @@ impl From<Mamba3SingleSsdCache> for Mamba3Cache {
 //
 // At a cache boundary, the look-ahead term `νₜ₊ₗₐ₉` vanishes, so `scaleₜ = γₜ`
 // for the final `lag` positions. The *next* call pays their second
-// installment, from the tap slots. With this substitution, the single-ssd
+// installment, from the tap FIFO. With this substitution, the single-ssd
 // accumulator `h'ₜ = αₜ h'ₜ₋₁ + scaleₜ Bₜ⊗xₜ` is *exactly* the double-ssd state
 // `hₜ = αₜ hₜ₋₁ + Σ_taps βₜ Bₜ₋ₗ⊗xₜ₋ₗ + γₜ Bₜ⊗xₜ`. The next call rebuilds the
-// deferred β contribution from the saved `k_state`/`v_state`, identically in
-// both forms.
+// deferred β contribution from the saved tap FIFO, identically in both forms.
 //
-// The other fields have the same meaning in both caches: the K/V slots of the
-// tap FIFO (the last `lag` positions), the cumulative rotation, and the `ln Λ`
-// and `c` of the positive systems (which read only the inputs). So the
-// conversion is a field-by-field move.
+// The other fields have the same meaning in both caches. They are the tap FIFO
+// (the `B` and `x` of the last `lag` positions) and the cumulative rotation.
+// They are also the `ln Λ` and `c` of the positive systems, which read only
+// the inputs. So the conversion is a field-by-field move.
 //
 // The accumulators differ only *mid-sequence*. Caches exist only at
 // boundaries, so the move is lossless. The distinct types still prevent a
@@ -227,8 +305,7 @@ impl From<Mamba3SingleSsdCache> for Mamba3DoubleSsdCache {
     fn from(cache: Mamba3SingleSsdCache) -> Self {
         Mamba3DoubleSsdCache {
             ssm_bhpr: cache.ssm_bhpr,
-            k_state_bumhr: cache.k_state_bumhr,
-            v_state_buhp: cache.v_state_buhp,
+            tap_fifo: cache.tap_fifo,
             rotation: cache.rotation,
             log_precision_bh: cache.log_precision_bh,
             tropical_bh: cache.tropical_bh,
@@ -240,8 +317,7 @@ impl From<Mamba3DoubleSsdCache> for Mamba3SingleSsdCache {
     fn from(cache: Mamba3DoubleSsdCache) -> Self {
         Mamba3SingleSsdCache {
             ssm_bhpr: cache.ssm_bhpr,
-            k_state_bumhr: cache.k_state_bumhr,
-            v_state_buhp: cache.v_state_buhp,
+            tap_fifo: cache.tap_fifo,
             rotation: cache.rotation,
             log_precision_bh: cache.log_precision_bh,
             tropical_bh: cache.tropical_bh,

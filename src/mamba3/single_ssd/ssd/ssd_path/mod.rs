@@ -135,7 +135,7 @@ pub struct Mamba3SingleSsdInput {
     pub restarts: Option<crate::packing::Restarts>,
 
     /// The boundary β seed of each chunk, with resets: the installments that
-    /// the first `lag` positions of a chunk pay to the tap slots of the
+    /// the first `lag` positions of a chunk pay to the tap FIFO of the
     /// origin, in case the chunk restarts. `None` without resets.
     ///
     /// # Shape

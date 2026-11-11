@@ -11,7 +11,7 @@
 //!                               * strict lower-triangular intra-chunk mask
 //!                               * additive γ-weighted diagonal correction
 //!                               * boundary β seed Σⱼ νⱼ Kⱼ ⊗ xⱼ over the
-//!                                 cache's `lag` tap slots
+//!                                 `lag` slots of the tap FIFO of the cache
 //!                               * at lag > 1, the rest of the correction band
 //!                                 ([`crate::mamba3::single_ssd::token_band`])
 //! ```
@@ -66,7 +66,7 @@ impl Mamba3 {
     ///
     /// `pad_bt` marks a right-padded batch of tokens, as in [`Self::forward`].
     /// The last tap installment of a real position, which a padded position
-    /// would pay, then stays in the tap slots, exactly as at a call boundary.
+    /// would pay, then stays in the tap FIFO, exactly as at a call boundary.
     /// So the accumulator `h'` equals the state from the end of each row on.
     ///
     /// # Shapes
@@ -141,8 +141,7 @@ impl Mamba3 {
             log_precision_bsh,
             tropical_ab_bsh,
             new_rotation,
-            b_last_bumhr,
-            x_last_buhp,
+            new_tap_fifo,
         } = self.plant_entry(
             input_bsm,
             cache.map(Into::into),
@@ -159,7 +158,7 @@ impl Mamba3 {
         //
         // Each shifted term is zero for the last positions that its own lag
         // reaches past: the taps that pay them belong to the *next* call, from
-        // the tap slots. This also makes the accumulator `h'` equal to the
+        // the tap FIFO. This also makes the accumulator `h'` equal to the
         // state at a cache boundary, hence the field-identity `From` impls.
         //
         // `t+lag` is a later *write* position: lag 1 is
@@ -251,16 +250,15 @@ impl Mamba3 {
         };
         // The slots of a FIFO, `v` with MIMO_V applied:
         // `([batch, lag, mimo_rank, nheads, per_head_dim], [batch, lag, mimo_rank, nheads, state_rank])`.
-        let slots = "a β tap keeps its (B, x) cache slots";
-        let prev_slots = |v_state_buhp: Option<Tensor<4>>, k_state_bumhr: Option<Tensor<5>>| {
+        let prev_slots = |fifo: &Option<TapFifo>| {
+            let TapFifo { b_bumhr, x_buhp } = fifo.clone().expect("a β tap keeps its tap FIFO");
             let v_prev_mimo_bumhp =
-                helpers::build_v_with_mimo::<4, 5>(v_state_buhp.expect(slots), mimo_x_hmp.as_ref(), 2);
-            (v_prev_mimo_bumhp, k_state_bumhr.expect(slots))
+                helpers::build_v_with_mimo::<4, 5>(x_buhp, mimo_x_hmp.as_ref(), 2);
+            (v_prev_mimo_bumhp, b_bumhr)
         };
         // The seed of the call, from the slots of the cache and the masses of
         // chunk 0.
-        let (v_prev_mimo_bumhp, k_prev_bumhr) =
-            prev_slots(cache.v_state_buhp.clone(), cache.k_state_bumhr.clone());
+        let (v_prev_mimo_bumhp, k_prev_bumhr) = prev_slots(&cache.tap_fifo);
         let nu_head_buh = nu_heads_bnuh.clone().narrow(1, 0, 1).squeeze_dim::<3>(1);
         let v_prev_mimo_bumhp = v_prev_mimo_bumhp * nu_head_buh.unsqueeze_dims::<5>(&[2, 4]);
         // The seed contracts over the slots *and* the ranks (both are outer
@@ -277,8 +275,7 @@ impl Mamba3 {
         // in case it restarts. Each slot writes one outer product (over the
         // ranks). Each chunk weighs the slots by its own head masses.
         let seed_bnhpr = packed.as_ref().map(|p| {
-            let (v_origin_mimo_bumhp, k_origin_bumhr) =
-                prev_slots(p.origin.v_state_buhp.clone(), p.origin.k_state_bumhr.clone());
+            let (v_origin_mimo_bumhp, k_origin_bumhr) = prev_slots(&p.origin.tap_fifo);
             let slot_writes_bhuP = helpers::mimo_outer_sum(
                 v_origin_mimo_bumhp.reshape([batch * lag, mimo_rank, nheads, per_head_dim]),
                 k_origin_bumhr.reshape([batch * lag, mimo_rank, nheads, state_rank]),
@@ -414,8 +411,7 @@ impl Mamba3 {
                 end_b,
                 packed,
                 new_rotation,
-                b_last_bumhr,
-                x_last_buhp,
+                new_tap_fifo,
             },
             cache,
         );

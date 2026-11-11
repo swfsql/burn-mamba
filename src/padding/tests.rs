@@ -192,8 +192,10 @@ macro_rules! mamba3_fields {
     ($c:expr) => {{
         let c = $c;
         let mut out = vec![rows(&c.ssm_bhpr)];
-        out.extend(c.k_state_bumhr.as_ref().map(rows));
-        out.extend(c.v_state_buhp.as_ref().map(rows));
+        if let Some(fifo) = &c.tap_fifo {
+            out.push(rows(&fifo.b_bumhr));
+            out.push(rows(&fifo.x_buhp));
+        }
         match &c.rotation {
             RotationState::Real(_) => {}
             // On the circle: `θ` and `θ ± 2π` are the same rotation, and two

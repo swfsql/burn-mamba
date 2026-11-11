@@ -26,7 +26,7 @@ struct RunGrads {
     /// Final state from the returned cache.
     final_ssm: Tensor<4>,
     /// Final tap-FIFO B from the returned cache; `None` for
-    /// [`TapPattern::None`], which keeps no tap slots.
+    /// [`TapPattern::None`], which keeps no tap FIFO.
     final_k: Option<Tensor<5>>,
     /// Final tap-FIFO x from the returned cache; `None` with it.
     final_v: Option<Tensor<4>>,
@@ -107,8 +107,10 @@ fn build_init_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3Dou
     let tap = slots > 0;
     Mamba3DoubleSsdCache {
         ssm_bhpr: mk4([batch, nheads, per_head_dim, state_rank]),
-        k_state_bumhr: tap.then(|| mk5([batch, slots, mimo_rank, nheads, state_rank])),
-        v_state_buhp: tap.then(|| mk4([batch, slots, nheads, per_head_dim])),
+        tap_fifo: tap.then(|| TapFifo {
+            b_bumhr: mk5([batch, slots, mimo_rank, nheads, state_rank]),
+            x_buhp: mk4([batch, slots, nheads, per_head_dim]),
+        }),
         rotation,
         log_precision_bh: None,
         tropical_bh: None,
@@ -128,18 +130,18 @@ fn assert_outputs_match(label: &str, a: &RunGrads, b: &RunGrads, tol: f32) {
     ];
     let checks: Vec<(&str, f32)> = checks
         .into_iter()
-        // `TapPattern::None` keeps no tap slots to compare.
+        // `TapPattern::None` keeps no tap FIFO to compare.
         .chain(
             a.final_k
                 .clone()
                 .zip(b.final_k.clone())
-                .map(|(x, y)| ("final k_state", max_rel_diff(y, x))),
+                .map(|(x, y)| ("final tap FIFO B", max_rel_diff(y, x))),
         )
         .chain(
             a.final_v
                 .clone()
                 .zip(b.final_v.clone())
-                .map(|(x, y)| ("final v_state", max_rel_diff(y, x))),
+                .map(|(x, y)| ("final tap FIFO x", max_rel_diff(y, x))),
         )
         .chain(
             // `Real1D` has no accumulator to compare.
@@ -167,8 +169,7 @@ fn run_with_grads(
     let (out, cache) = forward(model, input.val());
     let out_inner = out.clone().inner();
     let ssm = cache.ssm_bhpr;
-    let k = cache.k_state_bumhr;
-    let v = cache.v_state_buhp;
+    let (k, v) = cache.tap_fifo.map(|f| (f.b_bumhr, f.x_buhp)).unzip();
     let angle = match cache.rotation {
         RotationState::Real(_) => None,
         other => Some(other.angle()),

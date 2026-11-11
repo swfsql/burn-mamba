@@ -20,7 +20,7 @@
 //! produced and consumed (see [`crate::mamba3::cache`]). Under
 //! [`TapPattern::None`](crate::mamba3::tap_pattern::TapPattern::None) the difference
 //! disappears everywhere: `scaleₜ = γₜ`, so `h' ≡ h` at every position, and
-//! neither cache has tap slots.
+//! neither cache has a tap FIFO.
 //!
 //! The distinct type prevents a `forward_double_ssd` cache from going into
 //! `forward_single_ssd` (or the reverse) mid-sequence, which would silently
@@ -61,8 +61,8 @@ pub struct Mamba3SingleSsdCache {
     /// Shape: `[batch, nheads, per_head_dim, state_rank]`
     pub ssm_bhpr: Tensor<4>,
 
-    /// **The K of the tap FIFO** (`B` after the bias and the rotation), one
-    /// slot per lagged position, **oldest first**.
+    /// **The tap FIFO** ([`TapFifo`]), the same value as in the double-SSD
+    /// cache.
     ///
     /// At the start of the next `forward_single_ssd` call, it seeds the
     /// deferred boundary β contributions
@@ -71,16 +71,7 @@ pub struct Mamba3SingleSsdCache {
     /// them.
     ///
     /// `None` under [`TapPattern::None`], which has no boundary β term to defer.
-    ///
-    /// Shape: `[batch, tap_slots, mimo_rank, nheads, state_rank]`
-    pub k_state_bumhr: Option<Tensor<5>>,
-
-    /// **The x of the tap FIFO**, matching [`Self::k_state_bumhr`] slot for
-    /// slot, and `None` with it. Pre-scaled by the decay accumulated since its
-    /// own position, exactly as in the double-SSD cache.
-    ///
-    /// Shape: `[batch, tap_slots, nheads, per_head_dim]`
-    pub v_state_buhp: Option<Tensor<4>>,
+    pub tap_fifo: Option<TapFifo>,
 
     /// **Cumulative data-dependent rotation** up to the current position
     /// ([`RotationState`]).
@@ -107,16 +98,8 @@ impl Mamba3SingleSsdCache {
     /// Run the [`NaN`/`Inf` guards](burn_stack::modules::misc::sanity) on every cached tensor.
     pub fn sanity(&self) {
         san(&self.ssm_bhpr);
-        assert_eq!(
-            self.k_state_bumhr.is_some(),
-            self.v_state_buhp.is_some(),
-            "the trapezoid's tap slots are present or absent together"
-        );
-        if let Some(k_state_bumhr) = &self.k_state_bumhr {
-            san(k_state_bumhr);
-        }
-        if let Some(v_state_buhp) = &self.v_state_buhp {
-            san(v_state_buhp);
+        if let Some(tap_fifo) = &self.tap_fifo {
+            tap_fifo.sanity();
         }
         self.rotation.sanity();
         for field in [&self.log_precision_bh, &self.tropical_bh].into_iter().flatten() {

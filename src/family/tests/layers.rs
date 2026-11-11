@@ -71,15 +71,15 @@ fn layer_cache_flat(caches: &Mamba3Caches, i: usize) -> Vec<Tensor<1>> {
         Mamba3Caches::SingleSsd(cs) => &cs.caches[i],
         Mamba3Caches::DoubleSsd(_) => panic!("expected the default single-ssd caches"),
     };
-    // The trapezoid's tap slots are absent under `TapPattern::None`.
+    // The tap FIFO is absent under `TapPattern::None`.
     vec![
         c.ssm_bhpr.clone().reshape([-1]),
-        match &c.k_state_bumhr {
-            Some(t) => t.clone().reshape([-1]),
+        match &c.tap_fifo {
+            Some(fifo) => fifo.b_bumhr.clone().reshape([-1]),
             None => Tensor::zeros([1], &c.ssm_bhpr.device()),
         },
-        match &c.v_state_buhp {
-            Some(t) => t.clone().reshape([-1]),
+        match &c.tap_fifo {
+            Some(fifo) => fifo.x_buhp.clone().reshape([-1]),
             None => Tensor::zeros([1], &c.ssm_bhpr.device()),
         },
         match &c.rotation {
@@ -108,13 +108,8 @@ fn layer_cache_sum(caches: &Mamba3Caches, i: usize) -> Tensor<1> {
         RotationState::Angle(t) => t.clone().sum(),
         RotationState::Quaternion(t) | RotationState::Rotor(t) => t.clone().sum(),
     };
-    let taps = [
-        c.k_state_bumhr.clone().map(|t| t.sum()),
-        c.v_state_buhp.clone().map(|t| t.sum()),
-    ];
-    taps.into_iter()
-        .flatten()
-        .fold(c.ssm_bhpr.clone().sum() + rot, |acc, t| acc + t)
+    let taps = c.tap_fifo.iter().flat_map(|f| [f.b_bumhr.clone().sum(), f.x_buhp.clone().sum()]);
+    taps.fold(c.ssm_bhpr.clone().sum() + rot, |acc, t| acc + t)
 }
 
 // ===========================================================================

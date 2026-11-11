@@ -7,7 +7,7 @@
 //! output.
 //!
 //! ```text
-//!   input  ── plant_entry ──▶ rotated B and C, masses, tap slots
+//!   input  ── plant_entry ──▶ rotated B and C, masses, tap FIFO
 //!                                        │
 //!                              the scan of the pathway
 //!                                        │
@@ -16,7 +16,7 @@
 //!
 //! - [`Mamba3::plant_entry`] holds the padding, the segments, the fresh cache,
 //!   the origin, the in-projection, the split, the trapezoid coefficients,
-//!   QK-Norm, the rotation and the tap slots.
+//!   QK-Norm, the rotation and the tap FIFO.
 //! - [`Mamba3::plant_tail`] holds the positive systems, the `D` skip, the gate,
 //!   the MIMO merge and `out_proj`. The band correction of single-SSD runs
 //!   before the tail and stays in that pathway.
@@ -29,6 +29,7 @@
 //! it. So the tests of this module compare the split and the tail with their
 //! definitions (ADR-0007).
 
+use crate::mamba3::cache::TapFifo;
 use crate::mamba3::double_ssd::prelude::Mamba3DoubleSsdCache;
 use crate::mamba3::helpers;
 use crate::mamba3::in_proj_layout::GroupKey;
@@ -108,10 +109,8 @@ pub(crate) struct PlantEntry {
     pub tropical_ab_bsh: Option<(Tensor<3>, Tensor<3>)>,
     /// The cumulative rotation for the next call.
     pub new_rotation: RotationState,
-    /// The `B` tap slots for the next call.
-    pub b_last_bumhr: Option<Tensor<5>>,
-    /// The `x` tap slots for the next call.
-    pub x_last_buhp: Option<Tensor<4>>,
+    /// The tap FIFO for the next call.
+    pub new_tap_fifo: Option<TapFifo>,
 }
 
 /// The input of [`Mamba3::plant_tail`]. The readout comes from the middle of a
@@ -126,13 +125,12 @@ pub(crate) struct PlantTail {
     pub end_b: Option<Tensor<1, Int>>,
     pub packed: Option<Packed>,
     pub new_rotation: RotationState,
-    pub b_last_bumhr: Option<Tensor<5>>,
-    pub x_last_buhp: Option<Tensor<4>>,
+    pub new_tap_fifo: Option<TapFifo>,
 }
 
 impl Mamba3 {
     /// The entry of the plant frame: from the input to the rotated `B` and `C`,
-    /// the masses and the tap slots.
+    /// the masses and the tap FIFO.
     ///
     /// `cache` and the origin of `resets` start fresh when they are `None`.
     ///
@@ -282,15 +280,13 @@ impl Mamba3 {
         // These are exactly the positions whose taps the next call must pay.
         // So the trapezoid continues unchanged across a split prefill (at
         // `lag = u`, that window is exactly the last token). With no β tap
-        // there is nothing to continue, and the slots stay empty.
-        let (b_last_bumhr, x_last_buhp) = self.save_tap_slots(
+        // there is nothing to continue, and the FIFO stays empty.
+        let new_tap_fifo = self.save_tap_slots(
             &b_bsmhr,
             &x_bshp,
             &da_bsh,
             self.tap_lag(),
-            end_b.clone().map(|end_b| {
-                (end_b, cache.k_state_bumhr.clone(), cache.v_state_buhp.clone())
-            }),
+            end_b.clone().map(|end_b| (end_b, cache.tap_fifo.clone())),
             packed.as_ref(),
         );
 
@@ -310,8 +306,7 @@ impl Mamba3 {
             log_precision_bsh,
             tropical_ab_bsh,
             new_rotation,
-            b_last_bumhr,
-            x_last_buhp,
+            new_tap_fifo,
         }
     }
 
@@ -337,8 +332,7 @@ impl Mamba3 {
             end_b,
             packed,
             new_rotation,
-            b_last_bumhr,
-            x_last_buhp,
+            new_tap_fifo,
         } = tail;
         let [batch, tokens, mimo_rank, nheads, per_head_dim] = y_btmhp.dims();
         let btmhp = [batch, tokens, mimo_rank, nheads, per_head_dim];
@@ -415,8 +409,7 @@ impl Mamba3 {
         let out_btd = self.out_proj.forward(y_bti);
         san(&out_btd);
 
-        cache.k_state_bumhr = b_last_bumhr;
-        cache.v_state_buhp = x_last_buhp;
+        cache.tap_fifo = new_tap_fifo;
         cache.rotation = new_rotation;
 
         (out_btd, cache)

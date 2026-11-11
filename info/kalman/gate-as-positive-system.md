@@ -330,7 +330,7 @@ not approximately.
 
 The block substitutes the decay inside `helpers::trapezoidal_coefficients`,
 between `da` and `α`. That is not only a convenience. The transports of the
-trapezoid, the carried decay of the tap slots and the key scale of single-SSD
+trapezoid, the carried decay of the tap FIFO and the key scale of single-SSD
 all read the log-decay. When the block substitutes it where it is *formed*,
 they are consistent by construction, not by audit.
 

@@ -236,7 +236,7 @@ mod impl_mamba3 {
             Self::from_options(slots)
         }
         fn cache_to_inner(c: Mamba3Cache) -> Mamba3Cache {
-            use crate::mamba3::prelude::RotationState;
+            use crate::mamba3::prelude::{RotationState, TapFifo};
             fn rot(r: RotationState) -> RotationState {
                 match r {
                     RotationState::Real(u) => RotationState::Real(u),
@@ -245,19 +245,20 @@ mod impl_mamba3 {
                     RotationState::Rotor(t) => RotationState::Rotor(t.inner()),
                 }
             }
+            fn fifo(f: TapFifo) -> TapFifo {
+                TapFifo { b_bumhr: f.b_bumhr.inner(), x_buhp: f.x_buhp.inner() }
+            }
             match c {
                 Mamba3Cache::DoubleSsd(c) => Mamba3Cache::DoubleSsd(Mamba3DoubleSsdCache {
                     ssm_bhpr: c.ssm_bhpr.inner(),
-                    k_state_bumhr: c.k_state_bumhr.map(|t| t.inner()),
-                    v_state_buhp: c.v_state_buhp.map(|t| t.inner()),
+                    tap_fifo: c.tap_fifo.map(fifo),
                     rotation: rot(c.rotation),
                     log_precision_bh: c.log_precision_bh.map(|t| t.inner()),
                     tropical_bh: c.tropical_bh.map(|t| t.inner()),
                 }),
                 Mamba3Cache::SingleSsd(c) => Mamba3Cache::SingleSsd(Mamba3SingleSsdCache {
                     ssm_bhpr: c.ssm_bhpr.inner(),
-                    k_state_bumhr: c.k_state_bumhr.map(|t| t.inner()),
-                    v_state_buhp: c.v_state_buhp.map(|t| t.inner()),
+                    tap_fifo: c.tap_fifo.map(fifo),
                     rotation: rot(c.rotation),
                     log_precision_bh: c.log_precision_bh.map(|t| t.inner()),
                     tropical_bh: c.tropical_bh.map(|t| t.inner()),
@@ -265,7 +266,7 @@ mod impl_mamba3 {
             }
         }
         fn cache_from_inner(c: Mamba3Cache, device: &Device) -> Mamba3Cache {
-            use crate::mamba3::prelude::RotationState;
+            use crate::mamba3::prelude::{RotationState, TapFifo};
             fn rot(r: RotationState, device: &Device) -> RotationState {
                 match r {
                     RotationState::Real(u) => RotationState::Real(u),
@@ -274,19 +275,20 @@ mod impl_mamba3 {
                     RotationState::Rotor(t) => RotationState::Rotor(lift(t, device)),
                 }
             }
+            fn fifo(f: TapFifo, device: &Device) -> TapFifo {
+                TapFifo { b_bumhr: lift(f.b_bumhr, device), x_buhp: lift(f.x_buhp, device) }
+            }
             match c {
                 Mamba3Cache::DoubleSsd(c) => Mamba3Cache::DoubleSsd(Mamba3DoubleSsdCache {
                     ssm_bhpr: lift(c.ssm_bhpr, device),
-                    k_state_bumhr: c.k_state_bumhr.map(|t| lift(t, device)),
-                    v_state_buhp: c.v_state_buhp.map(|t| lift(t, device)),
+                    tap_fifo: c.tap_fifo.map(|f| fifo(f, device)),
                     rotation: rot(c.rotation, device),
                     log_precision_bh: c.log_precision_bh.map(|t| lift(t, device)),
                     tropical_bh: c.tropical_bh.map(|t| lift(t, device)),
                 }),
                 Mamba3Cache::SingleSsd(c) => Mamba3Cache::SingleSsd(Mamba3SingleSsdCache {
                     ssm_bhpr: lift(c.ssm_bhpr, device),
-                    k_state_bumhr: c.k_state_bumhr.map(|t| lift(t, device)),
-                    v_state_buhp: c.v_state_buhp.map(|t| lift(t, device)),
+                    tap_fifo: c.tap_fifo.map(|f| fifo(f, device)),
                     rotation: rot(c.rotation, device),
                     log_precision_bh: c.log_precision_bh.map(|t| lift(t, device)),
                     tropical_bh: c.tropical_bh.map(|t| lift(t, device)),

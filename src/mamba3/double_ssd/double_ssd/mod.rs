@@ -100,8 +100,7 @@ impl Mamba3 {
             log_precision_bsh,
             tropical_ab_bsh,
             new_rotation,
-            b_last_bumhr,
-            x_last_buhp,
+            new_tap_fifo,
         } = self.plant_entry(
             input_bsm,
             cache,
@@ -141,22 +140,19 @@ impl Mamba3 {
         // The prefix of a lag-`L` tap is the newest `L` slots of a FIFO: all
         // of it for the tap at `tap_lag`, only the newest slot for the lag-1
         // tap of a two-tap pattern.
-        let heads = |fifo: &Mamba3DoubleSsdCache, lag: usize| -> (Tensor<4>, Tensor<5>) {
-            let slots = "a β tap keeps its (B, x) cache slots";
-            let slots_buhp = fifo.v_state_buhp.clone().expect(slots);
-            let slots_bumhr = fifo.k_state_bumhr.clone().expect(slots);
-            let newest = slots_buhp.dims()[1] - lag;
-            (slots_buhp.narrow(1, newest, lag), slots_bumhr.narrow(1, newest, lag))
+        let head = |fifo: &Option<TapFifo>, lag: usize| -> TapFifo {
+            fifo.as_ref().expect("a β tap keeps its tap FIFO").newest(lag)
         };
         let beta_side = |nu_bsh: Tensor<3>, lag: usize| -> (Tensor<4>, Tensor<5>) {
-            let (x_head_buhp, b_head_bumhr) = heads(&cache, lag);
+            let TapFifo { b_bumhr: b_head_bumhr, x_buhp: x_head_buhp } = head(&cache.tap_fifo, lag);
             let x_prev_bshp = helpers::shift_stream(x_bshp.clone(), x_head_buhp, lag);
             let b_prev_bsmhr = helpers::shift_stream(b_bsmhr.clone(), b_head_bumhr, lag);
             // A packed row: each segment starts on the prefix of the origin,
             // as a call from it.
             let (x_prev_bshp, b_prev_bsmhr) = match &packed {
                 Some(p) => {
-                    let (x_head_buhp, b_head_bumhr) = heads(&p.origin, lag);
+                    let TapFifo { b_bumhr: b_head_bumhr, x_buhp: x_head_buhp } =
+                        head(&p.origin.tap_fifo, lag);
                     (
                         p.segments.restart_heads(x_prev_bshp, 1, x_head_buhp),
                         p.segments.restart_heads(b_prev_bsmhr, 1, b_head_bumhr),
@@ -332,8 +328,7 @@ impl Mamba3 {
                 end_b,
                 packed,
                 new_rotation,
-                b_last_bumhr,
-                x_last_buhp,
+                new_tap_fifo,
             },
             cache,
         )
@@ -431,8 +426,7 @@ mod step {
                 log_precision_bsh: log_precision_buh,
                 tropical_ab_bsh: tropical_ab_buh,
                 new_rotation,
-                b_last_bumhr,
-                x_last_buhp,
+                new_tap_fifo,
             } = self.plant_entry(input_bd.unsqueeze_dim::<3>(1), cache, None, None);
             let mimo_x_hmp = self.mimo_x_hmp.as_ref().map(|p| p.val());
             let siso = self.use_siso_decode_kernels();
@@ -450,7 +444,7 @@ mod step {
             //
             // Its transport `wⱼ` (the decay of a write to the end of the block)
             // is the same quantity that [`crate::mamba3::helpers::tail_decay`]
-            // computes for the tap slots, over the whole block instead of its
+            // computes for the tap FIFO, over the whole block instead of its
             // last `lag`.
             //
             // Every `writeⱼ` is an outer product into one shared state. So with
@@ -514,22 +508,13 @@ mod step {
             // no tapped side: no shifted stream, no second outer product, one
             // term less in the state update.
             let tap_write = |nu_buh: Tensor<3>, lag: usize| {
-                let slots_buhp = cache
-                    .v_state_buhp
-                    .clone()
-                    .expect("a β tap keeps its (B, x) cache slots");
-                let slots_bumhr = cache
-                    .k_state_bumhr
-                    .clone()
-                    .expect("a β tap keeps its (B, x) cache slots");
-                let newest = slots_buhp.dims()[1] - lag;
-                let x_prev_buhp = helpers::shift_stream(
-                    x_buhp.clone(),
-                    slots_buhp.narrow(1, newest, lag),
-                    lag,
-                );
-                let b_prev_bumhr =
-                    helpers::shift_stream(b_bumhr.clone(), slots_bumhr.narrow(1, newest, lag), lag);
+                let TapFifo { b_bumhr: b_head_bumhr, x_buhp: x_head_buhp } = cache
+                    .tap_fifo
+                    .as_ref()
+                    .expect("a β tap keeps its tap FIFO")
+                    .newest(lag);
+                let x_prev_buhp = helpers::shift_stream(x_buhp.clone(), x_head_buhp, lag);
+                let b_prev_bumhr = helpers::shift_stream(b_bumhr.clone(), b_head_bumhr, lag);
                 let beta_buh = nu_buh * alpha_buh.clone();
                 let beta_buh = match helpers::interior_gap_decay(da_buh.clone(), lag, None) {
                     Some(gap_buh) => beta_buh * gap_buh,
@@ -571,8 +556,7 @@ mod step {
                     end_b: None,
                     packed: None,
                     new_rotation,
-                    b_last_bumhr,
-                    x_last_buhp,
+                    new_tap_fifo,
                 },
                 cache,
             );

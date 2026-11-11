@@ -147,8 +147,8 @@
 //! `HorizontalCarryOver` reads the previous **micro-step**: the 2-tap FIR
 //! filter runs at the finer rate, and only `1/u` of the taps still cross a
 //! token. `Vertical` reads the same micro-step of the previous **token**. The
-//! tap cache (`k_state`, `v_state`) is the FIFO that the choice needs: one
-//! slot, or `u`. Either way, `forward` runs the same write axis as `step`,
+//! [tap FIFO](crate::mamba3::cache::TapFifo) of the cache is as deep as the
+//! choice needs: one slot, or `u`. Either way, `forward` runs the same write axis as `step`,
 //! which keeps them in exact agreement.
 //!
 //! ## Notation

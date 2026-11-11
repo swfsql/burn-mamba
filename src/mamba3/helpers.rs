@@ -31,7 +31,7 @@ use burn_stack::modules::softplus;
 use burn::prelude::*;
 use burn::tensor::DType;
 
-/// Shift a per-position stream back by `lag`. The tap slots of the cache fill
+/// Shift a per-position stream back by `lag`. The tap FIFO of the cache fills
 /// the first `lag` positions: `out[p] = stream[p − lag]`, or `prefix[p]` where
 /// that index is before the call.
 ///
@@ -378,8 +378,8 @@ pub fn interior_gap_decay(
 /// `Πᵣ₌q₊₁^{S−1} αᵣ` for the last `lag` positions `q` (oldest first). `None` at
 /// `lag = 1`: the one slot *is* the last position, so the product is empty.
 ///
-/// The tap slots are stored pre-scaled by this, so a lag-`L` tap can cross a
-/// call boundary. The next call supplies the in-call part of the gap
+/// The `x` of the tap FIFO is stored pre-scaled by this, so a lag-`L` tap can
+/// cross a call boundary. The next call supplies the in-call part of the gap
 /// ([`interior_gap_decay`], front-zero-padded), and the slot carries the rest.
 ///
 /// # Shapes
@@ -513,7 +513,7 @@ impl TrapezoidCoeffs {
 /// `gain` is `Some` under a Kalman [`Gain`](crate::mamba3::positive::Gain).
 /// This function then computes the decay
 /// ([`crate::mamba3::positive::kalman::gain`]) **before** it forms `α`. So no
-/// consumer (the tap transports, the tap slots, the single-SSD key scale) can
+/// consumer (the tap transports, the tap FIFO, the single-SSD key scale) can
 /// read the projected decay by mistake. The masses keep the projected `Δ`. The
 /// gain reads them in logs, formed from the same pre-activations
 /// ([`LogMasses`](crate::mamba3::positive::kalman::LogMasses)).

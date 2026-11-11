@@ -8,7 +8,7 @@
 //! optional field must be present in both caches or in neither. This module
 //! also shows why the stable cache must first be copied into buffers of its
 //! own ([`into_owned_buffers`](burn_stack::modules::CacheTensors::into_owned_buffers)):
-//! the Mamba-3 tap slots come back from `step` as `narrow`s of its own
+//! the Mamba-3 tap FIFO comes back from `step` as `narrow`s of its own
 //! tensors.
 
 use burn_stack::modules::{CacheTensors, TensorZip};
@@ -62,21 +62,25 @@ mod impl_mamba2 {
 #[cfg(feature = "mamba3")]
 mod impl_mamba3 {
     use super::*;
-    use burn::prelude::*;
     use crate::mamba3::double_ssd::prelude::{Mamba3DoubleSsdCache, Mamba3DoubleSsdCaches};
-    use crate::mamba3::prelude::{Mamba3Cache, Mamba3Caches, RotationState};
+    use crate::mamba3::prelude::{Mamba3Cache, Mamba3Caches, RotationState, TapFifo};
     use crate::mamba3::single_ssd::prelude::{Mamba3SingleSsdCache, Mamba3SingleSsdCaches};
 
     /// An optional field: both present or both absent.
-    fn zip_option<const D: usize>(
-        a: Option<Tensor<D>>,
-        b: Option<Tensor<D>>,
-        z: &mut impl TensorZip,
-    ) -> Option<Tensor<D>> {
+    fn zip_option<T: CacheTensors>(a: Option<T>, b: Option<T>, z: &mut impl TensorZip) -> Option<T> {
         match (a, b) {
-            (Some(a), Some(b)) => Some(z.zip(a, b)),
+            (Some(a), Some(b)) => Some(a.zip_tensors(b, z)),
             (None, None) => None,
             _ => panic!("the two caches differ in which optional fields they hold"),
+        }
+    }
+
+    impl CacheTensors for TapFifo {
+        fn zip_tensors(self, other: Self, z: &mut impl TensorZip) -> Self {
+            Self {
+                b_bumhr: z.zip(self.b_bumhr, other.b_bumhr),
+                x_buhp: z.zip(self.x_buhp, other.x_buhp),
+            }
         }
     }
 
@@ -96,8 +100,7 @@ mod impl_mamba3 {
         fn zip_tensors(self, other: Self, z: &mut impl TensorZip) -> Self {
             Self {
                 ssm_bhpr: z.zip(self.ssm_bhpr, other.ssm_bhpr),
-                k_state_bumhr: zip_option(self.k_state_bumhr, other.k_state_bumhr, z),
-                v_state_buhp: zip_option(self.v_state_buhp, other.v_state_buhp, z),
+                tap_fifo: zip_option(self.tap_fifo, other.tap_fifo, z),
                 rotation: zip_rotation(self.rotation, other.rotation, z),
                 log_precision_bh: zip_option(self.log_precision_bh, other.log_precision_bh, z),
                 tropical_bh: zip_option(self.tropical_bh, other.tropical_bh, z),

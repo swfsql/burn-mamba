@@ -1573,7 +1573,7 @@ impl Mamba3 {
     ///
     /// At a reset, every carried quantity starts again from `origin`: the SSD
     /// carry between chunks (plus the single-SSD boundary seed of that chunk),
-    /// the `β` taps (they read the tap slots), the cumulative rotation, and the
+    /// the `β` taps (they read the tap FIFO), the cumulative rotation, and the
     /// positive systems. The variant of `cache` selects the pathway, and
     /// `origin` of either variant converts to it. Only
     /// [`Mamba3SsdPath::Serial`] and [`Mamba3SsdPath::SerialRecalculated`] take
@@ -1647,36 +1647,25 @@ impl Mamba3 {
     }
 
     /// The tap FIFO of the trapezoid, filled with zeros: [`Self::tap_lag`]
-    /// slots of `(B, x)`, oldest first. `None` (no allocation) under a pattern
-    /// with no `β` tap.
-    ///
-    /// # Shapes
-    /// - `.0` : `[batch, tap_slots, mimo_rank, nheads, state_rank]`
-    /// - `.1` : `[batch, tap_slots, nheads, per_head_dim]`
-    pub fn zero_tap_slots(
-        &self,
-        batch: usize,
-        device: &Device,
-    ) -> (Option<Tensor<5>>, Option<Tensor<4>>) {
+    /// slots, oldest first. `None` (no allocation) under a pattern with no `β`
+    /// tap.
+    pub fn zero_tap_slots(&self, batch: usize, device: &Device) -> Option<TapFifo> {
         let slots = self.tap_lag();
-        if slots == 0 {
-            return (None, None);
-        }
-        let nheads = self.nheads();
-        (
-            Some(Tensor::zeros(
-                [batch, slots, self.mimo_rank, nheads, self.state_rank],
+        (slots > 0).then(|| {
+            TapFifo::zeros(
+                batch,
+                slots,
+                self.mimo_rank,
+                self.nheads(),
+                self.state_rank,
+                self.per_head_dim(),
                 device,
-            )),
-            Some(Tensor::zeros(
-                [batch, slots, nheads, self.per_head_dim()],
-                device,
-            )),
-        )
+            )
+        })
     }
 
-    /// The tap FIFO for the next call: the `(B, x)` of the last `lag` write
-    /// positions, oldest first. `(None, None)` when the pattern has no `β` tap.
+    /// The tap FIFO for the next call: the `B` and `x` of the last `lag` write
+    /// positions, oldest first. `None` when the pattern has no `β` tap.
     ///
     /// `x` is pre-scaled by the decay accumulated since its own position
     /// ([`crate::mamba3::helpers::tail_decay`]). This lets the gap transport of
@@ -1699,31 +1688,32 @@ impl Mamba3 {
     /// - `b_bsmhr` : `[batch, sequence, mimo_rank, nheads, state_rank]`
     /// - `x_bshp`  : `[batch, sequence, nheads, per_head_dim]`
     /// - `da_bsh`  : `[batch, sequence, nheads]`
-    /// - `end`     : `[batch]`, and the incoming `(B, x)` slots
+    /// - `end`     : `[batch]`, and the incoming FIFO
     pub(crate) fn save_tap_slots(
         &self,
         b_bsmhr: &Tensor<5>,
         x_bshp: &Tensor<4>,
         da_bsh: &Tensor<3>,
         lag: usize,
-        end: Option<(Tensor<1, Int>, Option<Tensor<5>>, Option<Tensor<4>>)>,
+        end: Option<(Tensor<1, Int>, Option<TapFifo>)>,
         packed: Option<&Packed>,
-    ) -> (Option<Tensor<5>>, Option<Tensor<4>>) {
+    ) -> Option<TapFifo> {
         if lag == 0 {
-            return (None, None);
+            return None;
         }
-        let slots = "a β tap keeps its (B, x) cache slots";
-        let end = end.map(|(end_b, prev_b, prev_x)| {
-            let (prev_b, prev_x) = (prev_b.expect(slots), prev_x.expect(slots));
+        let fifo = "a β tap keeps its tap FIFO";
+        let end = end.map(|(end_b, prev)| {
+            let TapFifo { b_bumhr: prev_b, x_buhp: prev_x } = prev.expect(fifo);
             // The FIFO that the last segment of each slot starts from.
             match packed {
-                Some(p) => (
-                    end_b,
-                    p.segments
-                        .last_origin(prev_b, p.origin.k_state_bumhr.clone().expect(slots)),
-                    p.segments
-                        .last_origin(prev_x, p.origin.v_state_buhp.clone().expect(slots)),
-                ),
+                Some(p) => {
+                    let origin = p.origin.tap_fifo.clone().expect(fifo);
+                    (
+                        end_b,
+                        p.segments.last_origin(prev_b, origin.b_bumhr),
+                        p.segments.last_origin(prev_x, origin.x_buhp),
+                    )
+                }
                 None => (end_b, prev_b, prev_x),
             }
         });
@@ -1770,7 +1760,7 @@ impl Mamba3 {
             Some(tail_buh) => x_last_buhp * tail_buh.unsqueeze_dim::<4>(3),
             None => x_last_buhp,
         };
-        (Some(b_last_bumhr), Some(x_last_buhp))
+        Some(TapFifo { b_bumhr: b_last_bumhr, x_buhp: x_last_buhp })
     }
 
     /// The fresh-sequence rotation accumulator for the [`RotationKind`] of this
