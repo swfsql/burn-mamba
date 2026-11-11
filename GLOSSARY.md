@@ -167,6 +167,16 @@ The choice of which taps exist, and whether the lag-1 tap closes at token
 boundaries.
 _Avoid_: trapezoid (for the choice)
 
+**Tap FIFO**:
+The factors `B` and `x` of the last samples, which a cache keeps for the taps
+of the next call, oldest first. One slot holds one write position.
+_Avoid_: tap cache, tap slots (for the whole FIFO)
+
+**Frame cache**:
+The part of a Mamba-3 cache that the plant frame writes. It holds the tap FIFO,
+the cumulative rotation and the registers of the positive systems. It has the
+same meaning in both pathways.
+
 **Mass**:
 The share of the step size `Δ` that the write of one micro-step gives to one
 sample. The masses of a micro-step add up to `Δ`.

@@ -118,7 +118,9 @@ scripts/compare_reports.py BASE --changed 'GLOB'...
 - **Commits**: when a skill or the user tells you to commit, commit your work
   to the current branch. When the user asks only for a commit message, write it
   as text for the user to copy. A commit message has a title line and a short
-  body, and it ends with the `Co-Authored-By:` trailer.
+  body, and it ends with the `Co-Authored-By:` trailer. A ticket that breaks
+  the public API bumps the minor version of this crate in its first breaking
+  commit. A pin move to a new minor version of burn-stack is such a break.
 - **Pushes**: push the current branch to `origin` when a ticket is complete and
   reviewed, or when the user tells you to. Ask the user before a force-push or
   a tag.
