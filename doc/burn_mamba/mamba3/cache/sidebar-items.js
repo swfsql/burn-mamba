@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["Mamba3Cache","Mamba3Caches"]};
+window.SIDEBAR_ITEMS = {"enum":["Mamba3Cache","Mamba3Caches"],"struct":["Mamba3FrameCache","TapFifo"]};

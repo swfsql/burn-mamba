@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["Mamba3SingleSsdCache","Mamba3SingleSsdCacheConfig","Mamba3SingleSsdCaches","Mamba3SingleSsdCachesConfig"]};
+window.SIDEBAR_ITEMS = {"struct":["Mamba3SingleSsdCache","Mamba3SingleSsdCaches"]};
