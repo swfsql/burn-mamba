@@ -24,12 +24,14 @@
 //! The frame has one cache type, `Mamba3DoubleSsdCache`. A forward starts and
 //! ends at a call boundary, where the accumulator of single-SSD equals the
 //! state. So the `From` impls convert the cache of that pathway (ADR-0003).
+//! The frame writes the frame cache ([`Mamba3FrameCache`]) of the cache. Only
+//! the scan of each pathway writes the state.
 //!
 //! A bug in the frame fails both pathways alike, and a parity test cannot show
 //! it. So the tests of this module compare the split and the tail with their
 //! definitions (ADR-0007).
 
-use crate::mamba3::cache::TapFifo;
+use crate::mamba3::cache::{Mamba3FrameCache, TapFifo};
 use crate::mamba3::double_ssd::prelude::Mamba3DoubleSsdCache;
 use crate::mamba3::helpers;
 use crate::mamba3::in_proj_layout::GroupKey;
@@ -221,7 +223,7 @@ impl Mamba3 {
             mu_raw_bsh,
             self.dt_bias_h.val(),
             self.tap_pattern_spec(),
-            self.gain_input(noise_bsh, cache.log_precision_bh.clone(), packed.as_ref()),
+            self.gain_input(noise_bsh, cache.frame.log_precision_bh.clone(), packed.as_ref()),
         )
         .padded(pad_bs.as_ref());
         san(&dt_bsh);
@@ -265,12 +267,12 @@ impl Mamba3 {
         let (b_bsmhr, c_btmhr, new_rotation) = rotate_bc_forward(
             rot_bsa,
             dt_bsh,
-            cache.rotation.clone(),
+            cache.frame.rotation.clone(),
             b_bsmhr,
             c_btmhr,
             u,
             self.rotation_spec(),
-            packed.as_ref().map(|p| (&p.segments.start_bs, p.origin.rotation.clone())),
+            packed.as_ref().map(|p| (&p.segments.start_bs, p.origin.frame.rotation.clone())),
         );
         san(&b_bsmhr);
         san(&c_btmhr);
@@ -286,7 +288,7 @@ impl Mamba3 {
             &x_bshp,
             &da_bsh,
             self.tap_lag(),
-            end_b.clone().map(|end_b| (end_b, cache.tap_fifo.clone())),
+            end_b.clone().map(|end_b| (end_b, cache.frame.tap_fifo.clone())),
             packed.as_ref(),
         );
 
@@ -313,7 +315,7 @@ impl Mamba3 {
     /// The tail of the plant frame: from the readout of a scan to `out_proj`.
     ///
     /// It runs the positive systems, the `D` skip, the gate (or the gated
-    /// RMSNorm), the MIMO merge and `out_proj`. It then fills the cache fields
+    /// RMSNorm), the MIMO merge and `out_proj`. It then writes the frame cache
     /// of the next call. The caller has already written the state.
     ///
     /// # Shapes
@@ -342,12 +344,10 @@ impl Mamba3 {
             y_btmhp,
             log_precision_bsh,
             tropical_ab_bsh,
-            cache.tropical_bh.clone(),
-            end_b.map(|end_b| (end_b, cache.log_precision_bh.clone())),
+            cache.frame.tropical_bh.clone(),
+            end_b.map(|end_b| (end_b, cache.frame.log_precision_bh.clone())),
             packed.as_ref(),
         );
-        cache.log_precision_bh = log_precision_bh;
-        cache.tropical_bh = tropical_bh;
 
         // ── D skip ────────────────────────────────────────────────────────────
         // It reads the raw `x ⊙ mimo_x` (not scaled by `γ`), at the micro-step
@@ -409,8 +409,12 @@ impl Mamba3 {
         let out_btd = self.out_proj.forward(y_bti);
         san(&out_btd);
 
-        cache.tap_fifo = new_tap_fifo;
-        cache.rotation = new_rotation;
+        cache.frame = Mamba3FrameCache {
+            tap_fifo: new_tap_fifo,
+            rotation: new_rotation,
+            log_precision_bh,
+            tropical_bh,
+        };
 
         (out_btd, cache)
     }

@@ -13,9 +13,10 @@
 //! are produced and consumed. So the `From` impls at the bottom convert
 //! between them by a lossless field-by-field move (see the note there).
 //!
-//! [`TapFifo`] is a field of both cache types: the tap FIFO of the trapezoid.
-//! It owns its layout: the slot order, the zeros and the decay pre-scale of
-//! `x`.
+//! Both cache types hold the `ssm_bhpr` of their pathway and one
+//! [`Mamba3FrameCache`]: the fields that the plant frame writes. Its
+//! [`TapFifo`] is the tap FIFO of the trapezoid. It owns its layout: its
+//! zeros, and the docs of the slot order and of the decay pre-scale of `x`.
 
 use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::mamba3::Mamba3;
@@ -157,12 +158,9 @@ impl Mamba3Cache {
 /// positions. A cache keeps them for the `β` taps of the next call. One slot
 /// holds one write position, and the slots are **oldest first**.
 ///
-/// Both cache types hold an `Option<TapFifo>`. It is `None` (not allocated,
-/// not zeroed) under
-/// [`TapPattern::None`](crate::mamba3::tap_pattern::TapPattern::None), which
-/// has no `β` tap. Otherwise it has
-/// [`tap_slots`](crate::mamba3::tap_pattern::TapPattern::tap_slots) slots:
-/// `1` for the default, `u` for
+/// The frame cache holds it as an option ([`Mamba3FrameCache::tap_fifo`]).
+/// It has [`tap_slots`](crate::mamba3::tap_pattern::TapPattern::tap_slots)
+/// slots: `1` for the default, `u` for
 /// [`TapPattern::Vertical`](crate::mamba3::tap_pattern::TapPattern::Vertical).
 #[derive(Module, Debug)]
 pub struct TapFifo {
@@ -187,7 +185,7 @@ pub struct TapFifo {
 impl TapFifo {
     /// The FIFO of a fresh sequence: `slots` zero slots. A zero slot adds
     /// nothing to a tap.
-    pub fn zeros(
+    pub(crate) fn zeros(
         batch: usize,
         slots: usize,
         mimo_rank: usize,
@@ -225,6 +223,76 @@ impl TapFifo {
 }
 
 // ---------------------------------------------------------------------------
+// The frame cache
+// ---------------------------------------------------------------------------
+
+/// The frame cache: the part of a Mamba-3 cache that the plant frame writes.
+/// It has the same meaning in both pathways, and both cache types hold it
+/// beside their `ssm_bhpr`.
+#[derive(Module, Debug)]
+pub struct Mamba3FrameCache {
+    /// **The tap FIFO** ([`TapFifo`]). The `β` taps of the next call read it.
+    /// Double-SSD rebuilds its β term
+    /// `β * sumₘ Bₚ₋ₗₐ₉[m] ⊗ (xₚ₋ₗₐ₉ * mimo_x[m])` from it. Single-SSD seeds
+    /// the deferred boundary β contributions
+    /// `Σⱼ (1 − λⱼ) · Δⱼ · Bₚ₋ₗₐ₉₊ⱼ ⊗ xₚ₋ₗₐ₉₊ⱼ` from it. The previous call
+    /// could not add them, because it did not know the `λ, Δ` of the `lag`
+    /// positions that pay them.
+    ///
+    /// `None` (not allocated, not zeroed) under
+    /// [`TapPattern::None`](crate::mamba3::tap_pattern::TapPattern::None),
+    /// which has no β term.
+    pub tap_fifo: Option<TapFifo>,
+
+    /// **Cumulative data-dependent rotation** up to the current position
+    /// ([`RotationState`](crate::mamba3::rotation::RotationState)). It holds
+    /// nothing for `Real1D`, and the abelian rotation angle for
+    /// [`Complex2D`](crate::mamba3::rotation::RotationKind::Complex2D) (each
+    /// micro-step `cum_angleₜ = cum_angleₜ₋₁ + Δₜ · range · π · tanh(θₜ)`). It
+    /// holds the cumulative unit quaternion(s) for the quaternion kinds.
+    ///
+    /// The identity for fresh sequences. It continues across calls for
+    /// streaming.
+    pub rotation: crate::mamba3::rotation::RotationState,
+
+    /// **The log-precision of the Kalman gain**, `ln Λ` after the last
+    /// position ([`crate::mamba3::positive::kalman`]). It is the evidence that
+    /// the head holds. The gain computes the decay of the next position from
+    /// it.
+    ///
+    /// [`LOG_ZERO`](crate::mamba3::positive::LOG_ZERO) (`Λ = 0`) for a fresh
+    /// sequence. `None` under
+    /// [`Gain::Projected`](crate::mamba3::positive::Gain::Projected).
+    ///
+    /// Shape: `[batch, nheads]`
+    pub log_precision_bh: Option<Tensor<2>>,
+
+    /// **The tropical register** `c` after the last position
+    /// ([`crate::mamba3::positive::tropical`]).
+    ///
+    /// [`LOG_ZERO`](crate::mamba3::positive::LOG_ZERO) (the max of nothing) for
+    /// a fresh sequence. `None` under
+    /// [`Tropical::None`](crate::mamba3::positive::Tropical::None).
+    ///
+    /// Shape: `[batch, nheads]`
+    pub tropical_bh: Option<Tensor<2>>,
+}
+
+impl Mamba3FrameCache {
+    /// Run the [`NaN`/`Inf` guards](burn_stack::modules::misc::sanity) on every
+    /// tensor of the frame cache.
+    pub fn sanity(&self) {
+        if let Some(tap_fifo) = &self.tap_fifo {
+            tap_fifo.sanity();
+        }
+        self.rotation.sanity();
+        for field in [&self.log_precision_bh, &self.tropical_bh].into_iter().flatten() {
+            san(field);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // The fresh cache
 // ---------------------------------------------------------------------------
 
@@ -247,13 +315,8 @@ impl Mamba3 {
         let tap_fifo = self.zero_tap_slots(batch, device);
         let rotation = self.zero_rotation_state(batch, device);
         let (log_precision_bh, tropical_bh) = self.zero_positive_state(batch, device);
-        Mamba3SingleSsdCache {
-            ssm_bhpr,
-            tap_fifo,
-            rotation,
-            log_precision_bh,
-            tropical_bh,
-        }
+        let frame = Mamba3FrameCache { tap_fifo, rotation, log_precision_bh, tropical_bh };
+        Mamba3SingleSsdCache { ssm_bhpr, frame }
     }
 }
 
@@ -292,10 +355,10 @@ impl From<Mamba3SingleSsdCache> for Mamba3Cache {
 // `hₜ = αₜ hₜ₋₁ + Σ_taps βₜ Bₜ₋ₗ⊗xₜ₋ₗ + γₜ Bₜ⊗xₜ`. The next call rebuilds the
 // deferred β contribution from the saved tap FIFO, identically in both forms.
 //
-// The other fields have the same meaning in both caches. They are the tap FIFO
+// The frame cache has the same meaning in both caches. It holds the tap FIFO
 // (the `B` and `x` of the last `lag` positions) and the cumulative rotation.
-// They are also the `ln Λ` and `c` of the positive systems, which read only
-// the inputs. So the conversion is a field-by-field move.
+// It also holds the `ln Λ` and `c` of the positive systems, which read only
+// the inputs. So the conversion moves the two fields.
 //
 // The accumulators differ only *mid-sequence*. Caches exist only at
 // boundaries, so the move is lossless. The distinct types still prevent a
@@ -303,25 +366,13 @@ impl From<Mamba3SingleSsdCache> for Mamba3Cache {
 
 impl From<Mamba3SingleSsdCache> for Mamba3DoubleSsdCache {
     fn from(cache: Mamba3SingleSsdCache) -> Self {
-        Mamba3DoubleSsdCache {
-            ssm_bhpr: cache.ssm_bhpr,
-            tap_fifo: cache.tap_fifo,
-            rotation: cache.rotation,
-            log_precision_bh: cache.log_precision_bh,
-            tropical_bh: cache.tropical_bh,
-        }
+        Mamba3DoubleSsdCache { ssm_bhpr: cache.ssm_bhpr, frame: cache.frame }
     }
 }
 
 impl From<Mamba3DoubleSsdCache> for Mamba3SingleSsdCache {
     fn from(cache: Mamba3DoubleSsdCache) -> Self {
-        Mamba3SingleSsdCache {
-            ssm_bhpr: cache.ssm_bhpr,
-            tap_fifo: cache.tap_fifo,
-            rotation: cache.rotation,
-            log_precision_bh: cache.log_precision_bh,
-            tropical_bh: cache.tropical_bh,
-        }
+        Mamba3SingleSsdCache { ssm_bhpr: cache.ssm_bhpr, frame: cache.frame }
     }
 }
 

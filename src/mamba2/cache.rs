@@ -21,6 +21,8 @@
 //!    tokens. This is the memory advantage of SSMs over attention: the
 //!    KV-cache of a Transformer grows linearly with the sequence length, but
 //!    the state is always O(per_head_dim·state_rank).
+//!
+//! [`Mamba2::zero_cache`] builds the cache of a fresh sequence.
 
 use crate::mamba2::prelude::*;
 use burn_stack::modules::sanity as san;

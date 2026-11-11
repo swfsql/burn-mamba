@@ -137,14 +137,13 @@ impl Mamba3 {
         // β-scaled copy of `x`, and (below) no second SSD call. `forward` is
         // then one standard SSD pass, with keys scaled by `γ = Δ`.
         let lag = self.tap_lag();
-        // The prefix of a lag-`L` tap is the newest `L` slots of a FIFO: all
-        // of it for the tap at `tap_lag`, only the newest slot for the lag-1
-        // tap of a two-tap pattern.
-        let head = |fifo: &Option<TapFifo>, lag: usize| -> TapFifo {
+        // The prefix of a lag-`L` tap: [`TapFifo::newest`].
+        let head =|fifo: &Option<TapFifo>, lag: usize| -> TapFifo {
             fifo.as_ref().expect("a β tap keeps its tap FIFO").newest(lag)
         };
         let beta_side = |nu_bsh: Tensor<3>, lag: usize| -> (Tensor<4>, Tensor<5>) {
-            let TapFifo { b_bumhr: b_head_bumhr, x_buhp: x_head_buhp } = head(&cache.tap_fifo, lag);
+            let TapFifo { b_bumhr: b_head_bumhr, x_buhp: x_head_buhp } =
+                head(&cache.frame.tap_fifo, lag);
             let x_prev_bshp = helpers::shift_stream(x_bshp.clone(), x_head_buhp, lag);
             let b_prev_bsmhr = helpers::shift_stream(b_bsmhr.clone(), b_head_bumhr, lag);
             // A packed row: each segment starts on the prefix of the origin,
@@ -152,7 +151,7 @@ impl Mamba3 {
             let (x_prev_bshp, b_prev_bsmhr) = match &packed {
                 Some(p) => {
                     let TapFifo { b_bumhr: b_head_bumhr, x_buhp: x_head_buhp } =
-                        head(&p.origin.tap_fifo, lag);
+                        head(&p.origin.frame.tap_fifo, lag);
                     (
                         p.segments.restart_heads(x_prev_bshp, 1, x_head_buhp),
                         p.segments.restart_heads(b_prev_bsmhr, 1, b_head_bumhr),
@@ -509,6 +508,7 @@ mod step {
             // term less in the state update.
             let tap_write = |nu_buh: Tensor<3>, lag: usize| {
                 let TapFifo { b_bumhr: b_head_bumhr, x_buhp: x_head_buhp } = cache
+                    .frame
                     .tap_fifo
                     .as_ref()
                     .expect("a β tap keeps its tap FIFO")

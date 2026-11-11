@@ -4,20 +4,22 @@
 //!
 //! 1. **State**: `hₜ ∈ ℝ^{per_head_dim×state_rank}` per head, the
 //!    compressed context.
-//! 2. **Tap FIFO** ([`TapFifo`](crate::mamba3::cache::TapFifo)): the `B` and
-//!    the `x` of the last `lag` positions, oldest first. With them, the β term
-//!    of the trapezoidal recurrence rebuilds `β Bₚ₋ₗₐ₉ ⊗ xₚ₋ₗₐ₉`. The FIFO
-//!    exists only when the
-//!    [`TapPattern`](crate::mamba3::tap_pattern::TapPattern) of the block has a
-//!    β tap. It is as deep as its
-//!    [`tap_lag`](crate::mamba3::tap_pattern::TapPattern::tap_lag) (`1` for the
-//!    default, `u` for
-//!    [`TapPattern::Vertical`](crate::mamba3::tap_pattern::TapPattern::Vertical)).
-//! 3. **Cumulative rotation**
-//!    ([`RotationState`](crate::mamba3::rotation::RotationState)): the rotation accumulated up
-//!    to position `t`, to continue the data-dependent rotation.
-//! 4. **Positive-system fields**: `ln Λ` of a Kalman gain and `c` of a tropical
-//!    register, when the block has them.
+//! 2. **Frame cache**
+//!    ([`Mamba3FrameCache`](crate::mamba3::cache::Mamba3FrameCache)): the
+//!    fields that the plant frame writes, with the same meaning in both
+//!    pathways.
+//!    - **Tap FIFO** ([`TapFifo`](crate::mamba3::cache::TapFifo)): the `B` and
+//!      the `x` of the last `lag` positions, oldest first. With them, the β
+//!      term of the trapezoidal recurrence rebuilds `β Bₚ₋ₗₐ₉ ⊗ xₚ₋ₗₐ₉`. The
+//!      FIFO exists only when the
+//!      [`TapPattern`](crate::mamba3::tap_pattern::TapPattern) of the block
+//!      has a β tap.
+//!    - **Cumulative rotation**
+//!      ([`RotationState`](crate::mamba3::rotation::RotationState)): the
+//!      rotation accumulated up to position `t`, to continue the
+//!      data-dependent rotation.
+//!    - **Positive-system fields**: `ln Λ` of a Kalman gain and `c` of a
+//!      tropical register, when the block has them.
 //!
 //! Mamba-3 has **no conv cache**. It removes the short 1-D convolution of
 //! Mamba-2: the trapezoidal discretisation and the learnable B/C biases take
@@ -58,53 +60,16 @@ pub struct Mamba3DoubleSsdCache {
     /// Shape: `[batch, nheads, per_head_dim, state_rank]`
     pub ssm_bhpr: Tensor<4>,
 
-    /// **The tap FIFO** ([`TapFifo`]), which rebuilds the β term of the next
-    /// call: `β * sumₘ Bₚ₋ₗₐ₉[m] ⊗ (xₚ₋ₗₐ₉ * mimo_x[m])`.
-    ///
-    /// `None` (not allocated, not zeroed) under [`TapPattern::None`], which has
-    /// no β term.
-    pub tap_fifo: Option<TapFifo>,
-
-    /// **Cumulative data-dependent rotation** up to the current position
-    /// ([`RotationState`]): nothing for `Real1D`, the abelian rotation angle
-    /// for [`Complex2D`](crate::mamba3::rotation::RotationKind::Complex2D)
-    /// (each micro-step `cum_angleₜ = cum_angleₜ₋₁ + Δₜ · range · π · tanh(θₜ)`), or
-    /// the cumulative unit quaternion(s) for the quaternion kinds.
-    ///
-    /// The identity for fresh sequences. It continues across calls for
-    /// streaming.
-    pub rotation: RotationState,
-
-    /// **The log-precision of the Kalman gain**, `ln Λ` after the last
-    /// position ([`crate::mamba3::positive::kalman`]): the evidence that the
-    /// head holds, from which the gain computes the decay of the next position.
-    ///
-    /// [`LOG_ZERO`](crate::mamba3::positive::LOG_ZERO) (`Λ = 0`) for a fresh
-    /// sequence. `None` under [`Gain::Projected`].
-    ///
-    /// Shape: `[batch, nheads]`
-    pub log_precision_bh: Option<Tensor<2>>,
-
-    /// **The tropical register** `c` after the last position
-    /// ([`crate::mamba3::positive::tropical`]).
-    ///
-    /// [`LOG_ZERO`](crate::mamba3::positive::LOG_ZERO) (the max of nothing) for
-    /// a fresh sequence. `None` under [`Tropical::None`].
-    ///
-    /// Shape: `[batch, nheads]`
-    pub tropical_bh: Option<Tensor<2>>,
+    /// **The frame cache** ([`Mamba3FrameCache`]): the tap FIFO, the
+    /// cumulative rotation and the registers of the positive systems. The
+    /// plant frame writes it, and it has the same meaning in both pathways.
+    pub frame: Mamba3FrameCache,
 }
 
 impl Mamba3DoubleSsdCache {
     /// Run the [`NaN`/`Inf` guards](burn_stack::modules::misc::sanity) on every cached tensor.
     pub fn sanity(&self) {
         san(&self.ssm_bhpr);
-        if let Some(tap_fifo) = &self.tap_fifo {
-            tap_fifo.sanity();
-        }
-        self.rotation.sanity();
-        for field in [&self.log_precision_bh, &self.tropical_bh].into_iter().flatten() {
-            san(field);
-        }
+        self.frame.sanity();
     }
 }

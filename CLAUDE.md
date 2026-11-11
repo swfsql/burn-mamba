@@ -230,7 +230,7 @@ src/
 ├─ mamba2/               Mamba-2 block (`mamba2.rs`: the SSD math) + cache
 │  └─ ssd/               the three SSD paths, selected by `ssd_path.rs`
 │     └─ serial_recalculated/  the chain rule and `D` skip around the standard scan
-├─ mamba3/               Mamba-3 block (`mamba3.rs`: the math) + the cache enum
+├─ mamba3/               Mamba-3 block (`mamba3.rs`: the math) + `cache.rs` (the enum, the frame cache, the tap FIFO, `zero_cache`)
 │  ├─ helpers.rs         shared by both pathways and by forward and step
 │  ├─ in_proj_layout.rs  the table of the channel groups of the in-projection
 │  ├─ plant_frame.rs     the entry and the tail around each scan

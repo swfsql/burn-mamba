@@ -533,7 +533,7 @@ impl Mamba3 {
             carry_bh: carry_bh.expect(field),
             resets: packed.map(|p| crate::mamba3::positive::scan::Resets {
                 start_bs: p.segments.start_bs.clone(),
-                origin_bh: p.origin.log_precision_bh.clone().expect(field),
+                origin_bh: p.origin.frame.log_precision_bh.clone().expect(field),
             }),
         })
     }
@@ -591,7 +591,7 @@ impl Mamba3 {
             let carry_bh = tropical_carry_bh.clone().expect(field);
             let resets = packed.map(|p| crate::mamba3::positive::scan::Resets {
                 start_bs: p.segments.start_bs.clone(),
-                origin_bh: p.origin.tropical_bh.clone().expect(field),
+                origin_bh: p.origin.frame.tropical_bh.clone().expect(field),
             });
             crate::mamba3::positive::tropical::register(a_bsh, b_bsh, carry_bh, resets.as_ref())
         });
@@ -627,11 +627,11 @@ impl Mamba3 {
             last_bh(
                 t_bsh,
                 log_precision_carry_bh.flatten(),
-                packed.and_then(|p| p.origin.log_precision_bh.clone()),
+                packed.and_then(|p| p.origin.frame.log_precision_bh.clone()),
             )
         });
         let tropical_bh = tropical_bsh.as_ref().map(|t_bsh| {
-            last_bh(t_bsh, tropical_carry_bh, packed.and_then(|p| p.origin.tropical_bh.clone()))
+            last_bh(t_bsh, tropical_carry_bh, packed.and_then(|p| p.origin.frame.tropical_bh.clone()))
         });
         let read_positions = |t_bsh: Tensor<3>| crate::mamba3::helpers::read_positions::<3, 4>(t_bsh, 1, u);
         let y_btmhp = self.positive_read(
@@ -1701,13 +1701,13 @@ impl Mamba3 {
         if lag == 0 {
             return None;
         }
-        let fifo = "a β tap keeps its tap FIFO";
+        let kept = "a β tap keeps its tap FIFO";
         let end = end.map(|(end_b, prev)| {
-            let TapFifo { b_bumhr: prev_b, x_buhp: prev_x } = prev.expect(fifo);
+            let TapFifo { b_bumhr: prev_b, x_buhp: prev_x } = prev.expect(kept);
             // The FIFO that the last segment of each slot starts from.
             match packed {
                 Some(p) => {
-                    let origin = p.origin.tap_fifo.clone().expect(fifo);
+                    let origin = p.origin.frame.tap_fifo.clone().expect(kept);
                     (
                         end_b,
                         p.segments.last_origin(prev_b, origin.b_bumhr),

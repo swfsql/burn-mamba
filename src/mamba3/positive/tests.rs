@@ -562,6 +562,7 @@ fn assert_field(label: &str, name: &str, a: &Option<Tensor<2>>, b: &Option<Tenso
 fn assert_caches_match(label: &str, a: &Mamba3DoubleSsdCache, b: &Mamba3DoubleSsdCache) {
     let d = max_abs_diff(a.ssm_bhpr.clone(), b.ssm_bhpr.clone());
     assert!(d < dtype_tol(1e-4), "{label}: state differs by {d}");
+    let (a, b) = (&a.frame, &b.frame);
     if let (Some(a), Some(b)) = (&a.tap_fifo, &b.tap_fifo) {
         let d = max_abs_diff(a.x_buhp.clone(), b.x_buhp.clone());
         assert!(d < dtype_tol(1e-4), "{label}: the x of the tap FIFO");
@@ -858,6 +859,7 @@ fn the_fields_survive_a_no_grad_round_trip() {
     let (Mamba3Cache::SingleSsd(before), Mamba3Cache::SingleSsd(after)) = (cache, back) else {
         panic!("a missing cache is a single-SSD one");
     };
+    let (before, after) = (before.frame, after.frame);
     assert_field("no-grad trip", "ln Λ", &before.log_precision_bh, &after.log_precision_bh, 0.0);
     assert_field("no-grad trip", "tropical c", &before.tropical_bh, &after.tropical_bh, 0.0);
     assert!(after.log_precision_bh.is_some() && after.tropical_bh.is_some());

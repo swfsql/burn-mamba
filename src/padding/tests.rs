@@ -192,19 +192,20 @@ macro_rules! mamba3_fields {
     ($c:expr) => {{
         let c = $c;
         let mut out = vec![rows(&c.ssm_bhpr)];
-        if let Some(fifo) = &c.tap_fifo {
+        let frame = &c.frame;
+        if let Some(fifo) = &frame.tap_fifo {
             out.push(rows(&fifo.b_bumhr));
             out.push(rows(&fifo.x_buhp));
         }
-        match &c.rotation {
+        match &frame.rotation {
             RotationState::Real(_) => {}
             // On the circle: `θ` and `θ ± 2π` are the same rotation, and two
             // runs can put an angle near `±π` on the two sides of the wrap.
             RotationState::Angle(t) => out.push(rows(&Tensor::cat(vec![t.clone().cos(), t.clone().sin()], 2))),
             RotationState::Quaternion(t) | RotationState::Rotor(t) => out.push(rows(t)),
         }
-        out.extend(c.log_precision_bh.as_ref().map(rows));
-        out.extend(c.tropical_bh.as_ref().map(rows));
+        out.extend(frame.log_precision_bh.as_ref().map(rows));
+        out.extend(frame.tropical_bh.as_ref().map(rows));
         out
     }};
 }

@@ -12,7 +12,8 @@
 //! 2. **State** — the per-channel state matrix. It compresses the
 //!    full past into a fixed size, for any number of tokens.
 //!
-//! Mirrors [`crate::mamba2::cache`]. The Mamba-1 state has no head axis.
+//! [`Mamba1::zero_cache`] builds the cache of a fresh sequence. Mirrors
+//! [`crate::mamba2::cache`]. The Mamba-1 state has no head axis.
 
 use crate::mamba1::prelude::*;
 use burn_stack::modules::sanity as san;

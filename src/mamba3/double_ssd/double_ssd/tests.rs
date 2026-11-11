@@ -107,13 +107,15 @@ fn build_init_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3Dou
     let tap = slots > 0;
     Mamba3DoubleSsdCache {
         ssm_bhpr: mk4([batch, nheads, per_head_dim, state_rank]),
-        tap_fifo: tap.then(|| TapFifo {
-            b_bumhr: mk5([batch, slots, mimo_rank, nheads, state_rank]),
-            x_buhp: mk4([batch, slots, nheads, per_head_dim]),
-        }),
-        rotation,
-        log_precision_bh: None,
-        tropical_bh: None,
+        frame: Mamba3FrameCache {
+            tap_fifo: tap.then(|| TapFifo {
+                b_bumhr: mk5([batch, slots, mimo_rank, nheads, state_rank]),
+                x_buhp: mk4([batch, slots, nheads, per_head_dim]),
+            }),
+            rotation,
+            log_precision_bh: None,
+            tropical_bh: None,
+        },
     }
 }
 
@@ -169,8 +171,8 @@ fn run_with_grads(
     let (out, cache) = forward(model, input.val());
     let out_inner = out.clone().inner();
     let ssm = cache.ssm_bhpr;
-    let (k, v) = cache.tap_fifo.map(|f| (f.b_bumhr, f.x_buhp)).unzip();
-    let angle = match cache.rotation {
+    let (k, v) = cache.frame.tap_fifo.map(|f| (f.b_bumhr, f.x_buhp)).unzip();
+    let angle = match cache.frame.rotation {
         RotationState::Real(_) => None,
         other => Some(other.angle()),
     };

@@ -236,17 +236,18 @@ macro_rules! impl_mamba3_cache {
         impl TestCache for $cache {
             fn visit(&self, v: &mut impl FieldVisit) {
                 v.visit(&self.ssm_bhpr);
-                if let Some(fifo) = &self.tap_fifo {
+                let frame = &self.frame;
+                if let Some(fifo) = &frame.tap_fifo {
                     v.visit(&fifo.b_bumhr);
                     v.visit(&fifo.x_buhp);
                 }
-                match &self.rotation {
+                match &frame.rotation {
                     RotationState::Real(_) => {}
                     RotationState::Angle(t) => v.visit_angle(t),
                     RotationState::Quaternion(t) | RotationState::Rotor(t) => v.visit(t),
                 }
-                self.log_precision_bh.iter().for_each(|t| v.visit(t));
-                self.tropical_bh.iter().for_each(|t| v.visit(t));
+                frame.log_precision_bh.iter().for_each(|t| v.visit(t));
+                frame.tropical_bh.iter().for_each(|t| v.visit(t));
             }
         }
     };

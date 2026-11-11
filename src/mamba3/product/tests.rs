@@ -146,11 +146,11 @@ fn forward_matches_step_double(kind: RotationKind, micro_steps: usize) {
     );
     // The tap FIFO is absent under `TapPattern::None`, in both caches.
     assert_eq!(
-        cache_fwd.tap_fifo.is_some(),
-        cache_step.tap_fifo.is_some(),
+        cache_fwd.frame.tap_fifo.is_some(),
+        cache_step.frame.tap_fifo.is_some(),
         "{label}: the two paths disagree on whether a tap FIFO exists"
     );
-    if let (Some(fwd), Some(step)) = (cache_fwd.tap_fifo, cache_step.tap_fifo) {
+    if let (Some(fwd), Some(step)) = (cache_fwd.frame.tap_fifo, cache_step.frame.tap_fifo) {
         assert!(
             max_abs_diff(fwd.b_bumhr, step.b_bumhr) < dtype_tol(1e-4),
             "{label}: final B of the tap FIFO"

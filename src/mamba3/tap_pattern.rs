@@ -558,7 +558,7 @@ mod tests {
                     "{label}: final state"
                 );
                 // Nothing to carry: the tap FIFO is absent, not zeroed.
-                assert!(cache_step.tap_fifo.is_none(), "{label}");
+                assert!(cache_step.frame.tap_fifo.is_none(), "{label}");
             }
         }
     }
@@ -727,7 +727,7 @@ mod tests {
                 }
 
                 // The tap FIFO is the previous token, `u` slots deep.
-                let fifo = cache_step.tap_fifo.expect("a β tap keeps its tap FIFO");
+                let fifo = cache_step.frame.tap_fifo.expect("a β tap keeps its tap FIFO");
                 assert_eq!(fifo.b_bumhr.dims()[1], micro_steps, "{label}");
                 assert_eq!(fifo.x_buhp.dims()[1], micro_steps, "{label}");
             }
@@ -828,7 +828,7 @@ mod tests {
                 let d = max_abs_diff(cache_fwd.ssm_bhpr, cache_all.ssm_bhpr);
                 assert!(d < dtype_tol(1e-4), "{label}: final state: {d:.3e}");
                 let (fifo_fwd, fifo_all) =
-                    (cache_fwd.tap_fifo.expect("fifo"), cache_all.tap_fifo.expect("fifo"));
+                    (cache_fwd.frame.tap_fifo.expect("fifo"), cache_all.frame.tap_fifo.expect("fifo"));
                 let d = max_abs_diff(fifo_fwd.b_bumhr, fifo_all.b_bumhr);
                 assert!(d < dtype_tol(1e-4), "{label}: tap FIFO B: {d:.3e}");
                 let d = max_abs_diff(fifo_fwd.x_buhp, fifo_all.x_buhp);
@@ -973,7 +973,7 @@ mod tests {
                     }
 
                     let slots = pattern.tap_slots(micro_steps);
-                    let fifo = cache_step.tap_fifo.expect("a β tap keeps its tap FIFO");
+                    let fifo = cache_step.frame.tap_fifo.expect("a β tap keeps its tap FIFO");
                     assert_eq!(fifo.b_bumhr.dims()[1], slots, "{label}");
                 }
             }
@@ -1076,8 +1076,8 @@ mod tests {
                 let d = max_abs_diff(cache_fwd.ssm_bhpr, cache_all.ssm_bhpr);
                 assert!(d < dtype_tol(1e-4), "{label}: final state: {d:.3e}");
                 let d = max_abs_diff(
-                    cache_fwd.tap_fifo.expect("fifo").x_buhp,
-                    cache_all.tap_fifo.expect("fifo").x_buhp,
+                    cache_fwd.frame.tap_fifo.expect("fifo").x_buhp,
+                    cache_all.frame.tap_fifo.expect("fifo").x_buhp,
                 );
                 assert!(d < dtype_tol(1e-4), "{label}: tap FIFO x (decay convention): {d:.3e}");
             }

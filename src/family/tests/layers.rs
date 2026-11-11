@@ -74,15 +74,15 @@ fn layer_cache_flat(caches: &Mamba3Caches, i: usize) -> Vec<Tensor<1>> {
     // The tap FIFO is absent under `TapPattern::None`.
     vec![
         c.ssm_bhpr.clone().reshape([-1]),
-        match &c.tap_fifo {
+        match &c.frame.tap_fifo {
             Some(fifo) => fifo.b_bumhr.clone().reshape([-1]),
             None => Tensor::zeros([1], &c.ssm_bhpr.device()),
         },
-        match &c.tap_fifo {
+        match &c.frame.tap_fifo {
             Some(fifo) => fifo.x_buhp.clone().reshape([-1]),
             None => Tensor::zeros([1], &c.ssm_bhpr.device()),
         },
-        match &c.rotation {
+        match &c.frame.rotation {
             RotationState::Real(_) => Tensor::zeros([1], &c.ssm_bhpr.device()),
             RotationState::Angle(t) => t.clone().reshape([-1]),
             RotationState::Quaternion(t) | RotationState::Rotor(t) => t.clone().reshape([-1]),
@@ -103,12 +103,12 @@ fn layer_cache_sum(caches: &Mamba3Caches, i: usize) -> Tensor<1> {
         Mamba3Caches::SingleSsd(cs) => &cs.caches[i],
         Mamba3Caches::DoubleSsd(_) => panic!("expected the default single-ssd caches"),
     };
-    let rot = match &c.rotation {
+    let rot = match &c.frame.rotation {
         RotationState::Real(_) => Tensor::zeros([1], &c.ssm_bhpr.device()),
         RotationState::Angle(t) => t.clone().sum(),
         RotationState::Quaternion(t) | RotationState::Rotor(t) => t.clone().sum(),
     };
-    let taps = c.tap_fifo.iter().flat_map(|f| [f.b_bumhr.clone().sum(), f.x_buhp.clone().sum()]);
+    let taps = c.frame.tap_fifo.iter().flat_map(|f| [f.b_bumhr.clone().sum(), f.x_buhp.clone().sum()]);
     taps.fold(c.ssm_bhpr.clone().sum() + rot, |acc, t| acc + t)
 }
 

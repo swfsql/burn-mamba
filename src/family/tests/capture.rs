@@ -62,9 +62,10 @@ mod mamba3 {
             }
         };
         let (a, b) = (fields(a), fields(b));
-        assert!(a.tap_fifo.is_some() && a.log_precision_bh.is_some() && a.tropical_bh.is_some());
         assert_same(&format!("{label} ssm"), &a.ssm_bhpr, &b.ssm_bhpr);
-        let fifo = |c: &Mamba3DoubleSsdCache| c.tap_fifo.clone().map(|f| (f.b_bumhr, f.x_buhp)).unzip();
+        let (a, b) = (a.frame, b.frame);
+        assert!(a.tap_fifo.is_some() && a.log_precision_bh.is_some() && a.tropical_bh.is_some());
+        let fifo = |c: &Mamba3FrameCache| c.tap_fifo.clone().map(|f| (f.b_bumhr, f.x_buhp)).unzip();
         let ((a_b, a_x), (b_b, b_x)) = (fifo(&a), fifo(&b));
         assert_same_option(&format!("{label} tap FIFO B"), &a_b, &b_b);
         assert_same_option(&format!("{label} tap FIFO x"), &a_x, &b_x);

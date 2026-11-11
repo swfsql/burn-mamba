@@ -63,7 +63,9 @@ mod impl_mamba2 {
 mod impl_mamba3 {
     use super::*;
     use crate::mamba3::double_ssd::prelude::{Mamba3DoubleSsdCache, Mamba3DoubleSsdCaches};
-    use crate::mamba3::prelude::{Mamba3Cache, Mamba3Caches, RotationState, TapFifo};
+    use crate::mamba3::prelude::{
+        Mamba3Cache, Mamba3Caches, Mamba3FrameCache, RotationState, TapFifo,
+    };
     use crate::mamba3::single_ssd::prelude::{Mamba3SingleSsdCache, Mamba3SingleSsdCaches};
 
     /// An optional field: both present or both absent.
@@ -96,10 +98,9 @@ mod impl_mamba3 {
         }
     }
 
-    impl CacheTensors for Mamba3DoubleSsdCache {
+    impl CacheTensors for Mamba3FrameCache {
         fn zip_tensors(self, other: Self, z: &mut impl TensorZip) -> Self {
             Self {
-                ssm_bhpr: z.zip(self.ssm_bhpr, other.ssm_bhpr),
                 tap_fifo: zip_option(self.tap_fifo, other.tap_fifo, z),
                 rotation: zip_rotation(self.rotation, other.rotation, z),
                 log_precision_bh: zip_option(self.log_precision_bh, other.log_precision_bh, z),
@@ -108,13 +109,21 @@ mod impl_mamba3 {
         }
     }
 
-    /// The same fields as the double-ssd cache (a lossless move, see
-    /// `mamba3/cache.rs`), so it rides that traversal.
+    impl CacheTensors for Mamba3DoubleSsdCache {
+        fn zip_tensors(self, other: Self, z: &mut impl TensorZip) -> Self {
+            Self {
+                ssm_bhpr: z.zip(self.ssm_bhpr, other.ssm_bhpr),
+                frame: self.frame.zip_tensors(other.frame, z),
+            }
+        }
+    }
+
     impl CacheTensors for Mamba3SingleSsdCache {
         fn zip_tensors(self, other: Self, z: &mut impl TensorZip) -> Self {
-            Mamba3DoubleSsdCache::from(self)
-                .zip_tensors(other.into(), z)
-                .into()
+            Self {
+                ssm_bhpr: z.zip(self.ssm_bhpr, other.ssm_bhpr),
+                frame: self.frame.zip_tensors(other.frame, z),
+            }
         }
     }
 

@@ -34,7 +34,7 @@
 //!   mid-sequence.
 //!
 //! [`cache`](crate::mamba3::cache) holds the enum that selects the pathway,
-//! and the tap FIFO that both cache types keep.
+//! and the frame cache that both cache types keep.
 //! [`ssd_path`](crate::mamba3::ssd_path) selects the pathway-agnostic
 //! *SSD path* (Minimal / Serial / SerialRecalculated).
 //!
@@ -88,7 +88,7 @@ pub mod tap_pattern;
 pub mod prelude {
     use super::*;
 
-    pub use cache::{Mamba3Cache, Mamba3Caches, TapFifo};
+    pub use cache::{Mamba3Cache, Mamba3Caches, Mamba3FrameCache, TapFifo};
     pub use mamba3::{Mamba3, Mamba3Config, Mamba3Untied};
     pub use positive::{Gain, Tropical};
     pub use quat_scan::Mamba3QuatScanBackendExt;

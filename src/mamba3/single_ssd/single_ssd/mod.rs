@@ -250,15 +250,15 @@ impl Mamba3 {
         };
         // The slots of a FIFO, `v` with MIMO_V applied:
         // `([batch, lag, mimo_rank, nheads, per_head_dim], [batch, lag, mimo_rank, nheads, state_rank])`.
-        let prev_slots = |fifo: &Option<TapFifo>| {
+        let prev_fifo = |fifo: &Option<TapFifo>| {
             let TapFifo { b_bumhr, x_buhp } = fifo.clone().expect("a β tap keeps its tap FIFO");
             let v_prev_mimo_bumhp =
                 helpers::build_v_with_mimo::<4, 5>(x_buhp, mimo_x_hmp.as_ref(), 2);
             (v_prev_mimo_bumhp, b_bumhr)
         };
-        // The seed of the call, from the slots of the cache and the masses of
-        // chunk 0.
-        let (v_prev_mimo_bumhp, k_prev_bumhr) = prev_slots(&cache.tap_fifo);
+        // The seed of the call, from the tap FIFO of the cache and the masses
+        // of chunk 0.
+        let (v_prev_mimo_bumhp, k_prev_bumhr) = prev_fifo(&cache.frame.tap_fifo);
         let nu_head_buh = nu_heads_bnuh.clone().narrow(1, 0, 1).squeeze_dim::<3>(1);
         let v_prev_mimo_bumhp = v_prev_mimo_bumhp * nu_head_buh.unsqueeze_dims::<5>(&[2, 4]);
         // The seed contracts over the slots *and* the ranks (both are outer
@@ -275,7 +275,7 @@ impl Mamba3 {
         // in case it restarts. Each slot writes one outer product (over the
         // ranks). Each chunk weighs the slots by its own head masses.
         let seed_bnhpr = packed.as_ref().map(|p| {
-            let (v_origin_mimo_bumhp, k_origin_bumhr) = prev_slots(&p.origin.tap_fifo);
+            let (v_origin_mimo_bumhp, k_origin_bumhr) = prev_fifo(&p.origin.frame.tap_fifo);
             let slot_writes_bhuP = helpers::mimo_outer_sum(
                 v_origin_mimo_bumhp.reshape([batch * lag, mimo_rank, nheads, per_head_dim]),
                 k_origin_bumhr.reshape([batch * lag, mimo_rank, nheads, state_rank]),

@@ -1277,13 +1277,13 @@ fn assert_cache_parity(
     assert!(d < dtype_tol(VAL_TOL), "{label}: state: {d:.3e}");
 
     let fifo = "the default carry-over tap keeps its tap FIFO";
-    let (fifo_a, fifo_b) = (a.tap_fifo.expect(fifo), b.tap_fifo.expect(fifo));
+    let (fifo_a, fifo_b) = (a.frame.tap_fifo.expect(fifo), b.frame.tap_fifo.expect(fifo));
     let d = max_abs_diff(fifo_a.b_bumhr, fifo_b.b_bumhr);
     assert!(d < dtype_tol(VAL_TOL), "{label}: tap FIFO B: {d:.3e}");
     let d = max_abs_diff(fifo_a.x_buhp, fifo_b.x_buhp);
     assert!(d < dtype_tol(VAL_TOL), "{label}: tap FIFO x: {d:.3e}");
 
-    let (a, b) = (a.rotation.angle(), b.rotation.angle());
+    let (a, b) = (a.frame.rotation.angle(), b.frame.rotation.angle());
     let d = max_abs_diff(a.clone().sin(), b.clone().sin()).max(max_abs_diff(a.cos(), b.cos()));
     assert!(d < dtype_tol(VAL_TOL), "{label}: cumulative rotation: {d:.3e}");
 }

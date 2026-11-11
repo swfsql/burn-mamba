@@ -49,8 +49,9 @@ pub struct Mamba3SingleSsdCaches {
 /// The cache of one Mamba-3 block that runs the single-ssd pathway.
 ///
 /// The fields and shapes match
-/// [`Mamba3DoubleSsdCache`](crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCache).
-/// The semantic difference is only in `ssm_bhpr` (see the module header).
+/// [`Mamba3DoubleSsdCache`](crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCache):
+/// the `ssm_bhpr` of the pathway and the frame cache. The semantic difference
+/// is only in `ssm_bhpr` (see the module header).
 #[derive(Module, Debug)]
 pub struct Mamba3SingleSsdCache {
     /// **Accumulator** `h'ₜ`.
@@ -61,49 +62,15 @@ pub struct Mamba3SingleSsdCache {
     /// Shape: `[batch, nheads, per_head_dim, state_rank]`
     pub ssm_bhpr: Tensor<4>,
 
-    /// **The tap FIFO** ([`TapFifo`]), the same value as in the double-SSD
-    /// cache.
-    ///
-    /// At the start of the next `forward_single_ssd` call, it seeds the
-    /// deferred boundary β contributions
-    /// `Σⱼ (1 − λⱼ) · Δⱼ · Bₚ₋ₗₐ₉₊ⱼ ⊗ xₚ₋ₗₐ₉₊ⱼ`. The previous call could not add
-    /// them, because it did not know the `λ, Δ` of the `lag` positions that pay
-    /// them.
-    ///
-    /// `None` under [`TapPattern::None`], which has no boundary β term to defer.
-    pub tap_fifo: Option<TapFifo>,
-
-    /// **Cumulative data-dependent rotation** up to the current position
-    /// ([`RotationState`]).
-    ///
-    /// The same value as the field of the double-ssd cache (the `From` impls
-    /// move it across), so the two caches convert by field identity.
-    pub rotation: RotationState,
-
-    /// **The log-precision of the Kalman gain**, `ln Λ` after the last position
-    /// (the same value as
-    /// [`Mamba3DoubleSsdCache::log_precision_bh`](crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCache::log_precision_bh)).
-    ///
-    /// Shape: `[batch, nheads]`
-    pub log_precision_bh: Option<Tensor<2>>,
-
-    /// **The tropical register** `c` after the last position (see
-    /// [`Mamba3DoubleSsdCache::tropical_bh`](crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCache::tropical_bh)).
-    ///
-    /// Shape: `[batch, nheads]`
-    pub tropical_bh: Option<Tensor<2>>,
+    /// **The frame cache** ([`Mamba3FrameCache`]), the same value as in the
+    /// double-SSD cache. The `From` impls move it across.
+    pub frame: Mamba3FrameCache,
 }
 
 impl Mamba3SingleSsdCache {
     /// Run the [`NaN`/`Inf` guards](burn_stack::modules::misc::sanity) on every cached tensor.
     pub fn sanity(&self) {
         san(&self.ssm_bhpr);
-        if let Some(tap_fifo) = &self.tap_fifo {
-            tap_fifo.sanity();
-        }
-        self.rotation.sanity();
-        for field in [&self.log_precision_bh, &self.tropical_bh].into_iter().flatten() {
-            san(field);
-        }
+        self.frame.sanity();
     }
 }

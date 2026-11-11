@@ -92,23 +92,17 @@ fn build_cross_caches(
     let slots = cfg.tap_pattern.tap_slots(cfg.micro_steps);
     let k = Tensor::<5>::zeros([batch, slots, mimo_rank, nheads, state_rank], &device);
     let v = Tensor::<4>::zeros([batch, slots, nheads, per_head_dim], &device);
-    let c3 = Mamba3DoubleSsdCache {
-        ssm_bhpr: Tensor::from_inner(ssm.clone()),
-        tap_fifo: Some(TapFifo {
-            b_bumhr: Tensor::from_inner(k.clone()),
-            x_buhp: Tensor::from_inner(v.clone()),
-        }),
-        rotation: rotation(),
-        log_precision_bh: None,
-        tropical_bh: None,
-    };
-    let cm = Mamba3SingleSsdCache {
-        ssm_bhpr: Tensor::from_inner(ssm),
+    let frame = |k, v| Mamba3FrameCache {
         tap_fifo: Some(TapFifo { b_bumhr: Tensor::from_inner(k), x_buhp: Tensor::from_inner(v) }),
         rotation: rotation(),
         log_precision_bh: None,
         tropical_bh: None,
     };
+    let c3 = Mamba3DoubleSsdCache {
+        ssm_bhpr: Tensor::from_inner(ssm.clone()),
+        frame: frame(k.clone(), v.clone()),
+    };
+    let cm = Mamba3SingleSsdCache { ssm_bhpr: Tensor::from_inner(ssm), frame: frame(k, v) };
     (c3, cm)
 }
 
@@ -158,13 +152,15 @@ fn build_single_ssd_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mam
     let tap = slots > 0;
     Mamba3SingleSsdCache {
         ssm_bhpr: mk4([batch, nheads, per_head_dim, state_rank]),
-        tap_fifo: tap.then(|| TapFifo {
-            b_bumhr: mk5([batch, slots, mimo_rank, nheads, state_rank]),
-            x_buhp: mk4([batch, slots, nheads, per_head_dim]),
-        }),
-        rotation,
-        log_precision_bh: None,
-        tropical_bh: None,
+        frame: Mamba3FrameCache {
+            tap_fifo: tap.then(|| TapFifo {
+                b_bumhr: mk5([batch, slots, mimo_rank, nheads, state_rank]),
+                x_buhp: mk4([batch, slots, nheads, per_head_dim]),
+            }),
+            rotation,
+            log_precision_bh: None,
+            tropical_bh: None,
+        },
     }
 }
 
@@ -303,8 +299,9 @@ fn run_with_grads_single_ssd(
     let ssm = cache.ssm_bhpr;
     // These tests all run a β tap. `TapPattern::None` never reaches this
     // pathway (`forward_single_ssd` delegates to the double-SSD form for it).
-    let TapFifo { b_bumhr: k, x_buhp: v } = cache.tap_fifo.expect("a β tap keeps its tap FIFO");
-    let angle = match cache.rotation {
+    let TapFifo { b_bumhr: k, x_buhp: v } =
+        cache.frame.tap_fifo.expect("a β tap keeps its tap FIFO");
+    let angle = match cache.frame.rotation {
         RotationState::Real(_) => None,
         other => Some(other.angle()),
     };
@@ -936,13 +933,15 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
     let run_a = run_cache_fields_with_grads(&model, &input_a, &heads, move |m, x| {
         let init_double = Mamba3DoubleSsdCache {
             ssm_bhpr: Tensor::from_inner(ssm_a),
-            tap_fifo: Some(TapFifo {
-                b_bumhr: Tensor::from_inner(k_a),
-                x_buhp: Tensor::from_inner(v_a),
-            }),
-            rotation: RotationState::Angle(Tensor::from_inner(ang_a)),
-            log_precision_bh: None,
-            tropical_bh: None,
+            frame: Mamba3FrameCache {
+                tap_fifo: Some(TapFifo {
+                    b_bumhr: Tensor::from_inner(k_a),
+                    x_buhp: Tensor::from_inner(v_a),
+                }),
+                rotation: RotationState::Angle(Tensor::from_inner(ang_a)),
+                log_precision_bh: None,
+                tropical_bh: None,
+            },
         };
         let prefix = x.clone().narrow(1, 0, split);
         let suffix = x.narrow(1, split, seq_len - split);
@@ -950,8 +949,8 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
         let mid_single = Mamba3SingleSsdCache::from(mid_double);
         let (out_suffix, last) = m.forward_single_ssd(suffix, Some(mid_single), &ps_a, None);
         let out = Tensor::cat(vec![out_prefix, out_suffix], 1);
-        let fifo = last.tap_fifo.expect("a β tap keeps its tap FIFO");
-        (out, last.ssm_bhpr, fifo.b_bumhr, fifo.x_buhp, last.rotation.angle())
+        let fifo = last.frame.tap_fifo.expect("a β tap keeps its tap FIFO");
+        (out, last.ssm_bhpr, fifo.b_bumhr, fifo.x_buhp, last.frame.rotation.angle())
     });
 
     // ── Run B: single → (convert) → double ───────────────────────────────
@@ -961,13 +960,15 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
     let run_b = run_cache_fields_with_grads(&model, &input_b, &heads, move |m, x| {
         let init_single = Mamba3SingleSsdCache {
             ssm_bhpr: Tensor::from_inner(ssm_b),
-            tap_fifo: Some(TapFifo {
-                b_bumhr: Tensor::from_inner(k_b),
-                x_buhp: Tensor::from_inner(v_b),
-            }),
-            rotation: RotationState::Angle(Tensor::from_inner(ang_b)),
-            log_precision_bh: None,
-            tropical_bh: None,
+            frame: Mamba3FrameCache {
+                tap_fifo: Some(TapFifo {
+                    b_bumhr: Tensor::from_inner(k_b),
+                    x_buhp: Tensor::from_inner(v_b),
+                }),
+                rotation: RotationState::Angle(Tensor::from_inner(ang_b)),
+                log_precision_bh: None,
+                tropical_bh: None,
+            },
         };
         let prefix = x.clone().narrow(1, 0, split);
         let suffix = x.narrow(1, split, seq_len - split);
@@ -975,8 +976,8 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
         let mid_double = Mamba3DoubleSsdCache::from(mid_single);
         let (out_suffix, last) = m.forward_double_ssd(suffix, Some(mid_double), &pd_b, None);
         let out = Tensor::cat(vec![out_prefix, out_suffix], 1);
-        let fifo = last.tap_fifo.expect("a β tap keeps its tap FIFO");
-        (out, last.ssm_bhpr, fifo.b_bumhr, fifo.x_buhp, last.rotation.angle())
+        let fifo = last.frame.tap_fifo.expect("a β tap keeps its tap FIFO");
+        (out, last.ssm_bhpr, fifo.b_bumhr, fifo.x_buhp, last.frame.rotation.angle())
     });
 
     check_single_ssd_match(
