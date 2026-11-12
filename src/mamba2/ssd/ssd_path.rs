@@ -94,12 +94,12 @@ pub struct Mamba2SsdInput {
     /// - `[nheads, per_head_dim, state_rank]`
     pub init_state_hpr: Option<Tensor<3>>,
     /// The chunks that start a new segment of a packed row, and the origin
-    /// state. The carry into each of these chunks restarts from the origin
+    /// state. The start state of each of these chunks is the origin state
     /// (see [`crate::packing`]). The call itself starts from
     /// `initial_state_bhpr`.
     /// `None` ⇒ no reset. Only the two serial paths take it.
     /// [`Mamba2SsdPath::Minimal`] panics when it is `Some`.
-    pub restarts: Option<crate::packing::Restarts>,
+    pub resets: Option<crate::packing::SsdResets>,
 }
 
 impl Mamba2SsdInput {
@@ -165,7 +165,7 @@ impl Mamba2SsdInput {
         match path {
             Mamba2SsdPath::Minimal(_) => {
                 assert!(
-                    self.restarts.is_none(),
+                    self.resets.is_none(),
                     "Minimal does not take resets: use Serial or SerialRecalculated"
                 );
                 self.ssd_minimal()

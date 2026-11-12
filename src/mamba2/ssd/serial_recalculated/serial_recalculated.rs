@@ -16,7 +16,7 @@
 //! per-backend impls.
 
 use crate::mamba2::prelude::*;
-use crate::packing::OpRestarts;
+use crate::packing::OpResets;
 use crate::standard_ssd;
 use burn_stack::utils::fprim::{F, san};
 use burn::backend::tensor::FloatTensor;
@@ -54,8 +54,8 @@ impl Mamba2SsdInput {
         );
 
         // The resets go into the op as a keep factor and the origin state (see
-        // `Restarts::op_inputs`).
-        let restarts = crate::packing::Restarts::op_inputs(input.restarts, &input.x_bnlhp);
+        // `SsdResets::op_inputs`).
+        let resets = crate::packing::SsdResets::op_inputs(input.resets, &input.x_bnlhp);
 
         // The custom op forms `da` itself (in forward and backward). It gets
         // `a_decay_h` directly, so `da` is not an autodiff-tracked intermediate
@@ -68,7 +68,7 @@ impl Mamba2SsdInput {
             input.d_h.into_dispatch(),
             input.initial_state_bhpr.into_dispatch(),
             input.a_decay_h.into_dispatch(),
-            restarts,
+            resets,
         );
         let y_bnlhp = Tensor::from_dispatch(y_bnlhp);
         let final_state_bhpr = Tensor::from_dispatch(final_state_bhpr);
@@ -90,8 +90,8 @@ impl Mamba2SsdInput {
     Autodiff:  cfg(feature = "autodiff"),
 )]
 pub trait Mamba2BackendExt: Backend {
-    /// `restarts` gives the chunks that start a new segment of a packed row,
-    /// and the state that they start from ([`OpRestarts`]).
+    /// `resets` gives the chunks that start a new segment of a packed row,
+    /// and the state that they start from ([`OpResets`]).
     ///
     /// Returns:
     /// - `y_bnlhp`.
@@ -105,7 +105,7 @@ pub trait Mamba2BackendExt: Backend {
         d_h: FloatTensor<Self>,
         initial_state_bhpr: FloatTensor<Self>,
         a_decay_h: FloatTensor<Self>,
-        #[extension_type] restarts: OpRestarts<Self>,
+        #[extension_type] resets: OpResets<Self>,
     ) -> (FloatTensor<Self>, FloatTensor<Self>) {
         // This body runs under a generic `B`, where the high-level `Tensor`
         // (pinned to `Dispatch`) is not available. So the math uses the
@@ -113,7 +113,7 @@ pub trait Mamba2BackendExt: Backend {
         let x_bnlhp = F::<Self, 5>::new(x_bnlhp);
         let dt_bnlh = F::<Self, 4>::new(dt_discretized_bhnl).permute([0, 2, 3, 1]);
         let a_decay_111h = F::<Self, 1>::new(a_decay_h).unsqueeze_dims::<4>(&[0, 1, 2]);
-        let restarts = restarts.into_option();
+        let resets = resets.into_option();
 
         let (v_bnlhp, da_bnlh) = scan_inputs(x_bnlhp.clone(), dt_bnlh, a_decay_111h);
         let (y_bnl1hp, final_state_bhpr) = standard_ssd::forward::<Self>(
@@ -123,7 +123,7 @@ pub trait Mamba2BackendExt: Backend {
             F::<Self, 5>::new(c_bnlhr).unsqueeze_dim::<6>(3),
             F::new(initial_state_bhpr),
             1,
-            restarts,
+            resets,
         );
 
         // ── SKIP: D[h] · x[l,p] ─────────────────────────────────────────────────

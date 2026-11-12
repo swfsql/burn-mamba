@@ -153,8 +153,8 @@ impl Mamba3 {
                     let TapFifo { b_bumhr: b_head_bumhr, x_buhp: x_head_buhp } =
                         head(&p.origin.frame.tap_fifo, lag);
                     (
-                        p.segments.restart_heads(x_prev_bshp, 1, x_head_buhp),
-                        p.segments.restart_heads(b_prev_bsmhr, 1, b_head_bumhr),
+                        p.segments.origin_heads(x_prev_bshp, 1, x_head_buhp),
+                        p.segments.origin_heads(b_prev_bsmhr, 1, b_head_bumhr),
                     )
                 }
                 None => (x_prev_bshp, b_prev_bsmhr),
@@ -249,9 +249,9 @@ impl Mamba3 {
         let mimo_x_hmp = self.mimo_x_hmp.as_ref().map(|p| p.val());
         let v_gamma_bnlmhp =
             helpers::build_v_with_mimo::<5, 6>(x_gamma_bnlhp.clone(), mimo_x_hmp.as_ref(), 3);
-        // Every pass restarts its carry at the same chunks: the passes are
-        // the terms of one state. The γ pass holds the state of the origin,
-        // and a β pass restarts from zero, as it starts a call.
+        // Every pass has the same resets: the passes are the terms of one
+        // state. The γ pass holds the state of the origin. The start state of
+        // a β pass is zero, as at the start of a call.
         let reset_bn = packed.as_ref().map(|p| p.segments.reset_bn.clone());
 
         let input_gamma = Mamba3DoubleSsdInput {
@@ -262,7 +262,7 @@ impl Mamba3 {
             initial_state_bhpr: cache.ssm_bhpr,
             init_state_hpr: self.init_state_hpr.as_ref().map(|s| s.val()),
             read_stride: u,
-            restarts: packed.as_ref().map(|p| crate::packing::Restarts {
+            resets: packed.as_ref().map(|p| crate::packing::SsdResets {
                 reset_bn: p.segments.reset_bn.clone(),
                 origin_bhpr: p.origin.ssm_bhpr.clone(),
             }),
@@ -287,7 +287,7 @@ impl Mamba3 {
                     initial_state_bhpr: zero_bhpr.clone(),
                     init_state_hpr: None,
                     read_stride: u,
-                    restarts: reset_bn.clone().map(|reset_bn| crate::packing::Restarts {
+                    resets: reset_bn.clone().map(|reset_bn| crate::packing::SsdResets {
                         reset_bn,
                         origin_bhpr: zero_bhpr,
                     }),

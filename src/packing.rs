@@ -27,7 +27,7 @@
 //! - its chunk starts with a reset,
 //! - it reads further back than its own index in the chunk.
 //!
-//! Such a read takes the value of the origin instead (`restart_heads`). So a
+//! Such a read takes the value of the origin instead (`origin_heads`). So a
 //! per-chunk flag is all that those sites need, and no scan runs over the row
 //! for them. This needs a read that reaches back one chunk at most:
 //!
@@ -62,10 +62,10 @@ use burn::backend::{Autodiff, autodiff::checkpoint::strategy::CheckpointStrategy
 use burn::prelude::*;
 use burn_stack::utils::fprim::F;
 
-/// The resets of a packed row as an SSD pass takes them: the chunks that
-/// restart, and the state that they restart from.
+/// The resets of a packed row as an SSD pass takes them: the chunks with a
+/// reset, and the state that they start from.
 #[derive(Clone, Debug)]
-pub struct Restarts {
+pub struct SsdResets {
     /// `[batch, nchunks]`: `true` at a chunk that starts a new segment.
     pub reset_bn: Tensor<2, Bool>,
     /// `[batch, nheads, per_head_dim, state_rank]`: the state of the origin
@@ -73,37 +73,37 @@ pub struct Restarts {
     pub origin_bhpr: Tensor<4>,
 }
 
-impl Restarts {
-    /// The restarts as an SSD op takes them ([`OpRestarts`]). `keep_bn` gets
-    /// the dtype of `like`, and `like` is `[batch, nchunks, …]`.
+impl SsdResets {
+    /// The resets as an SSD op takes them ([`OpResets`]). `keep_bn` gets the
+    /// dtype of `like`, and `like` is `[batch, nchunks, …]`.
     pub(crate) fn op_inputs<const D: usize>(
-        restarts: Option<Self>,
+        resets: Option<Self>,
         like: &Tensor<D>,
-    ) -> OpRestarts<Dispatch> {
-        let Some(Restarts { reset_bn, origin_bhpr }) = restarts else {
-            return OpRestarts::None;
+    ) -> OpResets<Dispatch> {
+        let Some(SsdResets { reset_bn, origin_bhpr }) = resets else {
+            return OpResets::None;
         };
         let dims = like.dims();
         let options = (&like.device(), like.dtype());
         let keep_bn = Tensor::<2>::ones([dims[0], dims[1]], options).mask_fill(reset_bn, 0.0);
-        OpRestarts::Some {
+        OpResets::Some {
             keep_bn: keep_bn.into_dispatch(),
             origin_bhpr: origin_bhpr.into_dispatch(),
         }
     }
 }
 
-/// The restarts of a packed row as an SSD op takes them, on the primitives of
+/// The resets of a packed row as an SSD op takes them, on the primitives of
 /// `B`. An op argument of this type has `#[extension_type]`.
 ///
 /// This enum takes the place of an `Option` of the two tensors. Burn has no
 /// `ExtensionType` for `Option`, and the orphan rule stops this crate from
 /// adding one.
 #[derive(ExtensionType)]
-pub enum OpRestarts<B: Backend> {
-    /// No chunk of the call restarts.
+pub enum OpResets<B: Backend> {
+    /// No chunk of the call has a reset.
     None,
-    /// The chunks that restart, and the state that they restart from.
+    /// The chunks with a reset, and the state that they start from.
     Some {
         /// `[batch, nchunks]`: `0` at a chunk that starts a new segment, `1`
         /// elsewhere. It is a constant: the op registers no gradient for it.
@@ -114,32 +114,32 @@ pub enum OpRestarts<B: Backend> {
     },
 }
 
-impl<B: Backend> OpRestarts<B> {
+impl<B: Backend> OpResets<B> {
     /// The pair `(keep_bn, origin_bhpr)` that the standard SSD scan takes.
     pub(crate) fn into_option(self) -> Option<(F<B, 2>, F<B, 4>)> {
         match self {
-            OpRestarts::None => None,
-            OpRestarts::Some { keep_bn, origin_bhpr } => {
+            OpResets::None => None,
+            OpResets::Some { keep_bn, origin_bhpr } => {
                 Some((F::new(keep_bn), F::new(origin_bhpr)))
             }
         }
     }
 
-    /// The restarts from the two parts that a recompute node keeps (see
-    /// [`OpRestarts::into_recompute`]). `origin_bhpr` stays unread when
+    /// The resets from the two parts that a recompute node keeps (see
+    /// [`OpResets::into_recompute`]). `origin_bhpr` stays unread when
     /// `keep_bn` is `None`.
     #[cfg(feature = "autodiff")]
     pub(crate) fn from_recompute(keep_bn: Option<FloatTensor<B>>, origin_bhpr: FloatTensor<B>) -> Self {
         match keep_bn {
-            Some(keep_bn) => OpRestarts::Some { keep_bn, origin_bhpr },
-            None => OpRestarts::None,
+            Some(keep_bn) => OpResets::Some { keep_bn, origin_bhpr },
+            None => OpResets::None,
         }
     }
 }
 
 #[cfg(feature = "autodiff")]
-impl<B: Backend, C: CheckpointStrategy> OpRestarts<Autodiff<B, C>> {
-    /// The restarts as the `Autodiff` impl of an SSD op gives them to its
+impl<B: Backend, C: CheckpointStrategy> OpResets<Autodiff<B, C>> {
+    /// The resets as the `Autodiff` impl of an SSD op gives them to its
     /// recompute node:
     ///
     /// - `keep_bn`, on the primitives of `B`: a constant, with no gradient.
@@ -149,8 +149,8 @@ impl<B: Backend, C: CheckpointStrategy> OpRestarts<Autodiff<B, C>> {
         like: &FloatTensor<Autodiff<B, C>>,
     ) -> (Option<FloatTensor<B>>, FloatTensor<Autodiff<B, C>>) {
         match self {
-            OpRestarts::Some { keep_bn, origin_bhpr } => (Some(keep_bn.into_primitive()), origin_bhpr),
-            OpRestarts::None => (None, placeholder::<B, C, 4>(like)),
+            OpResets::Some { keep_bn, origin_bhpr } => (Some(keep_bn.into_primitive()), origin_bhpr),
+            OpResets::None => (None, placeholder::<B, C, 4>(like)),
         }
     }
 }
@@ -226,7 +226,7 @@ pub(crate) fn chunk_heads(
 /// every chunk that starts with a reset. `head` holds the values of the origin
 /// cache that those positions read at a reset: `x` with `width` entries
 /// along `axis`, one set per row. Axis 0 is the batch.
-pub(crate) fn restart_heads<const D: usize>(
+pub(crate) fn origin_heads<const D: usize>(
     x: Tensor<D>,
     axis: usize,
     head: Tensor<D>,
@@ -304,9 +304,9 @@ impl Segments {
         chunk_heads(&self.reset_bn, self.chunk_len, width, len)
     }
 
-    /// See [`restart_heads`].
-    pub fn restart_heads<const D: usize>(&self, x: Tensor<D>, axis: usize, head: Tensor<D>) -> Tensor<D> {
-        restart_heads(x, axis, head, &self.reset_bn, self.chunk_len)
+    /// See [`origin_heads`].
+    pub fn origin_heads<const D: usize>(&self, x: Tensor<D>, axis: usize, head: Tensor<D>) -> Tensor<D> {
+        origin_heads(x, axis, head, &self.reset_bn, self.chunk_len)
     }
 }
 

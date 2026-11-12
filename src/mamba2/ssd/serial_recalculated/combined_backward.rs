@@ -56,7 +56,7 @@ pub struct CombinedGrads<B: Backend> {
 /// - `d_final_bhpr` — upstream gradient of the final state
 /// - `x_bnlhp`, `dt_discretized_bhnl`, `b_bnlhr`, `c_bnlhr`, `d_h`,
 ///   `initial_state_bhpr`, `a_decay_h` — the seven saved forward inputs
-/// - `restarts` — `(keep_bn, origin_bhpr)`, or `None`. `keep_bn` is the
+/// - `resets` — `(keep_bn, origin_bhpr)`, or `None`. `keep_bn` is the
 ///   constant reset factor of the forward (`0` at a chunk that starts a new
 ///   segment). `origin_bhpr` is the state that those chunks start from.
 ///
@@ -75,7 +75,7 @@ pub fn combined_backward<B: Backend>(
     d_h: F<B, 1>,
     initial_state_bhpr: F<B, 4>,
     a_decay_h: F<B, 1>,
-    restarts: Option<(F<B, 2>, F<B, 4>)>,
+    resets: Option<(F<B, 2>, F<B, 4>)>,
 ) -> CombinedGrads<B> {
     let [batch, nchunks, chunk_len, nheads, per_head_dim] = x_bnlhp.dims();
 
@@ -97,7 +97,7 @@ pub fn combined_backward<B: Backend>(
         c_bnlhr.unsqueeze_dim::<6>(3),
         initial_state_bhpr,
         1,
-        restarts,
+        resets,
     );
     let d_v_bnlhp = grads.d_v_bnlmhp.squeeze_dim::<5>(3);
     let d_da_bnlh = grads.d_da_bnlh;

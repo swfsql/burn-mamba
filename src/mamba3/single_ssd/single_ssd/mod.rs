@@ -89,8 +89,8 @@ impl Mamba3 {
     ///
     /// A reset is a call boundary inside the row: the positions before it pay
     /// no `ν` forward (the taps of the segment start read the slots of the
-    /// origin), and the chunk restarts from the `h'` of the origin plus its
-    /// own boundary seed, as a call from the origin does.
+    /// origin). The start state of the chunk is the `h'` of the origin plus
+    /// its own boundary seed. A call from the origin starts the same way.
     #[allow(non_snake_case)]
     pub fn forward_single_ssd_packed(
         &self,
@@ -173,7 +173,7 @@ impl Mamba3 {
         // end of the call, where the tap belongs to the next call. Zero also
         // across a reset of a packed row: the first positions of a segment pay
         // the cache slots, through the seed of their chunk (below). (No output
-        // would see that mass: the restart drops the state it enters, and the
+        // would see that mass: the reset drops the state it enters, and the
         // band correction takes it out of the reads of its token. The zero
         // keeps `h'` at a reset equal to that at a call boundary.)
         let pay_forward = |nu_bsh: Tensor<3>, l: usize| {
@@ -272,7 +272,7 @@ impl Mamba3 {
         let initial_state_bhpr = cache.ssm_bhpr.clone() + boundary_seed_bhpr;
         san(&initial_state_bhpr);
         // A packed row: each chunk gets a seed from the slots of the origin,
-        // in case it restarts. Each slot writes one outer product (over the
+        // in case it has a reset. Each slot writes one outer product (over the
         // ranks). Each chunk weighs the slots by its own head masses.
         let seed_bnhpr = packed.as_ref().map(|p| {
             let (v_origin_mimo_bumhp, k_origin_bumhr) = prev_fifo(&p.origin.frame.tap_fifo);
@@ -373,7 +373,7 @@ impl Mamba3 {
             init_state_hpr: self.init_state_hpr.as_ref().map(|s| s.val()),
             read_stride: u,
             siso_specialization: self.siso_specialization,
-            restarts: packed.as_ref().map(|p| crate::packing::Restarts {
+            resets: packed.as_ref().map(|p| crate::packing::SsdResets {
                 reset_bn: p.segments.reset_bn.clone(),
                 origin_bhpr: p.origin.ssm_bhpr.clone(),
             }),

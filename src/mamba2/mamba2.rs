@@ -714,7 +714,7 @@ impl Mamba2 {
     /// `origin` has no effect without resets. See [`crate::packing`].
     ///
     /// At a start, the conv reads the window of `origin` in place of the
-    /// positions before it, and the SSD carry between chunks restarts from the state of
+    /// positions before it, and the SSD carry between chunks starts again from the state of
     /// `origin`. Only [`Mamba2SsdPath::Serial`] and
     /// [`Mamba2SsdPath::SerialRecalculated`] take resets.
     #[allow(non_snake_case)]
@@ -750,7 +750,7 @@ impl Mamba2 {
         assert!(chunk_len > 0);
         let reset_bn = reset_bs.map(|reset_bs| crate::packing::chunk_resets(reset_bs, chunk_len));
         // A conv tap reads `conv_kernel − 1` positions back, and only the first
-        // chunk of a segment checks for a restart (see [`crate::packing`]).
+        // chunk of a segment checks for a reset (see [`crate::packing`]).
         assert!(
             reset_bn.is_none() || chunk_len + 1 >= conv_kernel,
             "a packed call needs chunk_len {chunk_len} ≥ conv_kernel − 1 = {}",
@@ -953,7 +953,7 @@ impl Mamba2 {
             d_h: self.d_h.val(),
             initial_state_bhpr: cache.ssm_bhpr,
             init_state_hpr: self.init_state_hpr.as_ref().map(|s| s.val()),
-            restarts: reset_bn.zip(origin).map(|(reset_bn, origin)| crate::packing::Restarts {
+            resets: reset_bn.zip(origin).map(|(reset_bn, origin)| crate::packing::SsdResets {
                 reset_bn,
                 origin_bhpr: origin.ssm_bhpr,
             }),
@@ -1046,7 +1046,7 @@ impl Mamba2 {
                 // The padding is the newest `conv_kernel − 1` columns of the
                 // window, so column `c` of the padding is `c + 1` of it.
                 let head_bvk = origin_bvk.clone().narrow(2, i + 1, back);
-                crate::packing::restart_heads(tap_bvs, 2, head_bvk, reset_bn, chunk_len)
+                crate::packing::origin_heads(tap_bvs, 2, head_bvk, reset_bn, chunk_len)
             };
             let w_bvs = weight_vk
                 .clone()

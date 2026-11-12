@@ -123,20 +123,20 @@ pub struct Mamba3SingleSsdInput {
     pub siso_specialization: bool,
 
     /// The chunks that start a new segment of a packed row, and the origin
-    /// state. The carry into each of these chunks restarts from the origin
+    /// state. The start state of each of these chunks comes from the origin
     /// (see [`crate::packing`]). `None` ⇒ no reset. Only the two serial paths
     /// take it. `Minimal` panics when it is `Some`.
     ///
-    /// At a reset, no `ν` is paid forward across it. The chunk restarts from
-    /// the origin state plus its own boundary seed (`seed_bnhpr`), as a call
-    /// from the origin does. The call itself starts from
+    /// At a reset, no `ν` is paid forward across it. The start state of the
+    /// chunk is the origin state plus its own boundary seed (`seed_bnhpr`). A
+    /// call from the origin starts the same way. The call itself starts from
     /// `initial_state_bhpr`. As without resets, that accumulator holds the
     /// seed of the call.
-    pub restarts: Option<crate::packing::Restarts>,
+    pub resets: Option<crate::packing::SsdResets>,
 
     /// The boundary β seed of each chunk, with resets: the installments that
     /// the first `lag` positions of a chunk pay to the tap FIFO of the
-    /// origin, in case the chunk restarts. `None` without resets.
+    /// origin, in case the chunk has a reset. `None` without resets.
     ///
     /// # Shape
     /// - `[batch, nchunks, nheads, per_head_dim, state_rank]`
@@ -176,7 +176,7 @@ impl Mamba3SingleSsdInput {
         match path {
             Mamba3SsdPath::Minimal(_) => {
                 assert!(
-                    self.restarts.is_none(),
+                    self.resets.is_none(),
                     "Minimal does not take resets: use Serial or SerialRecalculated"
                 );
                 self.single_ssd_minimal()

@@ -10,7 +10,7 @@
 //! (`packing::placeholder`), which the node saves at no real cost.
 
 use crate::mamba3::double_ssd::ssd::serial_recalculated::Mamba3DoubleSsdBackendExt;
-use crate::packing::OpRestarts;
+use crate::packing::OpResets;
 use crate::standard_ssd::combined_backward;
 use burn::backend::Backend;
 use burn::backend::autodiff::{Autodiff, checkpoint::strategy::CheckpointStrategy};
@@ -50,7 +50,7 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt> RecomputeOp<B, 6> for SsdRecompute 
             inputs.c_bntmhr,
             inputs.initial_state_bhpr,
             extra.read_stride,
-            OpRestarts::from_recompute(extra.keep_bn.clone(), inputs.origin_bhpr),
+            OpResets::from_recompute(extra.keep_bn.clone(), inputs.origin_bhpr),
         )
     }
 
@@ -69,7 +69,7 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt> RecomputeOp<B, 6> for SsdRecompute 
             F::new(inputs.c_bntmhr),
             F::new(inputs.initial_state_bhpr),
             extra.read_stride,
-            OpRestarts::from_recompute(extra.keep_bn, inputs.origin_bhpr).into_option(),
+            OpResets::from_recompute(extra.keep_bn, inputs.origin_bhpr).into_option(),
         );
         Inputs {
             v_bnlmhp: Some(grads.d_v_bnlmhp.inner()),
@@ -92,9 +92,9 @@ impl<B: Backend + Mamba3DoubleSsdBackendExt, C: CheckpointStrategy> Mamba3Double
         c_bntmhr: FloatTensor<Self>,
         initial_state_bhpr: FloatTensor<Self>,
         read_stride: usize,
-        restarts: OpRestarts<Self>,
+        resets: OpResets<Self>,
     ) -> (FloatTensor<Self>, FloatTensor<Self>) {
-        let (keep_bn, origin_bhpr) = restarts.into_recompute(&v_bnlmhp);
+        let (keep_bn, origin_bhpr) = resets.into_recompute(&v_bnlmhp);
         recompute_pair::<B, C, SsdRecompute, _>(
             Inputs { v_bnlmhp, da_bnlh, b_bnlmhr, c_bntmhr, initial_state_bhpr, origin_bhpr },
             Extra { read_stride, keep_bn },

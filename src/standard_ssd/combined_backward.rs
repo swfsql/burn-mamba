@@ -71,7 +71,7 @@ pub struct CombinedGrads<B: Backend> {
 /// - `v_bnlmhp`, `da_bnlh`, `b_bnlmhr`, `c_bntmhr`, `initial_state_bhpr` —
 ///   the five saved forward inputs
 /// - `read_stride` — write positions per read position (`micro_steps`)
-/// - `restarts` — `(keep_bn, origin_bhpr)`, or `None`. `keep_bn` is the
+/// - `resets` — `(keep_bn, origin_bhpr)`, or `None`. `keep_bn` is the
 ///   constant reset factor of the forward (`0` at a chunk that starts a new
 ///   segment). `origin_bhpr` is the state that those chunks start from.
 ///
@@ -89,9 +89,9 @@ pub fn combined_backward<B: Backend>(
     c_bntmhr: F<B, 6>,
     initial_state_bhpr: F<B, 4>,
     read_stride: usize,
-    restarts: Option<(F<B, 2>, F<B, 4>)>,
+    resets: Option<(F<B, 2>, F<B, 4>)>,
 ) -> CombinedGrads<B> {
-    let keep_bn = restarts.as_ref().map(|(keep_bn, _)| keep_bn.clone());
+    let keep_bn = resets.as_ref().map(|(keep_bn, _)| keep_bn.clone());
     let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = v_bnlmhp.dims();
     let [.., state_rank] = b_bnlmhr.dims();
     // The chunk's two axes: `fused` is what it writes, `read` what it is read at.
@@ -126,7 +126,7 @@ pub fn combined_backward<B: Backend>(
         intra_chunk_state_bnhpr,
         da_chunk_end_bhn.clone(),
         initial_state_bhpr,
-        restarts,
+        resets,
         None,
     );
 
@@ -162,7 +162,7 @@ pub fn combined_backward<B: Backend>(
     );
 
     // ── K4 backward: the reverse of the state-passing scan ────────────────
-    let (d_intra_chunk_state_bnhpr, d_da_end_bhn, d_initial_state_bhpr, d_restart_bnhpr) =
+    let (d_intra_chunk_state_bnhpr, d_da_end_bhn, d_initial_state_bhpr, d_start_state_bnhpr) =
         k4_ssd_state_passing_backward(
             d_chunk_input_state_bnhpr,
             chunk_input_state_bnhpr,
@@ -170,8 +170,10 @@ pub fn combined_backward<B: Backend>(
             d_final_bhpr,
             keep_bn,
         );
-    // Every chunk restarts from the same origin state.
-    let d_origin_bhpr = d_restart_bnhpr.map(|d_restart_bnhpr| d_restart_bnhpr.sum_dim(1).squeeze_dim::<4>(1));
+    // The start state of each chunk is the origin state, with no seed. So the
+    // origin gets the sum over the chunks.
+    let d_origin_bhpr =
+        d_start_state_bnhpr.map(|d_start_state_bnhpr| d_start_state_bnhpr.sum_dim(1).squeeze_dim::<4>(1));
     let d_da_cumsum_k4_bhnl = scatter_chunk_end(d_da_end_bhn, chunk_len);
 
     // ── K3 and K2 backwards ───────────────────────────────────────────────

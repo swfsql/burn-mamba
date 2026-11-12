@@ -600,20 +600,20 @@ fn packed_mamba3_streams_are_the_batch_of_their_sequences() {
     }
 }
 
-/// [`restart_heads`](crate::packing::restart_heads) puts the head at the start
+/// [`origin_heads`](crate::packing::origin_heads) puts the head at the start
 /// of every reset chunk, so each head entry gets the sum of the gradients of
 /// its copies. The check is by hand, on the host: a tiling by `repeat_dim`
 /// has the right forward but a wrong backward in this Burn.
 #[test]
-fn restart_heads_gradient_sums_over_the_chunks() {
+fn origin_heads_gradient_sums_over_the_chunks() {
     let device = test_device().autodiff();
     let (width, chunk_len, nchunks) = (3, 4, 3);
     let len = chunk_len * nchunks;
     let head = Tensor::<3>::random([1, 2, width], Distribution::Normal(0.0, 1.0), &device).require_grad();
     let x = Tensor::<3>::zeros([1, 2, len], &device);
-    // Chunks 0 and 2 restart, chunk 1 does not.
+    // Chunks 0 and 2 have a reset, chunk 1 does not.
     let reset_bn = Tensor::<2, Bool>::from_data(TensorData::new(vec![true, false, true], [1, nchunks]), &device);
-    let y = crate::packing::restart_heads(x, 2, head.clone(), &reset_bn, chunk_len);
+    let y = crate::packing::origin_heads(x, 2, head.clone(), &reset_bn, chunk_len);
     let w = Tensor::<3>::random([1, 2, len], Distribution::Normal(0.0, 1.0), &device);
     let grads = (y * w.clone()).sum().backward();
     let got = Tensor::<3>::from_inner(head.grad(&grads).unwrap());
@@ -662,7 +662,7 @@ fn reset_inside_a_chunk_panics() {
 }
 
 /// A Mamba-2 conv tap reads `conv_kernel − 1` positions back, and only the
-/// first chunk of a segment checks for a restart. So a packed call refuses a
+/// first chunk of a segment checks for a reset. So a packed call refuses a
 /// chunk that holds fewer positions.
 #[cfg(feature = "mamba2")]
 #[test]

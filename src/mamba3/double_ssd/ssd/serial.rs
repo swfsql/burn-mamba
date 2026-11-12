@@ -88,7 +88,7 @@ impl Mamba3DoubleSsdInput {
                 intra_chunk_state_bnhpr,
                 da_chunk_end_bhn,
                 input.initial_state_bhpr,
-                input.restarts,
+                input.resets,
                 None,
             );
         assert_eq!(
@@ -254,14 +254,14 @@ pub fn k3_ssd_chunk_state(
 /// - `intra_chunk_state_bnhpr`: `[batch, nchunks, nheads, per_head_dim, state_rank]`
 /// - `da_chunk_end_bhn`: `[batch, nheads, nchunks]` — total log-decay per chunk
 /// - `initial_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
-/// - `restarts`: the chunks that start a new segment of a packed row
+/// - `resets`: the chunks that start a new segment of a packed row
 ///   ([`crate::packing`]) and the origin state, or `None`. The state that
-///   goes into such a chunk is its **restart state**, as at the start of a
+///   goes into such a chunk is its **start state**, as at the start of a
 ///   call from the origin. The select also stops the gradient to the state
 ///   before it.
 /// - `seed_bnhpr`: the single-SSD boundary seed of each chunk (see
-///   `Mamba3SingleSsdInput::seed_bnhpr`), or `None`. The restart state of
-///   chunk `c` is `origin + seedᶜ`. Without it, the restart state is `origin`.
+///   `Mamba3SingleSsdInput::seed_bnhpr`), or `None`. The start state of
+///   chunk `c` is `origin + seedᶜ`. Without it, the start state is `origin`.
 ///   The call starts from `initial` either way.
 ///
 /// # Returns
@@ -271,7 +271,7 @@ pub fn k4_ssd_state_passing(
     intra_chunk_state_bnhpr: Tensor<5>,
     da_chunk_end_bhn: Tensor<3>,
     initial_state_bhpr: Tensor<4>,
-    restarts: Option<crate::packing::Restarts>,
+    resets: Option<crate::packing::SsdResets>,
     seed_bnhpr: Option<Tensor<5>>,
 ) -> (Tensor<5>, Tensor<4>) {
     let [batch, nchunks, nheads, per_head_dim, state_rank] = intra_chunk_state_bnhpr.dims();
@@ -285,24 +285,24 @@ pub fn k4_ssd_state_passing(
     chunk_input_state_vec_bhpr.push(running_state_bhpr.clone());
 
     for i_chunk in 0..nchunks {
-        // A chunk that starts a segment starts from its restart state. (A
-        // learnable `init_state_hpr` would join it, but only `Minimal` takes
-        // one.)
-        if let Some(restarts) = &restarts {
-            let reset_bhpr = restarts
+        // A chunk that starts a segment takes its start state
+        // (`origin + seedᶜ`, or `origin`) in place of the carry. (A learnable
+        // `init_state_hpr` would join it, but only `Minimal` takes one.)
+        if let Some(resets) = &resets {
+            let reset_bhpr = resets
                 .reset_bn
                 .clone()
                 .slice(s![.., i_chunk])
                 .reshape([batch, 1, 1, 1])
                 .expand([batch, nheads, per_head_dim, state_rank]);
-            let restart_bhpr = match &seed_bnhpr {
+            let start_state_bhpr = match &seed_bnhpr {
                 Some(seed_bnhpr) => {
-                    restarts.origin_bhpr.clone()
+                    resets.origin_bhpr.clone()
                         + seed_bnhpr.clone().narrow(1, i_chunk, 1).squeeze_dim::<4>(1)
                 }
-                None => restarts.origin_bhpr.clone(),
+                None => resets.origin_bhpr.clone(),
             };
-            running_state_bhpr = running_state_bhpr.mask_where(reset_bhpr, restart_bhpr);
+            running_state_bhpr = running_state_bhpr.mask_where(reset_bhpr, start_state_bhpr);
             *chunk_input_state_vec_bhpr.last_mut().unwrap() = running_state_bhpr.clone();
         }
 

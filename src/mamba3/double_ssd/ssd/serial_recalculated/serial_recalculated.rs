@@ -11,7 +11,7 @@
 //! trapezoid.
 
 use crate::mamba3::double_ssd::prelude::*;
-use crate::packing::OpRestarts;
+use crate::packing::OpResets;
 use crate::standard_ssd;
 use burn_stack::utils::fprim::F;
 use burn::backend::tensor::FloatTensor;
@@ -36,7 +36,7 @@ impl Mamba3DoubleSsdInput {
             "init_state_hpr not yet implemented for ssd_serial_recalculated"
         );
 
-        let restarts = crate::packing::Restarts::op_inputs(input.restarts, &input.v_bnlmhp);
+        let resets = crate::packing::SsdResets::op_inputs(input.resets, &input.v_bnlmhp);
         let (y_bntmhp, final_state_bhpr) =
             <Dispatch as Mamba3DoubleSsdBackendExt>::double_ssd_serial_recalculated(
                 input.v_bnlmhp.into_dispatch(),
@@ -45,7 +45,7 @@ impl Mamba3DoubleSsdInput {
                 input.c_bntmhr.into_dispatch(),
                 input.initial_state_bhpr.into_dispatch(),
                 input.read_stride,
-                restarts,
+                resets,
             );
         let y_bntmhp = Tensor::from_dispatch(y_bntmhp);
         let final_state_bhpr = Tensor::from_dispatch(final_state_bhpr);
@@ -78,8 +78,8 @@ pub trait Mamba3DoubleSsdBackendExt: Backend {
     /// - `initial_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
     /// - `read_stride`:        `micro_steps` — write positions per read position, so
     ///   `chunk_tokens = chunk_len / read_stride`
-    /// - `restarts`:           the chunks that start a new segment of a packed
-    ///   row, and the state that they start from ([`OpRestarts`])
+    /// - `resets`:             the chunks that start a new segment of a packed
+    ///   row, and the state that they start from ([`OpResets`])
     ///
     /// # Returns
     /// - `y_bntmhp`:         `[batch, nchunks, chunk_tokens, mimo_rank, nheads, per_head_dim]`
@@ -91,7 +91,7 @@ pub trait Mamba3DoubleSsdBackendExt: Backend {
         c_bntmhr: FloatTensor<Self>,
         initial_state_bhpr: FloatTensor<Self>,
         read_stride: usize,
-        #[extension_type] restarts: OpRestarts<Self>,
+        #[extension_type] resets: OpResets<Self>,
     ) -> (FloatTensor<Self>, FloatTensor<Self>) {
         let (y_bntmhp, final_state_bhpr) = standard_ssd::forward::<Self>(
             F::new(v_bnlmhp),
@@ -100,7 +100,7 @@ pub trait Mamba3DoubleSsdBackendExt: Backend {
             F::new(c_bntmhr),
             F::new(initial_state_bhpr),
             read_stride,
-            restarts.into_option(),
+            resets.into_option(),
         );
         (y_bntmhp.inner(), final_state_bhpr.inner())
     }

@@ -13,7 +13,7 @@
 use crate::mamba2::ssd::serial_recalculated::{
     Mamba2BackendExt, combined_backward::combined_backward,
 };
-use crate::packing::OpRestarts;
+use crate::packing::OpResets;
 use burn::backend::Backend;
 use burn::backend::autodiff::{Autodiff, checkpoint::strategy::CheckpointStrategy};
 use burn::backend::tensor::FloatTensor;
@@ -54,7 +54,7 @@ impl<B: Backend + Mamba2BackendExt> RecomputeOp<B, 8> for SsdRecompute {
             inputs.d_h,
             inputs.initial_state_bhpr,
             inputs.a_decay_h,
-            OpRestarts::from_recompute(extra.keep_bn.clone(), inputs.origin_bhpr),
+            OpResets::from_recompute(extra.keep_bn.clone(), inputs.origin_bhpr),
         )
     }
 
@@ -74,7 +74,7 @@ impl<B: Backend + Mamba2BackendExt> RecomputeOp<B, 8> for SsdRecompute {
             F::new(inputs.d_h),
             F::new(inputs.initial_state_bhpr),
             F::new(inputs.a_decay_h),
-            OpRestarts::from_recompute(extra.keep_bn, inputs.origin_bhpr).into_option(),
+            OpResets::from_recompute(extra.keep_bn, inputs.origin_bhpr).into_option(),
         );
         Inputs {
             x_bnlhp: Some(grads.d_x_bnlhp.inner()),
@@ -98,9 +98,9 @@ impl<B: Backend + Mamba2BackendExt, C: CheckpointStrategy> Mamba2BackendExt for 
         d_h: FloatTensor<Self>,
         initial_state_bhpr: FloatTensor<Self>,
         a_decay_h: FloatTensor<Self>,
-        restarts: OpRestarts<Self>,
+        resets: OpResets<Self>,
     ) -> (FloatTensor<Self>, FloatTensor<Self>) {
-        let (keep_bn, origin_bhpr) = restarts.into_recompute(&x_bnlhp);
+        let (keep_bn, origin_bhpr) = resets.into_recompute(&x_bnlhp);
         recompute_pair::<B, C, SsdRecompute, _>(
             Inputs {
                 x_bnlhp,

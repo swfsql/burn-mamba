@@ -22,7 +22,7 @@
 
 use crate::mamba3::single_ssd::prelude::*;
 use crate::mamba3::single_ssd::ssd::serial_recalculated::diag::y_diag_correction;
-use crate::packing::OpRestarts;
+use crate::packing::OpResets;
 use crate::standard_ssd::kernels::{
     k1_ssd_chunk_cumsum, k2_ssd_bmm, k3_ssd_chunk_state, k4_ssd_state_passing,
 };
@@ -54,7 +54,7 @@ impl Mamba3SingleSsdInput {
             "init_state_hpr not yet implemented for single_ssd_serial_recalculated"
         );
 
-        let restarts = crate::packing::Restarts::op_inputs(input.restarts, &input.v_bnlmhp);
+        let resets = crate::packing::SsdResets::op_inputs(input.resets, &input.v_bnlmhp);
         let seeds = match input.seed_bnhpr {
             Some(seed_bnhpr) => OpSeeds::Some { seed_bnhpr: seed_bnhpr.into_dispatch() },
             None => OpSeeds::None,
@@ -70,7 +70,7 @@ impl Mamba3SingleSsdInput {
                 input.initial_state_bhpr.into_dispatch(),
                 input.read_stride,
                 input.siso_specialization,
-                restarts,
+                resets,
                 seeds,
             );
         let y_bntmhp = Tensor::from_dispatch(y_bntmhp);
@@ -112,9 +112,9 @@ pub trait Mamba3SingleSsdBackendExt: Backend {
     /// - `siso_specialization`: allow the specialized `mimo_rank == 1`
     ///   γ-correction (performance-only; see
     ///   [`Mamba3Config::siso_specialization`](crate::mamba3::mamba3::Mamba3Config::siso_specialization))
-    /// - `restarts`:           the chunks that start a new segment of a packed
+    /// - `resets`:             the chunks that start a new segment of a packed
     ///   row, and the accumulator that they start from, before their seed
-    ///   ([`OpRestarts`])
+    ///   ([`OpResets`])
     /// - `seeds`:              the boundary seed of each chunk ([`OpSeeds`])
     ///
     /// # Returns
@@ -131,7 +131,7 @@ pub trait Mamba3SingleSsdBackendExt: Backend {
         initial_state_bhpr: FloatTensor<Self>,
         read_stride: usize,
         siso_specialization: bool,
-        #[extension_type] restarts: OpRestarts<Self>,
+        #[extension_type] resets: OpResets<Self>,
         #[extension_type] seeds: OpSeeds<Self>,
     ) -> (FloatTensor<Self>, FloatTensor<Self>) {
         // Default impl: replicate the single-ssd form K1–K5 on primitives.
@@ -142,7 +142,7 @@ pub trait Mamba3SingleSsdBackendExt: Backend {
         let gamma_bnth = F::<Self, 4>::new(gamma_bnth);
         let scale_bnlh = F::<Self, 4>::new(scale_bnlh);
         let initial_state_bhpr = F::<Self, 4>::new(initial_state_bhpr);
-        let restarts = restarts.into_option();
+        let resets = resets.into_option();
         let seed_bnhpr = seeds.into_option();
 
         // K1 — chunk cumulative decay.
@@ -165,7 +165,7 @@ pub trait Mamba3SingleSsdBackendExt: Backend {
             intra_chunk_state_bnhpr,
             da_chunk_end_bhn,
             initial_state_bhpr,
-            restarts,
+            resets,
             seed_bnhpr,
         );
         san(&chunk_input_state_bnhpr);
@@ -192,7 +192,7 @@ pub trait Mamba3SingleSsdBackendExt: Backend {
 
 /// The boundary seeds of a single-SSD op, on the primitives of `B`. An op
 /// argument of this type has `#[extension_type]`. This enum takes the place of
-/// an `Option`, for the reason of [`OpRestarts`].
+/// an `Option`, for the reason of [`OpResets`].
 #[derive(ExtensionType)]
 pub enum OpSeeds<B: Backend> {
     /// No seeds: the call has no resets.

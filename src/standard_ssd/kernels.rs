@@ -33,7 +33,7 @@ use burn::tensor::s;
 /// - `c_bntmhr`:           `[batch, nchunks, chunk_tokens, mimo_rank, nheads, state_rank]`
 /// - `initial_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
 /// - `read_stride`:        write positions per read position (`micro_steps`)
-/// - `restarts`:           `(keep_bn, origin_bhpr)`, or `None`. `keep_bn` is
+/// - `resets`:             `(keep_bn, origin_bhpr)`, or `None`. `keep_bn` is
 ///   `0` at a chunk that starts a new segment of a packed row. `origin_bhpr`
 ///   is the state that such a chunk starts from.
 ///
@@ -47,7 +47,7 @@ pub fn forward<B: Backend>(
     c_bntmhr: F<B, 6>,
     initial_state_bhpr: F<B, 4>,
     read_stride: usize,
-    restarts: Option<(F<B, 2>, F<B, 4>)>,
+    resets: Option<(F<B, 2>, F<B, 4>)>,
 ) -> (F<B, 6>, F<B, 4>) {
     let nchunks = v_bnlmhp.dims()[1];
     assert!(nchunks > 0, "sequence length must be at least 1");
@@ -66,7 +66,7 @@ pub fn forward<B: Backend>(
         intra_chunk_state_bnhpr,
         da_chunk_end_bhn,
         initial_state_bhpr,
-        restarts,
+        resets,
         None,
     );
     san(&chunk_input_state_bnhpr);
@@ -353,24 +353,24 @@ pub(crate) fn k3_ssd_chunk_state_backward<B: Backend>(
 /// Returns the per-chunk input-state stream `chunk_input_state_bnhpr` and the
 /// `final_state_bhpr`.
 ///
-/// `restarts` is `(keep_bn, origin_bhpr)`: the reset as a factor, and the
+/// `resets` is `(keep_bn, origin_bhpr)`: the reset as a factor, and the
 /// origin state. The state that goes into a chunk with `keep = 0` is its
-/// restart state, `origin + seedᶜ` (`origin` without seeds). The call starts
+/// start state, `origin + seedᶜ` (`origin` without seeds). The call starts
 /// from `initial`.
 pub(crate) fn k4_ssd_state_passing<B: Backend>(
     intra_chunk_state_bnhpr: F<B, 5>,
     da_chunk_end_bhn: F<B, 3>,
     initial_state_bhpr: F<B, 4>,
-    restarts: Option<(F<B, 2>, F<B, 4>)>,
+    resets: Option<(F<B, 2>, F<B, 4>)>,
     seed_bnhpr: Option<F<B, 5>>,
 ) -> (F<B, 5>, F<B, 4>) {
     let [batch, nchunks, nheads, per_head_dim, state_rank] = intra_chunk_state_bnhpr.dims();
     let state = [nheads, per_head_dim, state_rank];
-    let restarts = restarts.map(|(keep_bn, origin_bhpr)| {
-        let restart_bn = restart_factor(&keep_bn);
-        (keep_bn, restart_bn, origin_bhpr)
+    let resets = resets.map(|(keep_bn, origin_bhpr)| {
+        let start_weight_bn = start_weight(&keep_bn);
+        (keep_bn, start_weight_bn, origin_bhpr)
     });
-    let restart = |origin_bhpr: &F<B, 4>, i_chunk: usize| match &seed_bnhpr {
+    let start_state = |origin_bhpr: &F<B, 4>, i_chunk: usize| match &seed_bnhpr {
         Some(seed_bnhpr) => {
             origin_bhpr.clone()
                 + seed_bnhpr
@@ -386,12 +386,12 @@ pub(crate) fn k4_ssd_state_passing<B: Backend>(
     chunk_input_state_vec_bhpr.push(running_state_bhpr.clone());
 
     for i_chunk in 0..nchunks {
-        // A chunk that starts a segment starts from its restart state. (A
-        // learnable `init_state_hpr` would join it, but only `Minimal` takes
-        // one.)
-        if let Some((keep_bn, restart_bn, origin_bhpr)) = &restarts {
+        // A chunk that starts a segment takes its start state
+        // (`origin + seedᶜ`, or `origin`) in place of the carry. (A learnable
+        // `init_state_hpr` would join it, but only `Minimal` takes one.)
+        if let Some((keep_bn, start_weight_bn, origin_bhpr)) = &resets {
             running_state_bhpr = running_state_bhpr * keep_at(keep_bn, i_chunk, state)
-                + restart(origin_bhpr, i_chunk) * keep_at(restart_bn, i_chunk, state);
+                + start_state(origin_bhpr, i_chunk) * keep_at(start_weight_bn, i_chunk, state);
             *chunk_input_state_vec_bhpr.last_mut().unwrap() = running_state_bhpr.clone();
         }
         let intra_state_bhpr = intra_chunk_state_bnhpr
@@ -413,8 +413,8 @@ pub(crate) fn k4_ssd_state_passing<B: Backend>(
     (chunk_input_state_bnhpr, final_state_bhpr)
 }
 
-/// `1 − keep`: `1` at a chunk that restarts.
-fn restart_factor<B: Backend>(keep_bn: &F<B, 2>) -> F<B, 2> {
+/// `1 − keep`: the weight of the start state, `1` at a chunk with a reset.
+fn start_weight<B: Backend>(keep_bn: &F<B, 2>) -> F<B, 2> {
     F::<B, 2>::full(keep_bn.dims(), 1.0, &keep_bn.device(), keep_bn.dtype()) - keep_bn.clone()
 }
 
@@ -441,16 +441,17 @@ fn keep_at<B: Backend>(keep_bn: &F<B, 2>, i_chunk: usize, [nheads, per_head_dim,
 /// product.
 ///
 /// Under a reset (`keep_bn`), `sᵢ = keepᵢ · (the state before chunk i) +
-/// (1 − keepᵢ) · restartᵢ`. So the gradient that goes on to chunk `i − 1` is
-/// `keepᵢ · d_sᵢ`, and `restartᵢ` gets `(1 − keepᵢ) · d_sᵢ`. The call starts
-/// from `initial`, so it gets what the walk leaves at the end. `sᵢ` in
-/// `d_decay` is already the restarted one (the caller recomputed it).
+/// (1 − keepᵢ) · startᵢ`, where `startᵢ` is the start state of chunk `i`. So
+/// the gradient that goes on to chunk `i − 1` is `keepᵢ · d_sᵢ`, and `startᵢ`
+/// gets `(1 − keepᵢ) · d_sᵢ`. The call starts from `initial`, so it gets what
+/// the walk leaves at the end. `sᵢ` in `d_decay` is already the state after
+/// the reset (the caller recomputed it).
 ///
 /// # Returns
 /// - `d_intra_chunk_state_bnhpr` — gradient of K3's per-chunk contribution
 /// - `d_da_chunk_end_bhn` — gradient of the per-chunk log-decay
 /// - `d_initial_state_bhpr` — what the walk leaves at the end
-/// - `d_restart_bnhpr` — the gradient of each chunk's restart state
+/// - `d_start_state_bnhpr` — the gradient of each chunk's start state
 ///   (`origin + seedᶜ`) with resets, else `None`. The origin gets its sum
 ///   over the chunks, and each seed gets its own chunk.
 pub(crate) fn k4_ssd_state_passing_backward<B: Backend>(
@@ -462,12 +463,12 @@ pub(crate) fn k4_ssd_state_passing_backward<B: Backend>(
 ) -> (F<B, 5>, F<B, 3>, F<B, 4>, Option<F<B, 5>>) {
     let [batch, nchunks, nheads, per_head_dim, state_rank] = chunk_input_state_bnhpr.dims();
     let state = [nheads, per_head_dim, state_rank];
-    let restart_bn = keep_bn.as_ref().map(restart_factor);
+    let start_weight_bn = keep_bn.as_ref().map(start_weight);
 
     let mut d_running_state_bhpr = d_final_state_bhpr;
     let mut d_intra_vec_bhpr: Vec<F<B, 4>> = Vec::with_capacity(nchunks);
-    // `d_restartᵢ`, in reverse chunk order.
-    let mut d_restart_vec_bhpr: Vec<F<B, 4>> = Vec::with_capacity(nchunks);
+    // `d_startᵢ`, in reverse chunk order.
+    let mut d_start_state_vec_bhpr: Vec<F<B, 4>> = Vec::with_capacity(nchunks);
     for i_chunk in (0..nchunks).rev() {
         d_intra_vec_bhpr.push(d_running_state_bhpr.clone());
 
@@ -483,8 +484,8 @@ pub(crate) fn k4_ssd_state_passing_backward<B: Backend>(
             .squeeze_dim::<4>(1);
 
         d_running_state_bhpr = decay_bhpr * d_running_state_bhpr + d_chunk_input_state_bhpr;
-        if let (Some(keep_bn), Some(restart_bn)) = (&keep_bn, &restart_bn) {
-            d_restart_vec_bhpr.push(d_running_state_bhpr.clone() * keep_at(restart_bn, i_chunk, state));
+        if let (Some(keep_bn), Some(start_weight_bn)) = (&keep_bn, &start_weight_bn) {
+            d_start_state_vec_bhpr.push(d_running_state_bhpr.clone() * keep_at(start_weight_bn, i_chunk, state));
             d_running_state_bhpr = d_running_state_bhpr * keep_at(keep_bn, i_chunk, state);
         }
         san(&d_running_state_bhpr);
@@ -494,9 +495,9 @@ pub(crate) fn k4_ssd_state_passing_backward<B: Backend>(
 
     // The walk ends on the state before chunk 0: `initial`.
     let d_initial_state_bhpr = d_running_state_bhpr;
-    let d_restart_bnhpr = (!d_restart_vec_bhpr.is_empty()).then(|| {
-        d_restart_vec_bhpr.reverse();
-        F::stack(d_restart_vec_bhpr, 1)
+    let d_start_state_bnhpr = (!d_start_state_vec_bhpr.is_empty()).then(|| {
+        d_start_state_vec_bhpr.reverse();
+        F::stack(d_start_state_vec_bhpr, 1)
     });
 
     let d_decay_bhn: F<B, 3> = (d_intra_chunk_state_bnhpr.clone() * chunk_input_state_bnhpr)
@@ -512,7 +513,7 @@ pub(crate) fn k4_ssd_state_passing_backward<B: Backend>(
         d_intra_chunk_state_bnhpr,
         d_da_chunk_end_bhn,
         d_initial_state_bhpr,
-        d_restart_bnhpr,
+        d_start_state_bnhpr,
     )
 }
 

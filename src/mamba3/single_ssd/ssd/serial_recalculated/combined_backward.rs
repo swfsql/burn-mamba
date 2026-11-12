@@ -86,7 +86,7 @@ pub struct CombinedSingleSsdGrads<B: Backend> {
 ///   [`Mamba3SingleSsdInput::read_stride`](crate::mamba3::single_ssd::ssd::Mamba3SingleSsdInput))
 /// - `siso_specialization` — the forward's γ-correction branch choice, replayed
 ///   here so the backward matches it (performance-only; both agree)
-/// - `restarts` — `(keep_bn, origin_bhpr)`, or `None`. `keep_bn` is the
+/// - `resets` — `(keep_bn, origin_bhpr)`, or `None`. `keep_bn` is the
 ///   constant reset factor of the forward (`0` at a chunk that starts a new
 ///   segment). `origin_bhpr` is the state that those chunks start from.
 /// - `seed_bnhpr` — the per-chunk boundary seeds of a packed row, or `None`
@@ -108,11 +108,11 @@ pub fn combined_backward<B: Backend>(
     initial_state_bhpr: F<B, 4>,
     read_stride: usize,
     siso_specialization: bool,
-    restarts: Option<(F<B, 2>, F<B, 4>)>,
+    resets: Option<(F<B, 2>, F<B, 4>)>,
     seed_bnhpr: Option<F<B, 5>>,
 ) -> CombinedSingleSsdGrads<B> {
     let seeded = seed_bnhpr.is_some();
-    let keep_bn = restarts.as_ref().map(|(keep_bn, _)| keep_bn.clone());
+    let keep_bn = resets.as_ref().map(|(keep_bn, _)| keep_bn.clone());
     let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = v_bnlmhp.dims();
     let [.., state_rank] = b_bnlmhr.dims();
     // The chunk's two axes: `fused` is what it writes, `read` what it is read
@@ -156,7 +156,7 @@ pub fn combined_backward<B: Backend>(
         intra_chunk_state_bnhpr,
         da_chunk_end_bhn.clone(),
         initial_state_bhpr,
-        restarts,
+        resets,
         seed_bnhpr,
     );
 
@@ -222,7 +222,7 @@ pub fn combined_backward<B: Backend>(
     let d_scale_lower_bhnl = d_scale_lower_bhnl.expect("K5 returns `d_scale` when it gets a scale");
 
     // ── K4 backward: the reverse of the state-passing scan ────────────────
-    let (d_intra_chunk_state_bnhpr, d_da_end_bhn, d_initial_state_bhpr, d_restart_bnhpr) =
+    let (d_intra_chunk_state_bnhpr, d_da_end_bhn, d_initial_state_bhpr, d_start_state_bnhpr) =
         k4_ssd_state_passing_backward(
             d_chunk_input_state_bnhpr,
             chunk_input_state_bnhpr,
@@ -230,12 +230,12 @@ pub fn combined_backward<B: Backend>(
             d_final_bhpr,
             keep_bn,
         );
-    // The restart state of chunk `c` is `origin + seedᶜ`: the origin gets the
+    // The start state of chunk `c` is `origin + seedᶜ`: the origin gets the
     // sum over the chunks, and each seed its own chunk.
-    let d_origin_bhpr = d_restart_bnhpr
+    let d_origin_bhpr = d_start_state_bnhpr
         .clone()
-        .map(|d_restart_bnhpr| d_restart_bnhpr.sum_dim(1).squeeze_dim::<4>(1));
-    let d_seed_bnhpr = d_restart_bnhpr.filter(|_| seeded);
+        .map(|d_start_state_bnhpr| d_start_state_bnhpr.sum_dim(1).squeeze_dim::<4>(1));
+    let d_seed_bnhpr = d_start_state_bnhpr.filter(|_| seeded);
     let d_da_cumsum_k4_bhnl = scatter_chunk_end(d_da_end_bhn, chunk_len);
 
     // ── K3 backward on K_scaled = scaleₜ·B ────────────────────────────────

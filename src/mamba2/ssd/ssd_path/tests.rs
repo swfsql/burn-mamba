@@ -114,7 +114,7 @@ impl Inputs {
             initial_state_bhpr: self.initial_state.val(),
             // Serial paths assert this is None — see ssd_serial / ssd_serial_recalculated.
             init_state_hpr: None,
-            restarts: None,
+            resets: None,
         }
     }
 }
