@@ -24,6 +24,10 @@ the readout change, but the skeleton does not. Each rung is one block, at the
 smallest size that allows an exact solution, with the residual switched off
 (`ignore_last_residual`), so the classification head sees only the block.
 
+`R` is a symbol of the input stream, as the other symbols are. No rung makes a
+packed call (`forward_packed`), so the block gets no **Reset** mark. The block
+erases its state on `R` by itself, through its data-dependent `A`.
+
 The four ladder rungs share three settings:
 
 - **`d_model = 2`**, the floor for a three-symbol alphabet. The pre-`RmsNorm`
