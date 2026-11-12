@@ -2,9 +2,15 @@
 //! Block`, `impl BlockConfig`, `impl CacheStack`.
 //!
 //! Each `CacheStack` impl holds only the slot logic of its family. The backend
-//! hop of a cache follows from its `CacheTensors` traversal in
-//! [`crate::family::capture`]. Each `Block::zero_cache` calls the `zero_cache`
-//! of its family.
+//! hop of a cache follows from its cache traversal in
+//! [`crate::family::cache_traversal`].
+//!
+//! Three trait methods have the name of an inherent method of their family:
+//! `zero_cache`, `untied_params` and `muon_projections`. Each one calls that
+//! inherent method by its type path, for example
+//! `Mamba1::zero_cache(self, batch, device)` and
+//! `Mamba1Config::muon_projections(self)`. A call on `self` selects the same
+//! method, but it reads like an endless recursion.
 
 use burn::prelude::*;
 use burn_stack::modules::{Block, BlockConfig, CacheStack};
@@ -49,10 +55,10 @@ mod impl_mamba1 {
             self.step(x, cache)
         }
         fn zero_cache(&self, batch: usize, device: &Device) -> Mamba1Cache {
-            self.zero_cache(batch, device)
+            Mamba1::zero_cache(self, batch, device)
         }
         fn untied_params(&self) -> Vec<UntiedParam> {
-            self.untied_params()
+            Mamba1::untied_params(self)
         }
     }
 
@@ -66,7 +72,7 @@ mod impl_mamba1 {
         }
         #[cfg(feature = "optim")]
         fn muon_projections(&self) -> Vec<burn_stack::optim::ProjSpec> {
-            self.muon_projections()
+            Mamba1Config::muon_projections(self)
         }
     }
 }
@@ -127,10 +133,10 @@ mod impl_mamba2 {
             self.step(x, cache)
         }
         fn zero_cache(&self, batch: usize, device: &Device) -> Mamba2Cache {
-            self.zero_cache(batch, device)
+            Mamba2::zero_cache(self, batch, device)
         }
         fn untied_params(&self) -> Vec<UntiedParam> {
-            self.untied_params()
+            Mamba2::untied_params(self)
         }
     }
 
@@ -144,7 +150,7 @@ mod impl_mamba2 {
         }
         #[cfg(feature = "optim")]
         fn muon_projections(&self) -> Vec<burn_stack::optim::ProjSpec> {
-            self.muon_projections()
+            Mamba2Config::muon_projections(self)
         }
     }
 }
@@ -251,10 +257,10 @@ mod impl_mamba3 {
         /// It holds about half the SSD memory of a double-SSD cache, for every
         /// rotation kind.
         fn zero_cache(&self, batch: usize, device: &Device) -> Mamba3Cache {
-            self.zero_cache(batch, device).into()
+            Mamba3::zero_cache(self, batch, device).into()
         }
         fn untied_params(&self) -> Vec<UntiedParam> {
-            self.untied_params()
+            Mamba3::untied_params(self)
         }
     }
 
@@ -268,7 +274,7 @@ mod impl_mamba3 {
         }
         #[cfg(feature = "optim")]
         fn muon_projections(&self) -> Vec<burn_stack::optim::ProjSpec> {
-            self.muon_projections()
+            Mamba3Config::muon_projections(self)
         }
     }
 }

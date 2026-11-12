@@ -14,8 +14,7 @@
 //! This is also where the three families meet the generic stack: the
 //! `impl Block for Mamba{1,2,3}`, `impl BlockConfig for Mamba{1,2,3}Config` and
 //! `impl CacheStack for Mamba{1,2,3}Caches` blocks are in [`adapters`]. The
-//! `CacheTensors` traversal of each cache, the one list of its fields, is in
-//! [`capture`].
+//! cache traversal of each family is in [`cache_traversal`].
 //!
 //! ## Muon: why the 3-D tensors are not "stacked matrices"
 //!
@@ -59,9 +58,9 @@ pub mod adapters;
 /// [`MambaBlock`], its caches, and the type aliases of the containers.
 #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
 pub mod block;
-/// The `CacheTensors` traversal of each family: the one list of the fields of
-/// a cache.
-pub mod capture;
+/// The cache traversal of each family: the one list of the tensors of each
+/// cache type.
+pub mod cache_traversal;
 /// The serializable `{ shape, block }` configs, and [`MambaBlockConfig`].
 #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
 pub mod config;

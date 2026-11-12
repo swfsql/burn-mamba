@@ -1,17 +1,19 @@
-//! The [`CacheTensors`](burn_stack::modules::CacheTensors) traversal of each
-//! family: the one list of the fields of each cache type.
+//! The cache traversal of each family: the
+//! [`CacheTensors`](burn_stack::modules::CacheTensors) impl of each cache type.
+//! It is the one list of the tensors of its cache type.
 //! [`burn_stack::modules::cache`] gives the operations that follow from it.
 //! Two examples are the backend hop of an untracked span and the cache
 //! write-back of a captured `step`
 //! ([`CapturedStep`](burn_stack::utils::capture::CapturedStep)). A captured
 //! step writes its new cache **into** the buffers of the old one.
 //!
-//! There is one traversal per cache type, and it visits every tensor field. An
-//! optional field must be present in both caches or in neither. This module
-//! also shows why the stable cache must first be copied into buffers of its
-//! own ([`into_owned_buffers`](burn_stack::modules::CacheTensors::into_owned_buffers)):
-//! the Mamba-3 tap FIFO comes back from `step` as `narrow`s of its own
-//! tensors.
+//! An optional field must be present in both caches or in neither.
+//!
+//! This module also shows why the stable cache must first be copied into
+//! buffers of its own
+//! ([`into_owned_buffers`](burn_stack::modules::CacheTensors::into_owned_buffers)).
+//! The cause is the Mamba-3 tap FIFO: `step` returns the FIFO as `narrow`s of
+//! the FIFO tensors.
 
 use burn_stack::modules::{CacheTensors, TensorZip};
 
