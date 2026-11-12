@@ -252,7 +252,7 @@
 <a href=#252 id=252 data-nosnippet>252</a>            [batch, <span class="self">self</span>.nheads(), <span class="self">self</span>.per_head_dim(), <span class="self">self</span>.state_rank],
 <a href=#253 id=253 data-nosnippet>253</a>            device,
 <a href=#254 id=254 data-nosnippet>254</a>        );
-<a href=#255 id=255 data-nosnippet>255</a>        <span class="kw">let </span>tap_fifo = <span class="self">self</span>.zero_tap_slots(batch, device);
+<a href=#255 id=255 data-nosnippet>255</a>        <span class="kw">let </span>tap_fifo = <span class="self">self</span>.zero_tap_fifo(batch, device);
 <a href=#256 id=256 data-nosnippet>256</a>        <span class="kw">let </span>rotation = <span class="self">self</span>.zero_rotation_state(batch, device);
 <a href=#257 id=257 data-nosnippet>257</a>        <span class="kw">let </span>(log_precision_bh, tropical_bh) = <span class="self">self</span>.zero_positive_state(batch, device);
 <a href=#258 id=258 data-nosnippet>258</a>        <span class="kw">let </span>frame = Mamba3FrameCache { tap_fifo, rotation, log_precision_bh, tropical_bh };

@@ -283,13 +283,13 @@
 <a href=#283 id=283 data-nosnippet>283</a>        san(<span class="kw-2">&amp;</span>c_btmhr);
 <a href=#284 id=284 data-nosnippet>284</a>        new_rotation.sanity();
 <a href=#285 id=285 data-nosnippet>285</a>
-<a href=#286 id=286 data-nosnippet>286</a>        <span class="comment">// ── Save the B and x of the last `lag` positions for the cache ────────
+<a href=#286 id=286 data-nosnippet>286</a>        <span class="comment">// ── Save the tap FIFO: the B and x of the last `lag` positions ────────
 <a href=#287 id=287 data-nosnippet>287</a>        // These are exactly the positions whose taps the next call must pay.
 <a href=#288 id=288 data-nosnippet>288</a>        // So the trapezoid continues unchanged across a split prefill (at
 <a href=#289 id=289 data-nosnippet>289</a>        // `lag = u`, these positions are exactly the last token). Each row
 <a href=#290 id=290 data-nosnippet>290</a>        // reads them at its row end. With no β tap there is nothing to
-<a href=#291 id=291 data-nosnippet>291</a>        // continue, and the FIFO stays empty.
-<a href=#292 id=292 data-nosnippet>292</a>        </span><span class="kw">let </span>new_tap_fifo = <span class="self">self</span>.save_tap_slots(
+<a href=#291 id=291 data-nosnippet>291</a>        // continue, and the tap FIFO stays `None`.
+<a href=#292 id=292 data-nosnippet>292</a>        </span><span class="kw">let </span>new_tap_fifo = <span class="self">self</span>.save_tap_fifo(
 <a href=#293 id=293 data-nosnippet>293</a>            <span class="kw-2">&amp;</span>b_bsmhr,
 <a href=#294 id=294 data-nosnippet>294</a>            <span class="kw-2">&amp;</span>x_bshp,
 <a href=#295 id=295 data-nosnippet>295</a>            <span class="kw-2">&amp;</span>da_bsh,
