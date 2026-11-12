@@ -170,8 +170,8 @@ pub fn combined_backward<B: Backend>(
             d_final_bhpr,
             keep_bn,
         );
-    // The start state of each chunk is the origin state, with no seed. So the
-    // origin gets the sum over the chunks.
+    // The start state of each chunk with a reset is the origin state, with no
+    // seed. So the origin gets the sum over the chunks.
     let d_origin_bhpr =
         d_start_state_bnhpr.map(|d_start_state_bnhpr| d_start_state_bnhpr.sum_dim(1).squeeze_dim::<4>(1));
     let d_da_cumsum_k4_bhnl = scatter_chunk_end(d_da_end_bhn, chunk_len);

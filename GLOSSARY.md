@@ -246,3 +246,8 @@ _Avoid_: real end, window (for the read at the row end)
 The cache that each segment of a packed call starts from. With no origin, a
 segment starts fresh. It is not the learnable initial state.
 _Avoid_: initial cache, initial state (for an origin)
+
+**Start state**:
+The state that a segment starts from at its reset. It is the state at the start
+of a call from the origin. In single-SSD, it is the accumulator at that start.
+_Avoid_: restart state, initial state (for a start state)

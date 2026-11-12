@@ -441,11 +441,11 @@ fn keep_at<B: Backend>(keep_bn: &F<B, 2>, i_chunk: usize, [nheads, per_head_dim,
 /// product.
 ///
 /// Under a reset (`keep_bn`), `sᵢ = keepᵢ · (the state before chunk i) +
-/// (1 − keepᵢ) · startᵢ`, where `startᵢ` is the start state of chunk `i`. So
-/// the gradient that goes on to chunk `i − 1` is `keepᵢ · d_sᵢ`, and `startᵢ`
-/// gets `(1 − keepᵢ) · d_sᵢ`. The call starts from `initial`, so it gets what
-/// the walk leaves at the end. `sᵢ` in `d_decay` is already the state after
-/// the reset (the caller recomputed it).
+/// (1 − keepᵢ) · startᵢ`, where `startᵢ` is the start state that chunk `i`
+/// takes at a reset. So the gradient that goes on to chunk `i − 1` is
+/// `keepᵢ · d_sᵢ`, and `startᵢ` gets `(1 − keepᵢ) · d_sᵢ`. The call starts
+/// from `initial`, so it gets what the walk leaves at the end. `sᵢ` in
+/// `d_decay` is already the state after the reset (the caller recomputed it).
 ///
 /// # Returns
 /// - `d_intra_chunk_state_bnhpr` — gradient of K3's per-chunk contribution

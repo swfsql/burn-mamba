@@ -171,10 +171,9 @@ by meaning:
 
 **Review findings that did not change the code:**
 
-- `GLOSSARY.md` has no entry for "start state" or "origin heads". The brief does not
-  ask for one, and "restart state" had none. "Start" also names the first position of
-  a segment (`segment_start`, `start_bs`). The maintainer decides if "start state" is a
-  term (through `/domain-modeling`).
+- The brief asks for no glossary entry. After the review, the maintainer agreed to
+  add **Start state** to `GLOSSARY.md` (through `/domain-modeling`). "Origin heads"
+  names only a function, so it has no entry.
 - Three docs call `keep_bn` "the constant reset factor", `kernels.rs` calls it "the
   reset as a factor", and the Mamba-2 recompute forward calls it "a keep factor". These
   lines have no "restart", so they did not change.
