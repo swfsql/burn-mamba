@@ -28,7 +28,7 @@ weights of the block.</p>
 <p>Zeros are correct: a zero convolution window means “no previous tokens”
 (the causal zero padding), and a zero state is the standard initial
 condition <code>h₀ = 0</code>.</p>
-</div></details></div></details><details class="toggle implementors-toggle" open><summary><section id="impl-Mamba1-1" class="impl"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#660-856">Source</a><a href="#impl-Mamba1-1" class="anchor">§</a><h3 class="code-header">impl <a class="struct" href="struct.Mamba1.html" title="struct burn_mamba::mamba1::mamba1::Mamba1">Mamba1</a></h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.step" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#667-743">Source</a><h4 class="code-header">pub fn <a href="#method.step" class="fn">step</a>(
+</div></details></div></details><details class="toggle implementors-toggle" open><summary><section id="impl-Mamba1-1" class="impl"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#655-851">Source</a><a href="#impl-Mamba1-1" class="anchor">§</a><h3 class="code-header">impl <a class="struct" href="struct.Mamba1.html" title="struct burn_mamba::mamba1::mamba1::Mamba1">Mamba1</a></h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.step" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#662-738">Source</a><h4 class="code-header">pub fn <a href="#method.step" class="fn">step</a>(
     &amp;self,
     x: Tensor&lt;2&gt;,
     cache: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="struct" href="../cache/struct.Mamba1Cache.html" title="struct burn_mamba::mamba1::cache::Mamba1Cache">Mamba1Cache</a>&gt;,
@@ -39,7 +39,7 @@ starts from zeros, as in <a href="struct.Mamba1.html#method.forward" title="meth
 <li>Input <code>[batch, d_model]</code></li>
 <li>Output <code>[batch, d_model]</code></li>
 </ul>
-</div></details><details class="toggle method-toggle" open><summary><section id="method.ssm_step" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#752-777">Source</a><h4 class="code-header">pub fn <a href="#method.ssm_step" class="fn">ssm_step</a>(
+</div></details><details class="toggle method-toggle" open><summary><section id="method.ssm_step" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#747-772">Source</a><h4 class="code-header">pub fn <a href="#method.ssm_step" class="fn">ssm_step</a>(
     &amp;self,
     u: Tensor&lt;2&gt;,
     cache: <a class="struct" href="../cache/struct.Mamba1Cache.html" title="struct burn_mamba::mamba1::cache::Mamba1Cache">Mamba1Cache</a>,
@@ -51,7 +51,7 @@ recurrence by one token via <a href="struct.Mamba1.html#method.selective_scan_st
 <li>Input u <code>[batch, d_inner]</code></li>
 <li>Output <code>[batch, d_inner]</code></li>
 </ul>
-</div></details><details class="toggle method-toggle" open><summary><section id="method.selective_scan_step" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#790-855">Source</a><h4 class="code-header">pub fn <a href="#method.selective_scan_step" class="fn">selective_scan_step</a>(
+</div></details><details class="toggle method-toggle" open><summary><section id="method.selective_scan_step" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#785-850">Source</a><h4 class="code-header">pub fn <a href="#method.selective_scan_step" class="fn">selective_scan_step</a>(
     delta: Tensor&lt;2&gt;,
     a: Tensor&lt;2&gt;,
     b: Tensor&lt;2&gt;,
@@ -73,7 +73,7 @@ one token and reads it out.</p>
 </ul>
 </div></details></div></details><details class="toggle implementors-toggle" open><summary><section id="impl-Mamba1-2" class="impl"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#342-370">Source</a><a href="#impl-Mamba1-2" class="anchor">§</a><h3 class="code-header">impl <a class="struct" href="struct.Mamba1.html" title="struct burn_mamba::mamba1::mamba1::Mamba1">Mamba1</a></h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.untied_params" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#345-369">Source</a><h4 class="code-header">pub fn <a href="#method.untied_params" class="fn">untied_params</a>(&amp;self) -&gt; <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;UntiedParam&gt;</h4></section></summary><div class="docblock"><p>The parameters held once per application (<a href="struct.Mamba1.html#structfield.untied" title="field burn_mamba::mamba1::mamba1::Mamba1::untied"><code>Self::untied</code></a>), each with
 the axis its copies lie along. See [<code>burn_stack::utils::untied</code>].</p>
-</div></details></div></details><details class="toggle implementors-toggle" open><summary><section id="impl-Mamba1-3" class="impl"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#372-655">Source</a><a href="#impl-Mamba1-3" class="anchor">§</a><h3 class="code-header">impl <a class="struct" href="struct.Mamba1.html" title="struct burn_mamba::mamba1::mamba1::Mamba1">Mamba1</a></h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.forward" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#389-479">Source</a><h4 class="code-header">pub fn <a href="#method.forward" class="fn">forward</a>(
+</div></details></div></details><details class="toggle implementors-toggle" open><summary><section id="impl-Mamba1-3" class="impl"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#372-650">Source</a><a href="#impl-Mamba1-3" class="anchor">§</a><h3 class="code-header">impl <a class="struct" href="struct.Mamba1.html" title="struct burn_mamba::mamba1::mamba1::Mamba1">Mamba1</a></h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.forward" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#389-474">Source</a><h4 class="code-header">pub fn <a href="#method.forward" class="fn">forward</a>(
     &amp;self,
     x: Tensor&lt;3&gt;,
     cache: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="struct" href="../cache/struct.Mamba1Cache.html" title="struct burn_mamba::mamba1::cache::Mamba1Cache">Mamba1Cache</a>&gt;,
@@ -86,14 +86,14 @@ a sequence in windows (prefill then decode, or a prefill over several
 windows).</p>
 <p><code>pad_bs</code> (<code>true</code> at padding, <code>None</code> ⇒ no padding) is right padding. A
 padded position is absent: it has <code>Δ = 0</code>, and each row reads its conv
-window at its own end (see <a href="../../prelude/trait.Block.html#tymethod.block_forward" title="method burn_mamba::prelude::Block::block_forward"><code>burn_stack::modules::Block::block_forward</code></a>).</p>
+window at its row end (see <a href="../../prelude/trait.Block.html#tymethod.block_forward" title="method burn_mamba::prelude::Block::block_forward"><code>burn_stack::modules::Block::block_forward</code></a>).</p>
 <h5 id="shapes-3"><a class="doc-anchor" href="#shapes-3">§</a>Shapes</h5>
 <ul>
 <li>Input <code>[batch, sequence, d_model]</code></li>
 <li><code>pad_bs</code> <code>[batch, sequence]</code></li>
 <li>Output <code>[batch, sequence, d_model]</code></li>
 </ul>
-</div></details><details class="toggle method-toggle" open><summary><section id="method.ssm" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#492-535">Source</a><h4 class="code-header">pub fn <a href="#method.ssm" class="fn">ssm</a>(
+</div></details><details class="toggle method-toggle" open><summary><section id="method.ssm" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#487-530">Source</a><h4 class="code-header">pub fn <a href="#method.ssm" class="fn">ssm</a>(
     &amp;self,
     u: Tensor&lt;3&gt;,
     init_ssm: Tensor&lt;3&gt;,
@@ -110,7 +110,7 @@ A padded position (<code>pad_bs</code>) gets <code>Δ = 0</code>. Then <code>exp
 <li>Output <code>[batch, sequence, d_inner]</code></li>
 <li>Output (final state) <code>[batch, d_inner, state_rank]</code></li>
 </ul>
-</div></details><details class="toggle method-toggle" open><summary><section id="method.selective_scan" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#552-654">Source</a><h4 class="code-header">pub fn <a href="#method.selective_scan" class="fn">selective_scan</a>(
+</div></details><details class="toggle method-toggle" open><summary><section id="method.selective_scan" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba1/mamba1.rs.html#547-649">Source</a><h4 class="code-header">pub fn <a href="#method.selective_scan" class="fn">selective_scan</a>(
     delta: Tensor&lt;3&gt;,
     a: Tensor&lt;2&gt;,
     b: Tensor&lt;3&gt;,

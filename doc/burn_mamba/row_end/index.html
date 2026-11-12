@@ -1,0 +1,65 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="The row end: where a row reads each cache field that keeps its last samples."><title>burn_mamba::row_end - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-1f5a765c.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.102.0-nightly (3ef0c22cd 2026-11-11)" data-channel="nightly" data-search-js="search-69faa2c4.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-9b351432.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../static.files/main-419f3a3f.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-101b5a15.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module row_end</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../burn_mamba/index.html">burn_<wbr>mamba</a><span class="version">0.79.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module row_end</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#padding" title="Padding">Padding</a></li><li><a href="#resets" title="Resets">Resets</a></li><li><a href="#one-narrow" title="One `narrow`">One <code>narrow</code></a></li></ul><h3><a href="#structs">Module Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#functions" title="Functions">Functions</a></li></ul></section><div id="rustdoc-modnav"><h2 class="in-crate"><a href="../index.html">In crate burn_<wbr>mamba</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../index.html">burn_mamba</a></div><h1>Module <span>row_end</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../src/burn_mamba/row_end.rs.html#1-251">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>The row end: where a row reads each cache field that keeps its last
+samples.</p>
+<p>Some cache fields keep the last <code>width</code> samples of a row, along one axis:</p>
+<ul>
+<li>the conv window of Mamba-1 and Mamba-2 (<code>width = conv_kernel</code>),</li>
+<li>the tap FIFO of Mamba-3 (<code>width = lag</code>),</li>
+<li>the <code>ln Λ</code> and <code>c</code> carries of the Mamba-3 positive systems
+(<code>width = 1</code>).</li>
+</ul>
+<p>A call gives these fields for the next call. Each field is the last <code>width</code>
+entries before the row end of each row, in the samples of the call after a
+<code>start</code> field:</p>
+<div class="example-wrap"><pre class="language-text"><code>  [ start | samples of the call ]  →  the `width` entries before the row end</code></pre></div>
+<p><code>start</code> has <code>width</code> entries. It holds the samples from before the call, so
+a call that is shorter than <code>width</code> also gives <code>width</code> entries. A
+<a href="struct.RowEnd.html" title="struct burn_mamba::row_end::RowEnd"><code>RowEnd</code></a> does each such read of one call. The code builds it once for
+each call, from the padding and the resets of the call.</p>
+<h2 id="padding"><a class="doc-anchor" href="#padding">§</a>Padding</h2>
+<p>Under right padding (<a href="../padding/index.html" title="mod burn_mamba::padding"><code>crate::padding</code></a>), the row end of a row is one past
+its last real position. A row with no real position reads <code>start</code>. Each row
+has its own row end. So the read is a gather at an offset for each row,
+with a fixed shape for all lengths.</p>
+<h2 id="resets"><a class="doc-anchor" href="#resets">§</a>Resets</h2>
+<p>A packed call (<a href="../packing/index.html" title="mod burn_mamba::packing"><code>crate::packing</code></a>) returns the cache of the last segment of
+each row, and that segment starts from the origin cache. So for a row with
+a reset in the call, <code>start</code> is the origin field. Each entry from before the
+start of the last segment comes from <code>start</code>. For a row with no reset,
+<code>start</code> is the incoming field.</p>
+<p>Let <code>s</code> be the first position of the last segment of a row, or <code>0</code> for a
+row with no reset. Let <code>e</code> be the row end. Then:</p>
+<ul>
+<li>In <code>[start | last segment]</code>, the read starts at <code>e′ = max(e − s, 0)</code>, so
+its entry <code>j &lt; width</code> is at <code>i = e′ + j</code>.</li>
+<li>In <code>[start | samples]</code>, that entry is at <code>i</code> for <code>i &lt; width</code> (an entry of
+<code>start</code>), else at <code>i + s</code>.</li>
+<li>With no reset, <code>s = 0</code>, and the read is <code>[e, e + width)</code> of
+<code>[start | samples]</code>.</li>
+</ul>
+<p>A last segment that holds only padding has <code>e ≤ s</code>, and its read is
+<code>start</code>: the field of the origin.</p>
+<h2 id="one-narrow"><a class="doc-anchor" href="#one-narrow">§</a>One <code>narrow</code></h2>
+<p>The gather and the <code>cat</code> cost memory. A read is one <code>narrow</code>, with no
+gather, when no row of the call has padding and one of these conditions is
+true:</p>
+<ul>
+<li>The call has no resets.</li>
+<li><code>width</code> is not more than the positions of one token.</li>
+</ul>
+<p>The row end of each row is then the end of the call. A segment holds at
+least one token of the call, so a read of one token or less stays in the
+last segment. A Mamba-3 read has <code>width ≤ u</code>, because a tap reads at most
+<code>u</code> positions back (<code>lag ≤ u</code>) and a positive carry reads 1. A packed
+Mamba-2 call still gathers. Its last segment can be shorter than
+<code>conv_kernel</code>, because a packed call requires only
+<code>chunk_len ≥ conv_kernel − 1</code>.</p>
+<p>When the call holds at least <code>width</code> positions, that <code>narrow</code> reads the
+samples alone, with no <code>cat</code>.</p>
+<p>In the shape suffixes of this module, <code>w</code> is the <code>width</code> of a read.</p>
+</div></details><h2 id="reexports" class="section-header">Re-exports<a href="#reexports" class="anchor">§</a></h2><dl class="item-table reexports"><dt><code>use burn::prelude::*;</code><span title="Restricted Visibility">&nbsp;🔒</span> </dt></dl><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.RowEnd.html" title="struct burn_mamba::row_end::RowEnd">RowEnd</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>The row-end reader of one call: it reads each “last samples” cache field
+at the row end of each row. See the module header.</dd></dl><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.gather_rows.html" title="fn burn_mamba::row_end::gather_rows">gather_<wbr>rows</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>The entries <code>idx_bw</code> of <code>x</code> along <code>axis</code>, one set for each row. Axis 0 is
+the batch.</dd><dt><a class="fn" href="fn.last_segment_start_b.html" title="fn burn_mamba::row_end::last_segment_start_b">last_<wbr>segment_<wbr>start_<wbr>b</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>The first position of the last segment of each row, <code>[batch]</code>. A row with
+no reset gives <code>0</code>.</dd><dt><a class="fn" href="fn.origin_where_reset.html" title="fn burn_mamba::row_end::origin_where_reset">origin_<wbr>where_<wbr>reset</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd><code>incoming</code>, where each row with a reset takes its row of <code>origin</code>: the
+field that the last segment of each row starts from. Axis 0 is the batch.</dd><dt><a class="fn" href="fn.row_end_b.html" title="fn burn_mamba::row_end::row_end_b">row_<wbr>end_<wbr>b</a><span title="Restricted Visibility">&nbsp;🔒</span> </dt><dd>The row end of each row, <code>[batch]</code>: one past its last real position. A row
+with no real position gives <code>0</code>. In a packed row, padded positions can end
+each segment, and only the last real position counts.</dd></dl></section></div></main></body></html>

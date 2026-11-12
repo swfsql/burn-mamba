@@ -93,12 +93,13 @@
 <a href=#93 id=93 data-nosnippet>93</a>
 <a href=#94 id=94 data-nosnippet>94</a><span class="kw">pub mod </span>packing;
 <a href=#95 id=95 data-nosnippet>95</a><span class="kw">mod </span>padding;
-<a href=#96 id=96 data-nosnippet>96</a><span class="doccomment">/// The standard SSD scan on primitives: the forward and the analytic backward
-<a href=#97 id=97 data-nosnippet>97</a>/// that Mamba-2 and the double-SSD pathway of Mamba-3 call.
-<a href=#98 id=98 data-nosnippet>98</a></span><span class="attr">#[cfg(any(feature = <span class="string">"mamba2"</span>, feature = <span class="string">"mamba3"</span>))]
-<a href=#99 id=99 data-nosnippet>99</a></span><span class="kw">pub mod </span>standard_ssd;
-<a href=#100 id=100 data-nosnippet>100</a>
-<a href=#101 id=101 data-nosnippet>101</a><span class="doccomment">/// Re-export of the block-generic composition crate this one builds on, so a
-<a href=#102 id=102 data-nosnippet>102</a>/// dependent can reach `Layer`/`Layers`/networks without naming it separately.
-<a href=#103 id=103 data-nosnippet>103</a></span><span class="kw">pub use </span>burn_stack;
+<a href=#96 id=96 data-nosnippet>96</a><span class="kw">mod </span>row_end;
+<a href=#97 id=97 data-nosnippet>97</a><span class="doccomment">/// The standard SSD scan on primitives: the forward and the analytic backward
+<a href=#98 id=98 data-nosnippet>98</a>/// that Mamba-2 and the double-SSD pathway of Mamba-3 call.
+<a href=#99 id=99 data-nosnippet>99</a></span><span class="attr">#[cfg(any(feature = <span class="string">"mamba2"</span>, feature = <span class="string">"mamba3"</span>))]
+<a href=#100 id=100 data-nosnippet>100</a></span><span class="kw">pub mod </span>standard_ssd;
+<a href=#101 id=101 data-nosnippet>101</a>
+<a href=#102 id=102 data-nosnippet>102</a><span class="doccomment">/// Re-export of the block-generic composition crate this one builds on, so a
+<a href=#103 id=103 data-nosnippet>103</a>/// dependent can reach `Layer`/`Layers`/networks without naming it separately.
+<a href=#104 id=104 data-nosnippet>104</a></span><span class="kw">pub use </span>burn_stack;
 </code></pre></div></section></main></body></html>

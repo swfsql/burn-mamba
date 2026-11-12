@@ -94,7 +94,7 @@ padding).</li>
 block has a learnable initial state, <a href="struct.Mamba2.html#method.forward" title="method burn_mamba::mamba2::mamba2::Mamba2::forward"><code>Mamba2::forward</code></a> adds it to
 this state.</li>
 </ul>
-</div></details></div></details><details class="toggle implementors-toggle" open><summary><section id="impl-Mamba2-1" class="impl"><a class="src rightside" href="../../../src/burn_mamba/mamba2/mamba2.rs.html#1087-1289">Source</a><a href="#impl-Mamba2-1" class="anchor">§</a><h3 class="code-header">impl <a class="struct" href="struct.Mamba2.html" title="struct burn_mamba::mamba2::mamba2::Mamba2">Mamba2</a></h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.step" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba2/mamba2.rs.html#1111-1288">Source</a><h4 class="code-header">pub fn <a href="#method.step" class="fn">step</a>(
+</div></details></div></details><details class="toggle implementors-toggle" open><summary><section id="impl-Mamba2-1" class="impl"><a class="src rightside" href="../../../src/burn_mamba/mamba2/mamba2.rs.html#1069-1271">Source</a><a href="#impl-Mamba2-1" class="anchor">§</a><h3 class="code-header">impl <a class="struct" href="struct.Mamba2.html" title="struct burn_mamba::mamba2::mamba2::Mamba2">Mamba2</a></h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.step" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba2/mamba2.rs.html#1093-1270">Source</a><h4 class="code-header">pub fn <a href="#method.step" class="fn">step</a>(
     &amp;self,
     input_bm: Tensor&lt;2&gt;,
     cache: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="struct" href="../cache/struct.Mamba2Cache.html" title="struct burn_mamba::mamba2::cache::Mamba2Cache">Mamba2Cache</a>&gt;,
@@ -124,7 +124,7 @@ or <code>in_proj</code> then <a href="struct.Mamba2.html#structfield.in_proj_tai
 <a href="enum.Mamba2Untied.html#variant.InProjTail" title="variant burn_mamba::mamba2::mamba2::Mamba2Untied::InProjTail"><code>Mamba2Untied::InProjTail</code></a>.</p>
 </div></details><details class="toggle method-toggle" open><summary><section id="method.untied_params" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba2/mamba2.rs.html#252-281">Source</a><h4 class="code-header">pub fn <a href="#method.untied_params" class="fn">untied_params</a>(&amp;self) -&gt; <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;UntiedParam&gt;</h4></section></summary><div class="docblock"><p>The parameters held once per application (<a href="struct.Mamba2.html#structfield.untied" title="field burn_mamba::mamba2::mamba2::Mamba2::untied"><code>Self::untied</code></a>), each with
 the axis its copies lie along. See [<code>burn_stack::utils::untied</code>].</p>
-</div></details></div></details><details class="toggle implementors-toggle" open><summary><section id="impl-Mamba2-3" class="impl"><a class="src rightside" href="../../../src/burn_mamba/mamba2/mamba2.rs.html#649-1078">Source</a><a href="#impl-Mamba2-3" class="anchor">§</a><h3 class="code-header">impl <a class="struct" href="struct.Mamba2.html" title="struct burn_mamba::mamba2::mamba2::Mamba2">Mamba2</a></h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.forward" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba2/mamba2.rs.html#691-699">Source</a><h4 class="code-header">pub fn <a href="#method.forward" class="fn">forward</a>(
+</div></details></div></details><details class="toggle implementors-toggle" open><summary><section id="impl-Mamba2-3" class="impl"><a class="src rightside" href="../../../src/burn_mamba/mamba2/mamba2.rs.html#649-1060">Source</a><a href="#impl-Mamba2-3" class="anchor">§</a><h3 class="code-header">impl <a class="struct" href="struct.Mamba2.html" title="struct burn_mamba::mamba2::mamba2::Mamba2">Mamba2</a></h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.forward" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba2/mamba2.rs.html#691-699">Source</a><h4 class="code-header">pub fn <a href="#method.forward" class="fn">forward</a>(
     &amp;self,
     input_bsm: Tensor&lt;3&gt;,
     cache: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="struct" href="../cache/struct.Mamba2Cache.html" title="struct burn_mamba::mamba2::cache::Mamba2Cache">Mamba2Cache</a>&gt;,
@@ -159,7 +159,7 @@ final state.</p>
 <p><code>pad_bs</code> (<code>true</code> at padding, <code>None</code> ⇒ no padding) marks a right-padded
 batch. A padded position is absent. It gets <code>Δ = 0</code> (the same identity update
 as the chunk padding above), and each row reads its conv window at its
-own end (see <a href="../../prelude/trait.Block.html#tymethod.block_forward" title="method burn_mamba::prelude::Block::block_forward"><code>burn_stack::modules::Block::block_forward</code></a>).</p>
+row end (see <a href="../../prelude/trait.Block.html#tymethod.block_forward" title="method burn_mamba::prelude::Block::block_forward"><code>burn_stack::modules::Block::block_forward</code></a>).</p>
 <h6 id="shapes-1"><a class="doc-anchor" href="#shapes-1">§</a>Shapes</h6>
 <ul>
 <li><code>input_bsm</code> : <code>[batch, sequence, d_model]</code></li>
@@ -167,7 +167,7 @@ own end (see <a href="../../prelude/trait.Block.html#tymethod.block_forward" tit
 <li>output      : <code>[batch, sequence, d_model]</code></li>
 <li>cache (out) : updated convolution window and state</li>
 </ul>
-</div></details><details class="toggle method-toggle" open><summary><section id="method.forward_packed" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba2/mamba2.rs.html#721-1018">Source</a><h4 class="code-header">pub fn <a href="#method.forward_packed" class="fn">forward_packed</a>(
+</div></details><details class="toggle method-toggle" open><summary><section id="method.forward_packed" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba2/mamba2.rs.html#721-1000">Source</a><h4 class="code-header">pub fn <a href="#method.forward_packed" class="fn">forward_packed</a>(
     &amp;self,
     input_bsm: Tensor&lt;3&gt;,
     cache: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="struct" href="../cache/struct.Mamba2Cache.html" title="struct burn_mamba::mamba2::cache::Mamba2Cache">Mamba2Cache</a>&gt;,
@@ -192,7 +192,7 @@ The result for each sequence is that of its own <code>forward</code> calls from
 positions before it, and the SSD carry between chunks restarts from the state of
 <code>origin</code>. Only <a href="../ssd/ssd_path/enum.Mamba2SsdPath.html#variant.Serial" title="variant burn_mamba::mamba2::ssd::ssd_path::Mamba2SsdPath::Serial"><code>Mamba2SsdPath::Serial</code></a> and
 <a href="../ssd/ssd_path/enum.Mamba2SsdPath.html#variant.SerialRecalculated" title="variant burn_mamba::mamba2::ssd::ssd_path::Mamba2SsdPath::SerialRecalculated"><code>Mamba2SsdPath::SerialRecalculated</code></a> take resets.</p>
-</div></details><details class="toggle method-toggle" open><summary><section id="method.conv_packed" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba2/mamba2.rs.html#1037-1077">Source</a><h4 class="code-header">fn <a href="#method.conv_packed" class="fn">conv_packed</a>(
+</div></details><details class="toggle method-toggle" open><summary><section id="method.conv_packed" class="method"><a class="src rightside" href="../../../src/burn_mamba/mamba2/mamba2.rs.html#1019-1059">Source</a><h4 class="code-header">fn <a href="#method.conv_packed" class="fn">conv_packed</a>(
     &amp;self,
     xbc_padded_bvS: Tensor&lt;3&gt;,
     origin_bvk: Tensor&lt;3&gt;,

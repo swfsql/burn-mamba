@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["fill_padded","real_end_b","repeat_positions","window"]};
+window.SIDEBAR_ITEMS = {"fn":["fill_padded","repeat_positions"]};

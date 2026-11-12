@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["OpRestarts"],"fn":["chunk_heads","chunk_resets","last_origin","last_start_b","placeholder","restart_heads","restart_window","segment_start"],"struct":["Restarts","Segments"]};
+window.SIDEBAR_ITEMS = {"enum":["OpRestarts"],"fn":["chunk_heads","chunk_resets","placeholder","restart_heads","segment_start"],"struct":["Restarts","Segments"]};
