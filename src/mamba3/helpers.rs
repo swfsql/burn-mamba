@@ -390,9 +390,15 @@ pub fn tail_decay(da_bsh: Tensor<3>, lag: usize) -> Option<Tensor<3>> {
         return None;
     }
     let sequence = da_bsh.dims()[1];
-    // Only the tail window matters, so the cumulative sum is over `lag` terms,
-    // never over the decay of the whole sequence.
-    let tail_blh = da_bsh.narrow(1, sequence - lag, lag);
+    // Only the last `lag` positions matter, so the cumulative sum is over
+    // `lag` terms, never over the decay of the whole sequence. An input of
+    // exactly `lag` positions is these positions, and a `narrow` would only
+    // add a node to the graph.
+    let tail_blh = if sequence == lag {
+        da_bsh
+    } else {
+        da_bsh.narrow(1, sequence - lag, lag)
+    };
     let cumulative_blh = tail_blh.cumsum(1);
     let total_b1h = cumulative_blh.clone().narrow(1, lag - 1, 1);
     Some((total_b1h - cumulative_blh).exp())
@@ -466,7 +472,7 @@ impl TrapezoidCoeffs {
     /// - the rotation (which advances by `Δ`) does not move.
     ///
     /// `log_precision` stays as is. Only causal sites read it, and each row
-    /// takes its carry at its own end.
+    /// takes its carry at its row end.
     pub fn padded(self, pad_bs: Option<&Tensor<2, Bool>>) -> Self {
         let Some(pad_bs) = pad_bs else {
             return self;

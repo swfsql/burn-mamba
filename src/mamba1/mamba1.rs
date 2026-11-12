@@ -380,7 +380,7 @@ impl Mamba1 {
     ///
     /// `pad_bs` (`true` at padding, `None` ⇒ no padding) is right padding. A
     /// padded position is absent: it has `Δ = 0`, and each row reads its conv
-    /// window at its own end (see [`burn_stack::modules::Block::block_forward`]).
+    /// window at its row end (see [`burn_stack::modules::Block::block_forward`]).
     ///
     /// # Shapes
     ///   - Input `[batch, sequence, d_model]`
@@ -416,6 +416,17 @@ impl Mamba1 {
             let conv_in_bis = xs_bsi.transpose();
             assert_eq!([batch, d_inner, sequence], conv_in_bis.dims());
 
+            // Update the conv window: the last conv_kernel columns of the
+            // window followed by the input, before the row end of each row.
+            let new_conv_bik = crate::row_end::RowEnd::new(pad_bs.as_ref(), None, 1).read(
+                conv_in_bis.clone(),
+                2,
+                conv_kernel,
+                cache.conv_bik.clone(),
+                None,
+            );
+            assert_eq!([batch, d_inner, conv_kernel], new_conv_bik.dims());
+
             // Left-pad with the last (conv_kernel - 1) columns of the cached
             // window so the convolution is strictly causal and continues the
             // previous window.
@@ -430,23 +441,7 @@ impl Mamba1 {
                 [batch, d_inner, (conv_kernel - 1) + sequence],
                 conv_in_padded.dims()
             );
-
-            // Update the conv window: the last conv_kernel columns of the padded
-            // input — under padding, of each row's real ones, read off the
-            // whole previous window followed by the input.
-            cache.conv_bik = match &pad_bs {
-                None => conv_in_padded.clone().narrow(2, sequence - 1, conv_kernel),
-                Some(pad_bs) => {
-                    let input_bis = conv_in_padded.clone().narrow(2, conv_kernel - 1, sequence);
-                    crate::padding::window(
-                        Tensor::cat(vec![cache.conv_bik.clone(), input_bis], 2),
-                        2,
-                        crate::padding::real_end_b(pad_bs),
-                        conv_kernel,
-                    )
-                }
-            };
-            assert_eq!([batch, d_inner, conv_kernel], cache.conv_bik.dims());
+            cache.conv_bik = new_conv_bik;
 
             let xs = self.conv1d.forward(conv_in_padded);
             assert_eq!([batch, d_inner, sequence], xs.dims());

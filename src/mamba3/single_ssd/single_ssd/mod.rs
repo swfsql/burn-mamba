@@ -128,7 +128,7 @@ impl Mamba3 {
         let PlantEntry {
             mut cache,
             packed,
-            end_b,
+            row_end,
             z_bti,
             x_bshp,
             b_bsmhr,
@@ -408,7 +408,7 @@ impl Mamba3 {
                 x_bshp,
                 log_precision_bsh,
                 tropical_ab_bsh,
-                end_b,
+                row_end,
                 packed,
                 new_rotation,
                 new_tap_fifo,

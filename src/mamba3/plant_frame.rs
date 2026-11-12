@@ -35,9 +35,10 @@ use crate::mamba3::cache::{Mamba3FrameCache, TapFifo};
 use crate::mamba3::double_ssd::prelude::Mamba3DoubleSsdCache;
 use crate::mamba3::helpers;
 use crate::mamba3::in_proj_layout::GroupKey;
-use crate::mamba3::mamba3::{Mamba3, Packed};
+use crate::mamba3::mamba3::{Mamba3, PackedCall};
 use crate::mamba3::product::last_micro4;
 use crate::mamba3::rotation::{RotationState, rotate_bc_forward};
+use crate::row_end::RowEnd;
 use crate::standard_ssd;
 use burn::prelude::*;
 use burn_stack::modules::{Silu, sanity as san};
@@ -84,9 +85,9 @@ pub(crate) struct PlantEntry {
     /// The cache of the call: the one that the caller gave, or a fresh one.
     pub cache: Mamba3DoubleSsdCache,
     /// The resets and the origin of a packed call.
-    pub packed: Option<Packed>,
-    /// One past the last real write position of each row, for a padded call.
-    pub end_b: Option<Tensor<1, Int>>,
+    pub packed: Option<PackedCall>,
+    /// The row-end reader of the call, on the write axis.
+    pub row_end: RowEnd,
     /// The gate.
     pub z_bti: Tensor<3>,
     /// The value stream.
@@ -124,8 +125,8 @@ pub(crate) struct PlantTail {
     pub x_bshp: Tensor<4>,
     pub log_precision_bsh: Option<Tensor<3>>,
     pub tropical_ab_bsh: Option<(Tensor<3>, Tensor<3>)>,
-    pub end_b: Option<Tensor<1, Int>>,
-    pub packed: Option<Packed>,
+    pub row_end: RowEnd,
+    pub packed: Option<PackedCall>,
     pub new_rotation: RotationState,
     pub new_tap_fifo: Option<TapFifo>,
 }
@@ -165,11 +166,8 @@ impl Mamba3 {
         assert_eq!(nheads % ngroups, 0);
         san(&input_btd);
 
-        // A padded token pads all of its micro-steps. `end_b` is one past the
-        // last real position of each row on the write axis, where its cache
-        // fields are read.
+        // A padded token pads all of its micro-steps.
         let pad_bs = pad_bt.map(|pad_bt| crate::padding::repeat_positions(pad_bt, u));
-        let end_b = pad_bs.as_ref().map(crate::padding::real_end_b);
 
         // ── Initialise the caches that the caller did not give ────────────────
         let fresh = || Mamba3DoubleSsdCache::from(self.zero_cache(batch, &device));
@@ -179,11 +177,18 @@ impl Mamba3 {
         let packed = resets.map(|PlantResets { reset_bt, origin, chunk_len }| {
             let chunk_tokens = standard_ssd::chunk_tokens(chunk_len, u);
             let reset_bn = crate::packing::chunk_resets(reset_bt, chunk_tokens);
-            Packed {
+            PackedCall {
                 segments: crate::packing::Segments::new(reset_bn, chunk_len, sequence),
                 origin: origin.unwrap_or_else(fresh),
             }
         });
+        // Each "last samples" cache field is read at the row end of each row,
+        // on the write axis, where one token is `u` positions.
+        let row_end = RowEnd::new(
+            pad_bs.as_ref(),
+            packed.as_ref().map(|p| (&p.segments.reset_bn, p.segments.chunk_len)),
+            u,
+        );
 
         // ── In-projection ─────────────────────────────────────────────────────
         let proj_btd = self.project_in(input_btd);
@@ -281,21 +286,23 @@ impl Mamba3 {
         // ── Save the B and x of the last `lag` positions for the cache ────────
         // These are exactly the positions whose taps the next call must pay.
         // So the trapezoid continues unchanged across a split prefill (at
-        // `lag = u`, that window is exactly the last token). With no β tap
-        // there is nothing to continue, and the FIFO stays empty.
+        // `lag = u`, these positions are exactly the last token). Each row
+        // reads them at its row end. With no β tap there is nothing to
+        // continue, and the FIFO stays empty.
         let new_tap_fifo = self.save_tap_slots(
             &b_bsmhr,
             &x_bshp,
             &da_bsh,
             self.tap_lag(),
-            end_b.clone().map(|end_b| (end_b, cache.frame.tap_fifo.clone())),
-            packed.as_ref(),
+            cache.frame.tap_fifo.clone(),
+            packed.as_ref().and_then(|p| p.origin.frame.tap_fifo.clone()),
+            &row_end,
         );
 
         PlantEntry {
             cache,
             packed,
-            end_b,
+            row_end,
             z_bti,
             x_bshp,
             b_bsmhr,
@@ -331,7 +338,7 @@ impl Mamba3 {
             x_bshp,
             log_precision_bsh,
             tropical_ab_bsh,
-            end_b,
+            row_end,
             packed,
             new_rotation,
             new_tap_fifo,
@@ -344,8 +351,9 @@ impl Mamba3 {
             y_btmhp,
             log_precision_bsh,
             tropical_ab_bsh,
+            cache.frame.log_precision_bh.clone(),
             cache.frame.tropical_bh.clone(),
-            end_b.map(|end_b| (end_b, cache.frame.log_precision_bh.clone())),
+            &row_end,
             packed.as_ref(),
         );
 

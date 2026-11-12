@@ -226,6 +226,7 @@ use crate::mamba3::positive::{Gain, Tropical};
 use crate::mamba3::prelude::*;
 use crate::mamba3::rotation::RotationKind;
 use crate::mamba3::tap_pattern::TapPattern;
+use crate::row_end::RowEnd;
 use burn_stack::modules::sanity as san;
 use burn_stack::modules::{RmsNorm, RmsNormConfig, RmsNormGated, RmsNormGatedConfig};
 use burn::prelude::*;
@@ -523,7 +524,7 @@ impl Mamba3 {
         &self,
         noise_bsh: Option<Tensor<3>>,
         carry_bh: Option<Tensor<2>>,
-        packed: Option<&Packed>,
+        packed: Option<&PackedCall>,
     ) -> Option<crate::mamba3::positive::kalman::GainInput> {
         let log_kappa_h = self.kalman_log_kappa_h.as_ref()?.val();
         let field = "a Kalman gain keeps its ln Λ cache field";
@@ -561,29 +562,31 @@ impl Mamba3 {
     ///
     /// Returns `(y, ln Λ carry, c carry)`.
     ///
-    /// `end` is `(real write positions per row, the incoming ln Λ carry)`
-    /// for a right-padded call. Each carry then comes from the last real
-    /// position of its row, or is the incoming one for a row with none.
+    /// `row_end` reads each carry: the last write position before the row end
+    /// of each row ([`crate::row_end`]). A row with no real position keeps
+    /// the carry that its last segment starts from.
     ///
     /// `packed` marks the resets of a packed call ([`crate::packing`]). The
-    /// register then starts again at each of them from the carry of the origin. A
-    /// carry from before the last reset of a row is that of the origin.
+    /// register then starts again at each of them from the carry of the origin.
+    /// The last segment of a row with a reset starts from the carry of the
+    /// origin.
     ///
     /// # Shapes
-    /// - `y_btmhp`           : `[batch, tokens, mimo_rank, nheads, per_head_dim]`
-    /// - `log_precision_bsh` : `[batch, tokens·u, nheads]`, from the discretisation
-    /// - `tropical_ab_bsh`   : the register's `(a, b)`, each `[batch, tokens·u, nheads]`
-    /// - `tropical_carry_bh` : the cache's `c`, `[batch, nheads]`
-    /// - `end`               : `[batch]`, and the cache's `ln Λ`, `[batch, nheads]`
-    #[allow(clippy::type_complexity)]
+    /// - `y_btmhp`                : `[batch, tokens, mimo_rank, nheads, per_head_dim]`
+    /// - `log_precision_bsh`      : `[batch, tokens·u, nheads]`, from the discretisation
+    /// - `tropical_ab_bsh`        : the register's `(a, b)`, each `[batch, tokens·u, nheads]`
+    /// - `log_precision_carry_bh` : the cache's `ln Λ`, `[batch, nheads]`
+    /// - `tropical_carry_bh`      : the cache's `c`, `[batch, nheads]`
+    #[allow(clippy::type_complexity, clippy::too_many_arguments)]
     pub(crate) fn positive_tail(
         &self,
         y_btmhp: Tensor<5>,
         log_precision_bsh: Option<Tensor<3>>,
         tropical_ab_bsh: Option<(Tensor<3>, Tensor<3>)>,
+        log_precision_carry_bh: Option<Tensor<2>>,
         tropical_carry_bh: Option<Tensor<2>>,
-        end: Option<(Tensor<1, Int>, Option<Tensor<2>>)>,
-        packed: Option<&Packed>,
+        row_end: &RowEnd,
+        packed: Option<&PackedCall>,
     ) -> (Tensor<5>, Option<Tensor<2>>, Option<Tensor<2>>) {
         let u = self.micro_steps;
         let field = "a tropical register keeps its cache field";
@@ -595,43 +598,30 @@ impl Mamba3 {
             });
             crate::mamba3::positive::tropical::register(a_bsh, b_bsh, carry_bh, resets.as_ref())
         });
-        let (end_b, log_precision_carry_bh) = end.unzip();
-        let last_bh = |t_bsh: &Tensor<3>, carry_bh: Option<Tensor<2>>, origin_bh: Option<Tensor<2>>| {
-            match (&end_b, carry_bh) {
-                (Some(end_b), Some(carry_bh)) => {
-                    // The carry that the last segment starts from, then the run.
-                    let start_bh = match (packed, origin_bh) {
-                        (Some(p), Some(origin_bh)) => p.segments.last_origin(carry_bh, origin_bh),
-                        _ => carry_bh,
-                    };
-                    let all_bsh = Tensor::cat(vec![start_bh.unsqueeze_dim::<3>(1), t_bsh.clone()], 1);
-                    match packed {
-                        None => crate::padding::window(all_bsh, 1, end_b.clone(), 1),
-                        Some(p) => crate::packing::restart_window(
-                            all_bsh,
-                            1,
-                            end_b.clone(),
-                            1,
-                            p.segments.last_start_b(),
-                        ),
-                    }
-                    .squeeze_dim::<2>(1)
-                }
-                _ => {
-                    let len = t_bsh.dims()[1];
-                    t_bsh.clone().narrow(1, len - 1, 1).squeeze_dim::<2>(1)
-                }
-            }
+        let last_bh = |t_bsh: &Tensor<3>, carry_bh: Tensor<2>, origin_bh: Option<Tensor<2>>| {
+            row_end
+                .read(
+                    t_bsh.clone(),
+                    1,
+                    1,
+                    carry_bh.unsqueeze_dim::<3>(1),
+                    origin_bh.map(|origin_bh| origin_bh.unsqueeze_dim::<3>(1)),
+                )
+                .squeeze_dim::<2>(1)
         };
         let log_precision_bh = log_precision_bsh.as_ref().map(|t_bsh| {
             last_bh(
                 t_bsh,
-                log_precision_carry_bh.flatten(),
+                log_precision_carry_bh.expect("a Kalman gain keeps its ln Λ cache field"),
                 packed.and_then(|p| p.origin.frame.log_precision_bh.clone()),
             )
         });
         let tropical_bh = tropical_bsh.as_ref().map(|t_bsh| {
-            last_bh(t_bsh, tropical_carry_bh, packed.and_then(|p| p.origin.frame.tropical_bh.clone()))
+            last_bh(
+                t_bsh,
+                tropical_carry_bh.expect(field),
+                packed.and_then(|p| p.origin.frame.tropical_bh.clone()),
+            )
         });
         let read_positions = |t_bsh: Tensor<3>| crate::mamba3::helpers::read_positions::<3, 4>(t_bsh, 1, u);
         let y_btmhp = self.positive_read(
@@ -1512,7 +1502,7 @@ impl Mamba3Config {
 
 /// A packed call of either pathway ([`crate::packing`]): its resets, and the
 /// cache that each segment starts from.
-pub(crate) struct Packed {
+pub(crate) struct PackedCall {
     /// The resets on the write axis.
     pub segments: crate::packing::Segments,
     /// The origin cache. The two pathways have the same fields, and at a
@@ -1540,7 +1530,7 @@ impl Mamba3 {
     ///
     /// - all `u` of its micro-steps are identity micro-steps (no decay, no mass:
     ///   `TrapezoidCoeffs::padded`),
-    /// - each row reads every "last samples" cache field at its own end (see
+    /// - each row reads every "last samples" cache field at its row end (see
     ///   [`burn_stack::modules::Block::block_forward`]).
     ///
     /// # Shapes
@@ -1673,90 +1663,45 @@ impl Mamba3 {
     /// empty, and the slot is the plain last `x`. Both pathways use this
     /// function, so their caches stay field-identical.
     ///
-    /// `end` is `(real write positions per row, the incoming FIFO)` for a
-    /// right-padded call. The slots then hold the last `lag` real positions of
-    /// each row, read from the incoming FIFO followed by this call. For a row
-    /// with no real position, that is the incoming FIFO itself.
+    /// `row_end` reads the slots: the last `lag` write positions before the
+    /// row end of each row ([`crate::row_end`]). It reads them from `incoming`
+    /// (the FIFO of the cache) followed by this call. For a row with no real
+    /// position, the slots are the FIFO that its last segment starts from.
     ///
-    /// `packed` marks the resets of a packed call ([`crate::packing`]). The
-    /// last segment of a slot starts from the FIFO of the origin, so a
-    /// position from before its start is read from that FIFO. Without
-    /// padding, the last `lag` positions are always in the last segment: a
-    /// segment is at least one token, `u ≥ lag` positions.
+    /// `origin` is the FIFO of the origin of a packed call
+    /// ([`crate::packing`]). The last segment of a row with a reset starts from
+    /// it. So `row_end` reads each position from before the start of that
+    /// segment from this FIFO.
     ///
     /// # Shapes
     /// - `b_bsmhr` : `[batch, sequence, mimo_rank, nheads, state_rank]`
     /// - `x_bshp`  : `[batch, sequence, nheads, per_head_dim]`
     /// - `da_bsh`  : `[batch, sequence, nheads]`
-    /// - `end`     : `[batch]`, and the incoming FIFO
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn save_tap_slots(
         &self,
         b_bsmhr: &Tensor<5>,
         x_bshp: &Tensor<4>,
         da_bsh: &Tensor<3>,
         lag: usize,
-        end: Option<(Tensor<1, Int>, Option<TapFifo>)>,
-        packed: Option<&Packed>,
+        incoming: Option<TapFifo>,
+        origin: Option<TapFifo>,
+        row_end: &RowEnd,
     ) -> Option<TapFifo> {
         if lag == 0 {
             return None;
         }
-        let kept = "a β tap keeps its tap FIFO";
-        let end = end.map(|(end_b, prev)| {
-            let TapFifo { b_bumhr: prev_b, x_buhp: prev_x } = prev.expect(kept);
-            // The FIFO that the last segment of each slot starts from.
-            match packed {
-                Some(p) => {
-                    let origin = p.origin.frame.tap_fifo.clone().expect(kept);
-                    (
-                        end_b,
-                        p.segments.last_origin(prev_b, origin.b_bumhr),
-                        p.segments.last_origin(prev_x, origin.x_buhp),
-                    )
-                }
-                None => (end_b, prev_b, prev_x),
-            }
-        });
-        let sequence = x_bshp.dims()[1];
-        let (b_last_bumhr, x_last_buhp, da_bsh) = match end {
-            None => (
-                b_bsmhr.clone().narrow(1, sequence - lag, lag),
-                x_bshp.clone().narrow(1, sequence - lag, lag),
-                da_bsh.clone(),
-            ),
-            Some((end_b, prev_bumhr, prev_buhp)) => {
-                use crate::padding::window;
-                // The incoming slots already carry their decay to the old
-                // boundary, and the padding of a row adds none.
-                let [batch, _, nheads] = da_bsh.dims();
-                let prev_buh = Tensor::zeros([batch, lag, nheads], &da_bsh.device());
-                let b_all = Tensor::cat(vec![prev_bumhr, b_bsmhr.clone()], 1);
-                let x_all = Tensor::cat(vec![prev_buhp, x_bshp.clone()], 1);
-                let da_all = Tensor::cat(vec![prev_buh, da_bsh.clone()], 1);
-                let (b_last, x_last) = match packed {
-                    None => (
-                        window(b_all, 1, end_b.clone(), lag),
-                        window(x_all, 1, end_b.clone(), lag),
-                    ),
-                    Some(p) => {
-                        use crate::packing::restart_window;
-                        let start_b = p.segments.last_start_b();
-                        (
-                            restart_window(b_all, 1, end_b.clone(), lag, start_b.clone()),
-                            restart_window(x_all, 1, end_b.clone(), lag, start_b.clone()),
-                        )
-                    }
-                };
-                let da_last = match packed {
-                    None => window(da_all, 1, end_b, lag),
-                    Some(p) => {
-                        crate::packing::restart_window(da_all, 1, end_b, lag, p.segments.last_start_b())
-                    }
-                };
-                (b_last, x_last, da_last)
-            }
-        };
-        let x_last_buhp = match crate::mamba3::helpers::tail_decay(da_bsh, lag) {
+        let TapFifo { b_bumhr: prev_bumhr, x_buhp: prev_buhp } = incoming.expect("a β tap keeps its tap FIFO");
+        let (origin_bumhr, origin_buhp) = origin.map(|o| (o.b_bumhr, o.x_buhp)).unzip();
+        let b_last_bumhr = row_end.read(b_bsmhr.clone(), 1, lag, prev_bumhr, origin_bumhr);
+        let x_last_buhp = row_end.read(x_bshp.clone(), 1, lag, prev_buhp, origin_buhp);
+        // The decay of the slots. The incoming slots already carry their decay
+        // to the old boundary, and the padding of a row adds none. At
+        // `lag = 1` the one slot has no decay, so the code reads none.
+        let tail_buh = (lag > 1)
+            .then(|| row_end.read_after_zeros(da_bsh.clone(), 1, lag))
+            .and_then(|da_last_buh| crate::mamba3::helpers::tail_decay(da_last_buh, lag));
+        let x_last_buhp = match tail_buh {
             Some(tail_buh) => x_last_buhp * tail_buh.unsqueeze_dim::<4>(3),
             None => x_last_buhp,
         };

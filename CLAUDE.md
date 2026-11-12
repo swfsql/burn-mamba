@@ -222,6 +222,7 @@ A directory `x/` next to a file `x.rs` holds only the `tests.rs` of `x.rs`.
 src/
 ├─ padding.rs            right padding inside a block
 ├─ packing.rs            packed segments (`forward_packed`)
+├─ row_end.rs            `RowEnd`: the read of each "last samples" cache field at the row end
 ├─ standard_ssd/         the standard SSD scan on primitives (ADR-0010)
 │  ├─ kernels.rs         the forward K1–K5, the backward of each kernel
 │  ├─ combined_backward.rs  the assembly of the backward of one SSD call

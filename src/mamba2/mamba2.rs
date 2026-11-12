@@ -681,7 +681,7 @@ impl Mamba2 {
     /// `pad_bs` (`true` at padding, `None` ⇒ no padding) marks a right-padded
     /// batch. A padded position is absent. It gets `Δ = 0` (the same identity update
     /// as the chunk padding above), and each row reads its conv window at its
-    /// own end (see [`burn_stack::modules::Block::block_forward`]).
+    /// row end (see [`burn_stack::modules::Block::block_forward`]).
     ///
     /// ## Shapes
     /// - `input_bsm` : `[batch, sequence, d_model]`
@@ -807,6 +807,24 @@ impl Mamba2 {
         let xbc_bvs = xbc_bsv.transpose();
         assert_eq!([batch, conv_dim, sequence], xbc_bvs.dims());
 
+        // The conv window for the next call: the last `conv_kernel` columns of
+        // the window followed by the input, before the row end of each row.
+        // After a reset, the columns before the start of the last segment come
+        // from the window of the origin, where that segment started.
+        let new_conv_bvk = crate::row_end::RowEnd::new(
+            pad_bs.as_ref(),
+            reset_bn.as_ref().map(|reset_bn| (reset_bn, chunk_len)),
+            1,
+        )
+        .read(
+            xbc_bvs.clone(),
+            2,
+            conv_kernel,
+            cache.conv_bvk.clone(),
+            origin.as_ref().map(|origin| origin.conv_bvk.clone()),
+        );
+        assert_eq!([batch, conv_dim, conv_kernel], new_conv_bvk.dims());
+
         // Build the causally-padded input: [cached tail | new input]
         let xbc_padded_bvS = if conv_kernel >= 2 {
             // Drop the oldest (leftmost) element of the cache, keeping the
@@ -823,43 +841,7 @@ impl Mamba2 {
             xbc_padded_bvS.dims()
         );
         san(&xbc_padded_bvS);
-
-        // Update the cache: keep the last `conv_kernel` columns of the padded
-        // input (from position `sequence - 1`). Under right padding, keep the
-        // last real columns of each row, read from the full previous window
-        // followed by the input. After a reset, the columns before the start
-        // of the last segment come from the window of the origin, where that
-        // segment started.
-        cache.conv_bvk = match (&pad_bs, &reset_bn) {
-            (None, None) => xbc_padded_bvS.clone().slice(s![.., .., (sequence - 1)..]),
-            _ => {
-                let input_bvs = xbc_padded_bvS.clone().narrow(2, conv_kernel - 1, sequence);
-                let start_bvk = match (&reset_bn, &origin) {
-                    (Some(reset_bn), Some(origin)) => crate::packing::last_origin(
-                        cache.conv_bvk.clone(),
-                        origin.conv_bvk.clone(),
-                        reset_bn,
-                    ),
-                    _ => cache.conv_bvk.clone(),
-                };
-                let all_bvK = Tensor::cat(vec![start_bvk, input_bvs], 2);
-                let end_b = match &pad_bs {
-                    Some(pad_bs) => crate::padding::real_end_b(pad_bs),
-                    None => Tensor::full([batch], sequence as i64, &device),
-                };
-                match &reset_bn {
-                    None => crate::padding::window(all_bvK, 2, end_b, conv_kernel),
-                    Some(reset_bn) => crate::packing::restart_window(
-                        all_bvK,
-                        2,
-                        end_b,
-                        conv_kernel,
-                        crate::packing::last_start_b(reset_bn, chunk_len),
-                    ),
-                }
-            }
-        };
-        assert_eq!([batch, conv_dim, conv_kernel], cache.conv_bvk.dims());
+        cache.conv_bvk = new_conv_bvk;
 
         // Apply the depthwise convolution and transpose back to [batch, sequence, conv_dim].
         let xbc_bvs = match (&reset_bn, &origin) {

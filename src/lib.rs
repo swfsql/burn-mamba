@@ -93,6 +93,7 @@ pub mod family;
 
 pub mod packing;
 mod padding;
+mod row_end;
 /// The standard SSD scan on primitives: the forward and the analytic backward
 /// that Mamba-2 and the double-SSD pathway of Mamba-3 call.
 #[cfg(any(feature = "mamba2", feature = "mamba3"))]

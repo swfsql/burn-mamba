@@ -11,50 +11,10 @@
 //!   internal chunk padding uses). With right padding, no real token reads a
 //!   padded one, so nothing else has to know.
 //! - **Every cache field that holds the last few samples of a row** (a conv
-//!   window, a tap FIFO, the carry of a scan) is read at the own end of each
-//!   row: a gather at a per-row offset ([`window`]), with a fixed shape for any
-//!   lengths.
+//!   window, a tap FIFO, the carry of a scan) is read at the row end of each
+//!   row ([`crate::row_end`]).
 
 use burn::prelude::*;
-
-/// One past the last real token of each row, `[batch]`: where the row reads
-/// its cache fields. Under right padding, this is the number of real tokens. In
-/// a packed row ([`crate::packing`]), padded positions can also end each
-/// segment, and only the last real token counts. A row with no real token
-/// gives `0`.
-pub(crate) fn real_end_b(pad_bs: &Tensor<2, Bool>) -> Tensor<1, Int> {
-    let [batch, sequence] = pad_bs.dims();
-    let device = pad_bs.device();
-    Tensor::<1, Int>::arange(1..sequence as i64 + 1, &device)
-        .reshape([1, sequence])
-        .expand([batch, sequence])
-        .mask_fill(pad_bs.clone(), 0)
-        .max_dim(1)
-        .reshape([batch])
-}
-
-/// `width` consecutive positions of `x` along `axis`, from `start_b` in each
-/// row (axis 0 is the batch): the per-row `narrow(axis, start, width)`, as a
-/// fixed-shape gather.
-pub(crate) fn window<const D: usize>(
-    x: Tensor<D>,
-    axis: usize,
-    start_b: Tensor<1, Int>,
-    width: usize,
-) -> Tensor<D> {
-    let [batch] = start_b.dims();
-    let device = x.device();
-    let idx_bw = Tensor::<1, Int>::arange(0..width as i64, &device)
-        .reshape([1, width])
-        .expand([batch, width])
-        .add(start_b.reshape([batch, 1]).expand([batch, width]));
-    let mut shape = [1usize; D];
-    shape[0] = batch;
-    shape[axis] = width;
-    let mut dims = x.dims();
-    dims[axis] = width;
-    x.gather(axis, idx_bw.reshape(shape).expand(dims))
-}
 
 /// `pad_bt` with every position repeated `u` times in place: the padding of a
 /// token spread over its `u` micro-steps on the write axis (`[batch, tokens]`

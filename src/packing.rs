@@ -44,8 +44,7 @@
 //!
 //! The cache that a call returns is that of the last segment of each row. Its
 //! "last samples" fields (conv window, tap FIFO, carries) read the origin for
-//! the entries before the start of that segment (`last_origin`,
-//! `restart_window`).
+//! the entries before the start of that segment (`crate::row_end`).
 //!
 //! Only the serial SSD paths take resets. The inter-chunk decay of `Minimal`
 //! is a `nchunks × nchunks` matrix, which a long packed row makes large.
@@ -169,21 +168,6 @@ pub(crate) fn placeholder<B: Backend, C: CheckpointStrategy, const D: usize>(
     F::<Autodiff<B, C>, D>::zeros([1; D], &like.device(), like.dtype().into()).inner()
 }
 
-/// `cache`, where each row with a reset takes the row of `origin` instead:
-/// the field that the last segment of each row starts from. Axis 0 is the
-/// batch.
-pub(crate) fn last_origin<const D: usize>(
-    cache: Tensor<D>,
-    origin: Tensor<D>,
-    reset_bn: &Tensor<2, Bool>,
-) -> Tensor<D> {
-    let dims = cache.dims();
-    let mut shape = [1usize; D];
-    shape[0] = dims[0];
-    let restarted = reset_bn.clone().any_dim(1).reshape(shape).expand(dims);
-    cache.mask_where(restarted, origin)
-}
-
 /// The reset flag of each chunk, `[batch, nchunks]`: the flag of its first
 /// token. `nchunks = ⌈tokens / chunk_tokens⌉`, so a partial last chunk also
 /// has a flag.
@@ -291,19 +275,6 @@ pub(crate) fn segment_start(reset_bn: &Tensor<2, Bool>, chunk_len: usize, len: u
         .narrow(1, 0, len)
 }
 
-/// `[batch]`: the first position of the last segment of each row, or `0` for
-/// a row with no reset.
-pub(crate) fn last_start_b(reset_bn: &Tensor<2, Bool>, chunk_len: usize) -> Tensor<1, Int> {
-    let [batch, nchunks] = reset_bn.dims();
-    let device = reset_bn.device();
-    (Tensor::<1, Int>::arange(0..nchunks as i64, &device) * chunk_len as i64)
-        .reshape([1, nchunks])
-        .expand([batch, nchunks])
-        .mask_fill(reset_bn.clone().bool_not(), 0)
-        .max_dim(1)
-        .reshape([batch])
-}
-
 /// The resets of a packed call on its write axis (Mamba-3: `micro_steps`
 /// positions per token), with what the sites that read the past need.
 pub(crate) struct Segments {
@@ -337,52 +308,6 @@ impl Segments {
     pub fn restart_heads<const D: usize>(&self, x: Tensor<D>, axis: usize, head: Tensor<D>) -> Tensor<D> {
         restart_heads(x, axis, head, &self.reset_bn, self.chunk_len)
     }
-
-    /// See [`last_start_b`].
-    pub fn last_start_b(&self) -> Tensor<1, Int> {
-        last_start_b(&self.reset_bn, self.chunk_len)
-    }
-
-    /// See [`last_origin`].
-    pub fn last_origin<const D: usize>(&self, cache: Tensor<D>, origin: Tensor<D>) -> Tensor<D> {
-        last_origin(cache, origin, &self.reset_bn)
-    }
-}
-
-/// [`crate::padding::window`] of `x_all` (`[start | row]` along `axis`, where
-/// the `start` field is `width` entries) at `end_b`, as the last segment of
-/// each row sees it. That segment starts from the `start` field, so an entry
-/// from before its start is read from that field instead. `start` is the
-/// field of [`last_origin`]: the origin for a row with a reset, else the
-/// incoming cache. `last_start_b` is `0` for a row with no reset, which gives
-/// the plain window.
-pub(crate) fn restart_window<const D: usize>(
-    x_all: Tensor<D>,
-    axis: usize,
-    end_b: Tensor<1, Int>,
-    width: usize,
-    last_start_b: Tensor<1, Int>,
-) -> Tensor<D> {
-    let [batch] = end_b.dims();
-    let device = x_all.device();
-    let start_bw = last_start_b.reshape([batch, 1]).expand([batch, width]);
-    // In `[start | last segment]`, the window starts at the real length of
-    // the segment (zero for a segment with no real token).
-    let local_end_bw = (end_b.reshape([batch, 1]).expand([batch, width]) - start_bw.clone()).clamp_min(0);
-    let local_bw = Tensor::<1, Int>::arange(0..width as i64, &device)
-        .reshape([1, width])
-        .expand([batch, width])
-        + local_end_bw;
-    // Back to `[start | row]`: a `start` entry stays, a segment entry moves
-    // by the start of the segment.
-    let in_cache_bw = local_bw.clone().lower_elem(width as i64);
-    let idx_bw = local_bw + start_bw.mask_fill(in_cache_bw, 0);
-    let mut shape = [1usize; D];
-    shape[0] = batch;
-    shape[axis] = width;
-    let mut dims = x_all.dims();
-    dims[axis] = width;
-    x_all.gather(axis, idx_bw.reshape(shape).expand(dims))
 }
 
 #[cfg(all(test, feature = "_dev-test", any(feature = "mamba2", feature = "mamba3")))]

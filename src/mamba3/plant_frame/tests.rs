@@ -360,7 +360,7 @@ fn assert_tail(mimo_rank: usize, out_norm: bool, u: usize) {
             x_bshp: x_bshp.clone(),
             log_precision_bsh: None,
             tropical_ab_bsh: None,
-            end_b: None,
+            row_end: RowEnd::new(None, None, u),
             packed: None,
             new_rotation: RotationState::Angle(angle_bha.clone()),
             new_tap_fifo: Some(TapFifo { b_bumhr: b_last_bumhr.clone(), x_buhp: x_last_buhp.clone() }),
