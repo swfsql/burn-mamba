@@ -284,7 +284,7 @@ fn the_precision_is_the_plants_weight_on_ones() {
     for (pattern, u, exact) in [
         (T::HorizontalCarryOver, 1, true),
         (T::HorizontalCarryOver, 3, true),
-        (T::HorizontalReset, 2, true),
+        (T::HorizontalInToken, 2, true),
         (T::VerticalPlusHorizontalCarryOver, 1, true),
         (T::Vertical, 2, false),
         (T::VerticalPlusHorizontalCarryOver, 3, false),
@@ -530,7 +530,7 @@ fn lattice() -> Vec<Case> {
         case(Kalman, Tropical::MaxPlus, T::Vertical, 2, Complex2D, 2, true),
         case(KalmanProjectedNoise, Tropical::None, T::VerticalPlusHorizontalCarryOver, 3, Quaternion4D, 1, false),
         case(Projected, Tropical::MaxPlus, T::None, 2, Real1D, 1, false),
-        case(Kalman, Tropical::None, T::HorizontalReset, 2, Rotor4D, 2, false),
+        case(Kalman, Tropical::None, T::HorizontalInToken, 2, Rotor4D, 2, false),
         case(KalmanProjectedNoise, Tropical::MaxPlus, T::None, 1, Real1D, 1, true),
     ]
 }

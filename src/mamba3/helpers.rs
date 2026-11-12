@@ -413,7 +413,7 @@ pub fn tail_decay(da_bsh: Tensor<3>, lag: usize) -> Option<Tensor<3>> {
 /// `step` (`len` is `u`, so the closed position is its first entry). At
 /// `u = 1` every position is a token start, and the mask is all zeros. That
 /// alone is why
-/// [`TapPattern::HorizontalReset`](crate::mamba3::tap_pattern::TapPattern::HorizontalReset)
+/// [`TapPattern::HorizontalInToken`](crate::mamba3::tap_pattern::TapPattern::HorizontalInToken)
 /// becomes [`None`](crate::mamba3::tap_pattern::TapPattern::None) there.
 ///
 /// Here, the admissibility rule of a pattern becomes a tensor. The caller

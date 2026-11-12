@@ -450,7 +450,7 @@ gam_l = lamp * dtp
 nu_l = (1 - lamp) * dtp
 nu_2 = (1 - RNG.uniform(0, 1, TF)) * dtp
 en_all = np.ones(TF, dtype=bool)
-en_reset = micro != 0
+en_in_token = micro != 0
 
 
 def run_taps(taps, gam=gam_l):
@@ -476,9 +476,9 @@ def collapse_taps(taps, t_idx, gam=gam_l):
 
 LATTICE = {
     "vertical (lag u)": [(U, nu_l, en_all)],
-    "reset-horizontal (lag 1, no carry-over)": [(1, nu_l, en_reset)],
+    "in-token horizontal (lag 1, no carry-over)": [(1, nu_l, en_in_token)],
     "carry-over-horizontal (the default)": [(1, nu_l, en_all)],
-    "vertical + reset-horizontal": [(U, nu_l, en_all), (1, nu_2, en_reset)],
+    "vertical + in-token horizontal": [(U, nu_l, en_all), (1, nu_2, en_in_token)],
     "vertical + carry-over-horizontal": [(U, nu_l, en_all), (1, nu_2, en_all)],
 }
 for name, taps in LATTICE.items():
@@ -506,15 +506,15 @@ ok("at u = 1 that band is the diagonal, i.e. the diagonal correction of lag 1",
    all(band[t, s] == 0.0 for t in range(TF) for s in range(TF) if s <= t and t - s >= U))
 
 Hh = run_taps(LATTICE["carry-over-horizontal (the default)"])
-Hr2 = run_taps(LATTICE["reset-horizontal (lag 1, no carry-over)"])
+Hi = run_taps(LATTICE["in-token horizontal (lag 1, no carry-over)"])
 for a, Ha, b, Hb in [("vertical", Hv, "carry-over", Hh),
-                     ("reset", Hr2, "carry-over", Hh),
-                     ("vertical", Hv, "reset", Hr2)]:
+                     ("in-token", Hi, "carry-over", Hh),
+                     ("vertical", Hv, "in-token", Hi)]:
     ok(f"{a} and {b} are genuinely different models", not close(Ha, Hb, 1e-6))
 
 ok("at u = 1 vertical and carry-over-horizontal coincide",
    close(run_taps([(1, nu_l, en_all)]), Hh))
-ok("at u = 1 reset-horizontal degenerates to no trapezoid at all",
+ok("at u = 1 in-token horizontal degenerates to no trapezoid at all",
    close(run_taps([(1, nu_l, np.zeros(TF, dtype=bool))]), run_taps([])))
 
 # --- the crate's parameterisation of the lattice ----------------------------
@@ -529,17 +529,18 @@ ok("at u = 1 reset-horizontal degenerates to no trapezoid at all",
 # so gamma + nu_int + nu_far = dt at every position, whatever tap is closed.
 mu = RNG.uniform(0.0, 1.0, TF)
 nu_tot = (1 - lamp) * dtp
-# reset-horizontal: no admissible earlier sample at a token's first micro-step,
-# so the whole left-endpoint mass returns to gamma (i.e. lam = 1 there).
-gam_reset = np.where(micro == 0, dtp, gam_l)
-nu_reset = nu_tot * en_reset
+# in-token horizontal: no admissible earlier sample at a token's first
+# micro-step, so the whole left-endpoint mass returns to gamma (i.e. lam = 1
+# there).
+gam_in_token = np.where(micro == 0, dtp, gam_l)
+nu_in_token = nu_tot * en_in_token
 # the two-tap members: the lag-1 tap takes mu of the mass, closing or not.
-nu_int_r, nu_far_r = nu_tot * mu * en_reset, nu_tot * (1 - mu * en_reset)
+nu_int_i, nu_far_i = nu_tot * mu * en_in_token, nu_tot * (1 - mu * en_in_token)
 nu_int_c, nu_far_c = nu_tot * mu, nu_tot * (1 - mu)
 
 CRATE = {
-    "HorizontalReset": ([(1, nu_reset, en_all)], gam_reset),
-    "VerticalPlusHorizontalReset": ([(U, nu_far_r, en_all), (1, nu_int_r, en_all)], gam_l),
+    "HorizontalInToken": ([(1, nu_in_token, en_all)], gam_in_token),
+    "VerticalPlusHorizontalInToken": ([(U, nu_far_i, en_all), (1, nu_int_i, en_all)], gam_l),
     "VerticalPlusHorizontalCarryOver": ([(U, nu_far_c, en_all), (1, nu_int_c, en_all)], gam_l),
 }
 for name, (taps, gam) in CRATE.items():
@@ -551,12 +552,13 @@ for name, (taps, gam) in CRATE.items():
     ok(f"scalar per-sample collapse is exact: {name}",
        all(close(collapse_taps(taps, t, gam), Hx[t], 1e-9) for t in range(TF)))
 
-# The reset is a *submodel* of the carry-over, which is what makes the fallback
-# the right rule: saturating lam at each token's first micro-step is exactly it.
-lam_reset = np.where(micro == 0, 1.0, lamp)
-ok("reset-horizontal is carry-over-horizontal with lam = 1 at each token's start",
-   close(run_taps(*CRATE["HorizontalReset"]),
-         run_taps([(1, (1 - lam_reset) * dtp, en_all)], lam_reset * dtp)))
+# HorizontalInToken is a *submodel* of HorizontalCarryOver, which is what makes
+# the fallback the right rule: saturating lam at each token's first micro-step
+# is exactly it.
+lam_in_token = np.where(micro == 0, 1.0, lamp)
+ok("in-token horizontal is carry-over-horizontal with lam = 1 at each token's start",
+   close(run_taps(*CRATE["HorizontalInToken"]),
+         run_taps([(1, (1 - lam_in_token) * dtp, en_all)], lam_in_token * dtp)))
 
 # ...and the always-open two-tap member is the *join* of the two implemented ones:
 # mu is a per-(head, micro-step) interpolation between them, not a third model.
@@ -568,12 +570,12 @@ for label, m, target in [("mu = 1 is carry-over-horizontal", np.ones(TF), Hh),
 
 # At u = 1 the two lags coincide, so the split is a decomposition of ONE
 # coefficient and the pair folds back onto the carry-over -- whatever mu says,
-# and with the lag-1 tap of the reset closed everywhere (every position starts
-# a token).
-en_reset_u1 = np.zeros(TF)
+# and with the lag-1 tap of VerticalPlusHorizontalInToken closed everywhere
+# (every position starts a token).
+en_in_token_u1 = np.zeros(TF)
 for name, taps_u1 in [
-    ("VerticalPlusHorizontalReset",
-     [(1, nu_tot * (1 - mu * en_reset_u1), en_all), (1, nu_tot * mu * en_reset_u1, en_all)]),
+    ("VerticalPlusHorizontalInToken",
+     [(1, nu_tot * (1 - mu * en_in_token_u1), en_all), (1, nu_tot * mu * en_in_token_u1, en_all)]),
     ("VerticalPlusHorizontalCarryOver",
      [(1, nu_tot * (1 - mu), en_all), (1, nu_tot * mu, en_all)]),
 ]:
@@ -584,7 +586,7 @@ for name, taps_u1 in [
 # band correction that is the *lag-u* installment alone -- the lag-1 one is
 # already paid at every read inside the band except the diagonal, which the
 # kernel replaces with gamma outright.
-for name in ("VerticalPlusHorizontalReset", "VerticalPlusHorizontalCarryOver"):
+for name in ("VerticalPlusHorizontalInToken", "VerticalPlusHorizontalCarryOver"):
     taps, gam = CRATE[name]
     (_, nu_far, _), (_, nu_int, _) = taps
     scale2 = gam.copy()

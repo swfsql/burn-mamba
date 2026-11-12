@@ -50,7 +50,7 @@
 //!   (lag 1),
 //! - [`Vertical`](crate::mamba3::tap_pattern::TapPattern::Vertical) (lag `u`),
 //!   which is equal to the default at `u = 1`,
-//! - [`HorizontalReset`](crate::mamba3::tap_pattern::TapPattern::HorizontalReset)
+//! - [`HorizontalInToken`](crate::mamba3::tap_pattern::TapPattern::HorizontalInToken)
 //!   (lag 1, and the tap closes at token boundaries),
 //! - the tapless [`None`](crate::mamba3::tap_pattern::TapPattern::None).
 //!

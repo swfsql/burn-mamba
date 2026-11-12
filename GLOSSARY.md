@@ -165,7 +165,8 @@ _Avoid_: vertical tap, far tap
 **Tap pattern**:
 The choice of which taps exist, and whether the lag-1 tap closes at token
 boundaries.
-_Avoid_: trapezoid (for the choice)
+_Avoid_: trapezoid (for the choice), reset (for a lag-1 tap that closes at
+token boundaries)
 
 **Tap FIFO**:
 The factors `B` and `x` of the last samples, which a cache keeps for the taps

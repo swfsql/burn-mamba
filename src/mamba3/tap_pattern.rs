@@ -22,7 +22,7 @@
 //! admissible gives its mass back one level. The lag-1 tap of a two-tap
 //! member gives it to the lag-`u` tap. The tap at
 //! [`tap_lag`](TapPattern::tap_lag) gives it to `γ`. Under
-//! [`HorizontalReset`](TapPattern::HorizontalReset), that tap is a lag-1 tap.
+//! [`HorizontalInToken`](TapPattern::HorizontalInToken), that tap is a lag-1 tap.
 //! The masses are:
 //!
 //! ```text
@@ -43,7 +43,7 @@
 //! Because of this fallback, the members whose lag-1 tap closes at token
 //! boundaries, and the two-tap members, are *submodels*, not different models:
 //!
-//! - [`HorizontalReset`](TapPattern::HorizontalReset) is
+//! - [`HorizontalInToken`](TapPattern::HorizontalInToken) is
 //!   [`HorizontalCarryOver`](TapPattern::HorizontalCarryOver) with `λ = 1` at
 //!   the first micro-step of each token (the limit of §8).
 //! - [`VerticalPlusHorizontalCarryOver`](TapPattern::VerticalPlusHorizontalCarryOver)
@@ -69,10 +69,10 @@
 /// part). All six cells exist:
 ///
 /// ```text
-///                   no lag-u tap                + lag-u tap
-///   no lag-1 tap    None                        Vertical
-///   reset (j ≥ 1)   HorizontalReset             VerticalPlusHorizontalReset
-///   carry (all j)   HorizontalCarryOver         VerticalPlusHorizontalCarryOver
+///                      no lag-u tap                + lag-u tap
+///   no lag-1 tap       None                        Vertical
+///   in token (j ≥ 1)   HorizontalInToken           VerticalPlusHorizontalInToken
+///   carry (all j)      HorizontalCarryOver         VerticalPlusHorizontalCarryOver
 /// ```
 ///
 /// The single-tap members are one algorithm at two lags
@@ -83,7 +83,7 @@
 ///   [`HorizontalCarryOver`](Self::HorizontalCarryOver),
 /// - the two-tap members are also `HorizontalCarryOver` (they fold and have no
 ///   `μ` channels, see [`has_two_taps`](Self::has_two_taps)),
-/// - [`HorizontalReset`](Self::HorizontalReset) *is* [`None`](Self::None).
+/// - [`HorizontalInToken`](Self::HorizontalInToken) *is* [`None`](Self::None).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum TapPattern {
     /// **No second tap.** `λ ≡ 1`, so `β = 0` and `γ = Δ`: the write is plain
@@ -175,7 +175,7 @@ pub enum TapPattern {
     /// one-slot lag-1 buffer, ignored at the first micro-step of each token.
     /// So the carried value has no effect across a call boundary: the slot is
     /// layout, not information.
-    HorizontalReset,
+    HorizontalInToken,
 
     /// **Lag 1, always** (the default): one tap per position of the write
     /// axis. So `1/u` of the taps cross a token boundary, and `(u−1)/u`
@@ -185,7 +185,7 @@ pub enum TapPattern {
     HorizontalCarryOver,
 
     /// [`Vertical`](Self::Vertical) **and**
-    /// [`HorizontalReset`](Self::HorizontalReset) at once. `μ` shares the
+    /// [`HorizontalInToken`](Self::HorizontalInToken) at once. `μ` shares the
     /// left-endpoint mass between them, so the two jobs do not share one `λ`.
     /// Its tap graph is not a single lag on the write axis. On the
     /// `token × micro-step` grid, *two* taps write cell `(t, j)`: `(t−1, j)`
@@ -211,12 +211,12 @@ pub enum TapPattern {
     ///
     /// Under a Kalman [`Gain`](crate::mamba3::positive::Gain) at `u > 1`, it is
     /// inexact through its lag-`u` tap, as [`Vertical`](Self::Vertical) is.
-    VerticalPlusHorizontalReset,
+    VerticalPlusHorizontalInToken,
 
     /// [`Vertical`](Self::Vertical) **and**
     /// [`HorizontalCarryOver`](Self::HorizontalCarryOver) at once. It has the
     /// same two taps as
-    /// [`VerticalPlusHorizontalReset`](Self::VerticalPlusHorizontalReset), with
+    /// [`VerticalPlusHorizontalInToken`](Self::VerticalPlusHorizontalInToken), with
     /// the lag-1 tap unrestricted. So at `j = 0`, the lag-1 tap reads the
     /// *last* micro-step of the previous token, and the lag-`u` tap reads its
     /// *first*. Both candidates for the left endpoint of the micro-step are always
@@ -228,12 +228,14 @@ pub enum TapPattern {
     /// micro-step), so descent makes here the choice that the rest of this enum
     /// makes at configuration time.
     ///
-    /// Costs over [`VerticalPlusHorizontalReset`](Self::VerticalPlusHorizontalReset):
+    /// Costs over [`VerticalPlusHorizontalInToken`](Self::VerticalPlusHorizontalInToken):
     ///
     /// - nothing in the cache: the **newest** slot of the `u`-deep FIFO *is*
     ///   the lag-1 slot, with the empty decay product,
-    /// - one extra term in the single-SSD boundary seed: the lag-1 tap now
-    ///   crosses a call boundary, which it never does under the reset.
+    /// - one extra term in the single-SSD boundary seed: here the lag-1 tap
+    ///   crosses a call boundary. Under
+    ///   [`VerticalPlusHorizontalInToken`](Self::VerticalPlusHorizontalInToken),
+    ///   it never crosses one.
     ///
     /// Under a Kalman [`Gain`](crate::mamba3::positive::Gain) at `u > 1`, it is
     /// inexact through its lag-`u` tap, as [`Vertical`](Self::Vertical) is.
@@ -267,9 +269,9 @@ impl TapPattern {
     pub fn tap_lag(self, micro_steps: usize) -> usize {
         match self {
             TapPattern::None => 0,
-            TapPattern::HorizontalCarryOver | TapPattern::HorizontalReset => 1,
+            TapPattern::HorizontalCarryOver | TapPattern::HorizontalInToken => 1,
             TapPattern::Vertical
-            | TapPattern::VerticalPlusHorizontalReset
+            | TapPattern::VerticalPlusHorizontalInToken
             | TapPattern::VerticalPlusHorizontalCarryOver => micro_steps,
         }
     }
@@ -289,7 +291,7 @@ impl TapPattern {
         micro_steps > 1
             && matches!(
                 self,
-                TapPattern::VerticalPlusHorizontalReset
+                TapPattern::VerticalPlusHorizontalInToken
                     | TapPattern::VerticalPlusHorizontalCarryOver
             )
     }
@@ -297,10 +299,10 @@ impl TapPattern {
     /// Whether the tap at [`tap_lag`](Self::tap_lag) is admissible at the
     /// **first** micro-step of a token, where it would cross a token boundary.
     /// `false` only for
-    /// [`HorizontalReset`](Self::HorizontalReset), whose left-endpoint mass
+    /// [`HorizontalInToken`](Self::HorizontalInToken), whose left-endpoint mass
     /// then returns to `γ` (module header).
     pub fn tap_crosses_tokens(self) -> bool {
-        self != TapPattern::HorizontalReset
+        self != TapPattern::HorizontalInToken
     }
 
     /// Whether the lag-1 tap of a two-tap member is admissible at the first
@@ -308,7 +310,7 @@ impl TapPattern {
     /// only difference between
     /// [`VerticalPlusHorizontalCarryOver`](Self::VerticalPlusHorizontalCarryOver)
     /// (`true`) and
-    /// [`VerticalPlusHorizontalReset`](Self::VerticalPlusHorizontalReset)
+    /// [`VerticalPlusHorizontalInToken`](Self::VerticalPlusHorizontalInToken)
     /// (`false`). Where it is closed, the share of `μ` returns to the lag-`u`
     /// tap.
     ///
@@ -324,7 +326,7 @@ impl TapPattern {
     /// The state is always one matrix. Only the tap FIFO changes.
     ///
     /// A slot is a *layout*. It does not mean that something crosses the call
-    /// boundary through it: [`HorizontalReset`](Self::HorizontalReset) shares
+    /// boundary through it: [`HorizontalInToken`](Self::HorizontalInToken) shares
     /// the slot of the carry-over and ignores it per token. Also, a second tap
     /// needs no second buffer. The **newest** slot of the `u`-deep FIFO *is*
     /// the lag-1 slot, with the empty decay product, so the two-tap members
@@ -410,10 +412,10 @@ mod tests {
     /// bodies below to iterate over.
     const PATTERNS: [TapPattern; 6] = [
         TapPattern::None,
-        TapPattern::HorizontalReset,
+        TapPattern::HorizontalInToken,
         TapPattern::HorizontalCarryOver,
         TapPattern::Vertical,
-        TapPattern::VerticalPlusHorizontalReset,
+        TapPattern::VerticalPlusHorizontalInToken,
         TapPattern::VerticalPlusHorizontalCarryOver,
     ];
 
@@ -891,7 +893,7 @@ mod tests {
         let path = Mamba3SsdPath::default();
         for pattern in [
             TapPattern::Vertical,
-            TapPattern::VerticalPlusHorizontalReset,
+            TapPattern::VerticalPlusHorizontalInToken,
             TapPattern::VerticalPlusHorizontalCarryOver,
         ] {
             let mut folded: Mamba3 = base.clone().with_tap_pattern(pattern).init(&device);
@@ -922,17 +924,17 @@ mod tests {
         }
     }
 
-    // ── The `…Reset` and two-tap members ──────────────────────────────────
+    // ── The `HorizontalInToken` and two-tap members ───────────────────────
     //
-    // `HorizontalReset` (lag 1, closed at each token's first micro-step) and the
+    // `HorizontalInToken` (lag 1, closed at each token's first micro-step) and the
     // two members that add a lag-1 tap beside the lag-`u` one. The invariants
     // are the same for all three — `forward` on either pathway equals an
     // unrolled `step`, from a fresh cache and from a continued one — and the
     // degeneracy tests below are what pin their *semantics*.
 
-    const RESET_AND_TWO_TAP: [TapPattern; 3] = [
-        TapPattern::HorizontalReset,
-        TapPattern::VerticalPlusHorizontalReset,
+    const IN_TOKEN_AND_TWO_TAP: [TapPattern; 3] = [
+        TapPattern::HorizontalInToken,
+        TapPattern::VerticalPlusHorizontalInToken,
         TapPattern::VerticalPlusHorizontalCarryOver,
     ];
 
@@ -942,7 +944,7 @@ mod tests {
     #[test]
     fn lattice_forward_matches_step() {
         let device = test_device();
-        for pattern in RESET_AND_TWO_TAP {
+        for pattern in IN_TOKEN_AND_TWO_TAP {
             for kind in [
                 RotationKind::Real1D,
                 RotationKind::Complex2D,
@@ -986,7 +988,7 @@ mod tests {
     #[test]
     fn lattice_matches_step_with_mimo() {
         let device = test_device();
-        for pattern in RESET_AND_TWO_TAP {
+        for pattern in IN_TOKEN_AND_TWO_TAP {
             for mimo_rank in [2, 3] {
                 let config = cfg_for(pattern, RotationKind::Complex2D, 2).with_mimo_rank(mimo_rank);
                 let model: Mamba3 = config.init(&device);
@@ -1021,7 +1023,7 @@ mod tests {
     #[test]
     fn lattice_split_prefill_matches() {
         let device = test_device();
-        for pattern in RESET_AND_TWO_TAP {
+        for pattern in IN_TOKEN_AND_TWO_TAP {
             for kind in [RotationKind::Real1D, RotationKind::Complex2D] {
                 let config = cfg_for(pattern, kind, 3);
                 let model: Mamba3 = config.init(&device);
@@ -1049,7 +1051,7 @@ mod tests {
     #[test]
     fn lattice_forward_continues_a_stepped_cache() {
         let device = test_device();
-        for pattern in RESET_AND_TWO_TAP {
+        for pattern in IN_TOKEN_AND_TWO_TAP {
             for micro_steps in [2, 3] {
                 let config = cfg_for(pattern, RotationKind::Complex2D, micro_steps);
                 let model: Mamba3 = config.init(&device);
@@ -1089,7 +1091,7 @@ mod tests {
     #[test]
     fn lattice_grads_match_step() {
         let device = test_device();
-        for pattern in RESET_AND_TWO_TAP {
+        for pattern in IN_TOKEN_AND_TWO_TAP {
             let config = cfg_for(pattern, RotationKind::Complex2D, 2);
             let model: Mamba3 = config.init(&device.clone().autodiff());
             let x = input(&config, 4);
@@ -1159,23 +1161,23 @@ mod tests {
     }
 
     /// At `u = 1` every position is a token's first micro-step, so
-    /// `HorizontalReset`'s tap is closed everywhere and its mass returns to `γ`:
+    /// `HorizontalInToken`'s tap is closed everywhere and its mass returns to `γ`:
     /// the pattern **is** the ablation, whatever `λ` says. Built from a `None`
     /// block plus a live-but-ignored `λ` sub-projection, so the claim is about
     /// the closed tap and not about the projection.
     #[test]
-    fn horizontal_reset_is_none_at_one_micro_step() {
+    fn horizontal_in_token_is_none_at_one_micro_step() {
         let device = test_device();
         let config = cfg()
             .with_rotation(RotationKind::Real1D)
             .with_has_proj_bias(true);
         let none = config.clone().with_tap_pattern(TapPattern::None).init(&device);
-        let mut reset = config
+        let mut in_token = config
             .clone()
-            .with_tap_pattern(TapPattern::HorizontalReset)
+            .with_tap_pattern(TapPattern::HorizontalInToken)
             .init(&device);
-        share_weights_except_in_proj(&none, &mut reset);
-        append_dead_sub_projections(&none, &mut reset, config.nheads(), 0.0, &device);
+        share_weights_except_in_proj(&none, &mut in_token);
+        append_dead_sub_projections(&none, &mut in_token, config.nheads(), 0.0, &device);
 
         let x = input(&config, 6);
         let path = Mamba3SsdPath::default();
@@ -1184,50 +1186,50 @@ mod tests {
         assert_eq!(
             max_abs_diff(
                 none.forward_double_ssd(x.clone(), None, &path, None).0,
-                reset.forward_double_ssd(x.clone(), None, &path, None).0,
+                in_token.forward_double_ssd(x.clone(), None, &path, None).0,
             ),
             0.0,
-            "double: HorizontalReset is None at u = 1"
+            "double: HorizontalInToken is None at u = 1"
         );
         assert_eq!(
-            max_abs_diff(unrolled(&none, &x).0, unrolled(&reset, &x).0),
+            max_abs_diff(unrolled(&none, &x).0, unrolled(&in_token, &x).0),
             0.0,
-            "step: HorizontalReset is None at u = 1"
+            "step: HorizontalInToken is None at u = 1"
         );
         // The single pathway does not delegate here (the pattern *has* a tap),
         // so it reassembles the same numbers by a different route.
         let d = max_abs_diff(
             none.forward_single_ssd(x.clone(), None, &path, None).0,
-            reset.forward_single_ssd(x, None, &path, None).0,
+            in_token.forward_single_ssd(x, None, &path, None).0,
         );
-        assert!(d < dtype_tol(1e-6), "single: HorizontalReset is None at u = 1: {d:.3e}");
+        assert!(d < dtype_tol(1e-6), "single: HorizontalInToken is None at u = 1: {d:.3e}");
     }
 
     /// The semantic claim: closing a tap returns its mass to `γ`,
-    /// i.e. `λ = 1` there — so `HorizontalReset` is exactly
+    /// i.e. `λ = 1` there — so `HorizontalInToken` is exactly
     /// `HorizontalCarryOver` with each token's first micro-step saturated, and a
     /// *submodel* of it rather than a lossy version
     /// (`info/mamba-3/trapezoid-as-integration.md` §8).
     #[test]
-    fn horizontal_reset_is_the_carry_over_with_lambda_saturated() {
+    fn horizontal_in_token_is_the_carry_over_with_lambda_saturated() {
         use burn::module::Param;
         let device = test_device();
         let u = 3;
-        let config = cfg_for(TapPattern::HorizontalReset, RotationKind::Real1D, u)
+        let config = cfg_for(TapPattern::HorizontalInToken, RotationKind::Real1D, u)
             .with_has_proj_bias(true);
-        let reset = config.clone().init(&device);
+        let in_token = config.clone().init(&device);
         let mut carry = config
             .clone()
             .with_tap_pattern(TapPattern::HorizontalCarryOver)
             .init(&device);
-        share_weights_except_in_proj(&reset, &mut carry);
-        carry.in_proj = reset.in_proj.clone();
+        share_weights_except_in_proj(&in_token, &mut carry);
+        carry.in_proj = in_token.in_proj.clone();
 
         let x = input(&config, 4);
         let path = Mamba3SsdPath::default();
         // Not vacuous: with the same weights the two patterns disagree.
         let d = max_abs_diff(
-            reset.forward_single_ssd(x.clone(), None, &path, None).0,
+            in_token.forward_single_ssd(x.clone(), None, &path, None).0,
             carry.forward_single_ssd(x.clone(), None, &path, None).0,
         );
         assert!(d > dtype_tol(1e-4), "the closed tap has to do something: {d:.3e}");
@@ -1237,7 +1239,7 @@ mod tests {
         // Saturate exactly those.
         let nheads = config.nheads();
         let start = config.d_in_proj() - u * nheads;
-        let w = reset.in_proj.weight.val();
+        let w = in_token.in_proj.weight.val();
         let [d_model, width] = w.dims();
         carry.in_proj.weight = Param::from_tensor(Tensor::cat(
             vec![
@@ -1247,7 +1249,7 @@ mod tests {
             ],
             1,
         ));
-        let b = reset.in_proj.bias.as_ref().expect("has_proj_bias").val();
+        let b = in_token.in_proj.bias.as_ref().expect("has_proj_bias").val();
         carry.in_proj.bias = Some(Param::from_tensor(Tensor::cat(
             vec![
                 b.clone().narrow(0, 0, start),
@@ -1262,20 +1264,20 @@ mod tests {
         for (label, a, b) in [
             (
                 "single",
-                reset.forward_single_ssd(x.clone(), None, &path, None).0,
+                in_token.forward_single_ssd(x.clone(), None, &path, None).0,
                 carry.forward_single_ssd(x.clone(), None, &path, None).0,
             ),
             (
                 "double",
-                reset.forward_double_ssd(x.clone(), None, &path, None).0,
+                in_token.forward_double_ssd(x.clone(), None, &path, None).0,
                 carry.forward_double_ssd(x.clone(), None, &path, None).0,
             ),
-            ("step", unrolled(&reset, &x).0, unrolled(&carry, &x).0),
+            ("step", unrolled(&in_token, &x).0, unrolled(&carry, &x).0),
         ] {
             assert_eq!(
                 max_abs_diff(a, b),
                 0.0,
-                "{label}: the reset is the carry-over with λ = 1 at each token's start"
+                "{label}: HorizontalInToken is HorizontalCarryOver with λ = 1 at each token's start"
             );
         }
     }
@@ -1293,8 +1295,8 @@ mod tests {
         let device = test_device();
         for pattern in [
             TapPattern::Vertical,
-            TapPattern::HorizontalReset,
-            TapPattern::VerticalPlusHorizontalReset,
+            TapPattern::HorizontalInToken,
+            TapPattern::VerticalPlusHorizontalInToken,
             TapPattern::VerticalPlusHorizontalCarryOver,
         ] {
             let config = cfg_for(pattern, RotationKind::Complex2D, 3);
@@ -1342,7 +1344,7 @@ mod tests {
         let out_vertical = vertical.forward_single_ssd(x.clone(), None, &path, None).0;
 
         let two_tap: Vec<Tensor<3>> = [
-            TapPattern::VerticalPlusHorizontalReset,
+            TapPattern::VerticalPlusHorizontalInToken,
             TapPattern::VerticalPlusHorizontalCarryOver,
         ]
         .into_iter()
@@ -1357,7 +1359,10 @@ mod tests {
         })
         .collect();
         let d = max_abs_diff(two_tap[0].clone(), two_tap[1].clone());
-        assert!(d > dtype_tol(1e-4), "the reset and the carry-over of one lag: {d:.3e}");
+        assert!(
+            d > dtype_tol(1e-4),
+            "VerticalPlusHorizontalInToken and VerticalPlusHorizontalCarryOver must differ: {d:.3e}"
+        );
     }
 
     /// The join: `VerticalPlusHorizontalCarryOver` **contains** both implemented
@@ -1419,13 +1424,13 @@ mod tests {
     #[test]
     fn tap_slots_follow_the_lag() {
         assert_eq!(TapPattern::None.tap_slots(3), 0);
-        assert_eq!(TapPattern::HorizontalReset.tap_slots(3), 1);
+        assert_eq!(TapPattern::HorizontalInToken.tap_slots(3), 1);
         assert_eq!(TapPattern::HorizontalCarryOver.tap_slots(3), 1);
         assert_eq!(TapPattern::Vertical.tap_slots(3), 3);
-        assert_eq!(TapPattern::VerticalPlusHorizontalReset.tap_slots(3), 3);
+        assert_eq!(TapPattern::VerticalPlusHorizontalInToken.tap_slots(3), 3);
         // At `u = 1` the lag-`u` patterns *are* the lag-1 one, and the two
         // patterns that degenerate to each other agree on the buffer too.
         assert_eq!(TapPattern::Vertical.tap_slots(1), 1);
-        assert_eq!(TapPattern::VerticalPlusHorizontalReset.tap_slots(1), 1);
+        assert_eq!(TapPattern::VerticalPlusHorizontalInToken.tap_slots(1), 1);
     }
 }

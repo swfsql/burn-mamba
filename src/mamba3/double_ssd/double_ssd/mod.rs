@@ -130,7 +130,7 @@ impl Mamba3 {
         // SSD calls. The single-SSD pathway fuses them into its key scale and
         // stays at one. The prefix of the lag-1 tap of a two-tap pattern is the
         // newest slot of the FIFO, which *is* the lag-1 slot, undecayed. It has no effect
-        // under [`TapPattern::VerticalPlusHorizontalReset`], whose `νⁱⁿᵗ` is
+        // under [`TapPattern::VerticalPlusHorizontalInToken`], whose `νⁱⁿᵗ` is
         // zero at every position that would read it.
         //
         // Under [`TapPattern::None`] there is no left endpoint: no shift, no

@@ -580,7 +580,7 @@ fn packed_mamba3_streams_are_the_batch_of_their_sequences() {
         mamba3(R::Quaternion4D, T::Vertical, 3, 2, G::Kalman, Tr::MaxPlus),
         mamba3(R::Rotor4D, T::VerticalPlusHorizontalCarryOver, 2, 1, G::KalmanProjectedNoise, Tr::None),
         mamba3(R::Real1D, T::None, 2, 2, G::Projected, Tr::MaxPlus),
-        mamba3(R::Complex2D, T::HorizontalReset, 3, 1, G::Kalman, Tr::None),
+        mamba3(R::Complex2D, T::HorizontalInToken, 3, 1, G::Kalman, Tr::None),
     ];
     let paths: [fn(Option<usize>) -> Mamba3SsdPath; 2] =
         [Mamba3SsdPath::Serial, Mamba3SsdPath::SerialRecalculated];

@@ -402,15 +402,15 @@ degenerate cases rank them:
 | member | taps | crossings of a token, per token | at `u = 1` |
 |---|---|---|---|
 | `None` | — | `0` | no trapezoid, at any `u` |
-| `HorizontalReset` | lag 1, closed at the first micro-step of each token | `0` | is `None` |
+| `HorizontalInToken` | lag 1, closed at the first micro-step of each token | `0` | is `None` |
 | `HorizontalCarryOver` (default) | lag 1, always | `1` | *is* the baseline |
 | `Vertical` | lag `u`, always | `u` | is `HorizontalCarryOver` |
-| `VerticalPlusHorizontalReset` | both, the lag-1 tap closed | `u` | is `HorizontalCarryOver` |
+| `VerticalPlusHorizontalInToken` | both, the lag-1 tap closed | `u` | is `HorizontalCarryOver` |
 | `VerticalPlusHorizontalCarryOver` | both, always | `u+1` | is `HorizontalCarryOver` |
 
 Every degeneracy is verified:
 
-- `HorizontalReset` alone has no cross-token path at all. So it cannot do the
+- `HorizontalInToken` alone has no cross-token path at all. So it cannot do the
   job that the trapezoid was introduced for. It is a component, not an
   alternative.
 - `Vertical` gives the `u = 1` semantics again at every micro-step: `u`

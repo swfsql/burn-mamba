@@ -245,7 +245,7 @@ fn padded_mamba3_is_each_row_alone() {
         mamba3(R::Quaternion4D, T::Vertical, 3, 2, G::Kalman, Tr::MaxPlus),
         mamba3(R::Rotor4D, T::VerticalPlusHorizontalCarryOver, 2, 1, G::KalmanProjectedNoise, Tr::None),
         mamba3(R::Real1D, T::None, 2, 2, G::Projected, Tr::MaxPlus),
-        mamba3(R::Complex2D, T::HorizontalReset, 3, 1, G::Kalman, Tr::None),
+        mamba3(R::Complex2D, T::HorizontalInToken, 3, 1, G::Kalman, Tr::None),
     ];
     let paths = [
         Mamba3SsdPath::Minimal(Some(6)),
