@@ -230,8 +230,8 @@
 <a href=#230 id=230 data-nosnippet>230</a>            d_final_bhpr,
 <a href=#231 id=231 data-nosnippet>231</a>            keep_bn,
 <a href=#232 id=232 data-nosnippet>232</a>        );
-<a href=#233 id=233 data-nosnippet>233</a>    <span class="comment">// The start state of chunk `c` is `origin + seedᶜ`: the origin gets the
-<a href=#234 id=234 data-nosnippet>234</a>    // sum over the chunks, and each seed its own chunk.
+<a href=#233 id=233 data-nosnippet>233</a>    <span class="comment">// The start state of a chunk `c` with a reset is `origin + seedᶜ`. So the
+<a href=#234 id=234 data-nosnippet>234</a>    // origin gets the sum over the chunks, and each seed gets its own chunk.
 <a href=#235 id=235 data-nosnippet>235</a>    </span><span class="kw">let </span>d_origin_bhpr = d_start_state_bnhpr
 <a href=#236 id=236 data-nosnippet>236</a>        .clone()
 <a href=#237 id=237 data-nosnippet>237</a>        .map(|d_start_state_bnhpr| d_start_state_bnhpr.sum_dim(<span class="number">1</span>).squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>));

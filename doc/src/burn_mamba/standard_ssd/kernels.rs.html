@@ -441,11 +441,11 @@
 <a href=#441 id=441 data-nosnippet>441</a>/// product.
 <a href=#442 id=442 data-nosnippet>442</a>///
 <a href=#443 id=443 data-nosnippet>443</a>/// Under a reset (`keep_bn`), `sᵢ = keepᵢ · (the state before chunk i) +
-<a href=#444 id=444 data-nosnippet>444</a>/// (1 − keepᵢ) · startᵢ`, where `startᵢ` is the start state of chunk `i`. So
-<a href=#445 id=445 data-nosnippet>445</a>/// the gradient that goes on to chunk `i − 1` is `keepᵢ · d_sᵢ`, and `startᵢ`
-<a href=#446 id=446 data-nosnippet>446</a>/// gets `(1 − keepᵢ) · d_sᵢ`. The call starts from `initial`, so it gets what
-<a href=#447 id=447 data-nosnippet>447</a>/// the walk leaves at the end. `sᵢ` in `d_decay` is already the state after
-<a href=#448 id=448 data-nosnippet>448</a>/// the reset (the caller recomputed it).
+<a href=#444 id=444 data-nosnippet>444</a>/// (1 − keepᵢ) · startᵢ`, where `startᵢ` is the start state that chunk `i`
+<a href=#445 id=445 data-nosnippet>445</a>/// takes at a reset. So the gradient that goes on to chunk `i − 1` is
+<a href=#446 id=446 data-nosnippet>446</a>/// `keepᵢ · d_sᵢ`, and `startᵢ` gets `(1 − keepᵢ) · d_sᵢ`. The call starts
+<a href=#447 id=447 data-nosnippet>447</a>/// from `initial`, so it gets what the walk leaves at the end. `sᵢ` in
+<a href=#448 id=448 data-nosnippet>448</a>/// `d_decay` is already the state after the reset (the caller recomputed it).
 <a href=#449 id=449 data-nosnippet>449</a>///
 <a href=#450 id=450 data-nosnippet>450</a>/// # Returns
 <a href=#451 id=451 data-nosnippet>451</a>/// - `d_intra_chunk_state_bnhpr` — gradient of K3's per-chunk contribution
