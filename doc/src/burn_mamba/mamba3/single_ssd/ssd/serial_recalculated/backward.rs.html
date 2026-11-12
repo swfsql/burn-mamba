@@ -12,7 +12,7 @@
 <a href=#12 id=12 data-nosnippet>12</a></span><span class="kw">use </span><span class="kw">crate</span>::mamba3::single_ssd::ssd::serial_recalculated::{
 <a href=#13 id=13 data-nosnippet>13</a>    Mamba3SingleSsdBackendExt, OpSeeds, combined_backward::combined_backward,
 <a href=#14 id=14 data-nosnippet>14</a>};
-<a href=#15 id=15 data-nosnippet>15</a><span class="kw">use </span><span class="kw">crate</span>::packing::OpRestarts;
+<a href=#15 id=15 data-nosnippet>15</a><span class="kw">use </span><span class="kw">crate</span>::packing::OpResets;
 <a href=#16 id=16 data-nosnippet>16</a><span class="kw">use </span>burn::backend::Backend;
 <a href=#17 id=17 data-nosnippet>17</a><span class="kw">use </span>burn::backend::autodiff::{Autodiff, checkpoint::strategy::CheckpointStrategy};
 <a href=#18 id=18 data-nosnippet>18</a><span class="kw">use </span>burn::backend::tensor::FloatTensor;
@@ -60,7 +60,7 @@
 <a href=#60 id=60 data-nosnippet>60</a>            inputs.initial_state_bhpr,
 <a href=#61 id=61 data-nosnippet>61</a>            extra.read_stride,
 <a href=#62 id=62 data-nosnippet>62</a>            extra.siso_specialization,
-<a href=#63 id=63 data-nosnippet>63</a>            OpRestarts::from_recompute(extra.keep_bn.clone(), inputs.origin_bhpr),
+<a href=#63 id=63 data-nosnippet>63</a>            OpResets::from_recompute(extra.keep_bn.clone(), inputs.origin_bhpr),
 <a href=#64 id=64 data-nosnippet>64</a>            OpSeeds::from_recompute(extra.seeded, inputs.seed_bnhpr),
 <a href=#65 id=65 data-nosnippet>65</a>        )
 <a href=#66 id=66 data-nosnippet>66</a>    }
@@ -83,7 +83,7 @@
 <a href=#83 id=83 data-nosnippet>83</a>            F::new(inputs.initial_state_bhpr),
 <a href=#84 id=84 data-nosnippet>84</a>            extra.read_stride,
 <a href=#85 id=85 data-nosnippet>85</a>            extra.siso_specialization,
-<a href=#86 id=86 data-nosnippet>86</a>            OpRestarts::from_recompute(extra.keep_bn, inputs.origin_bhpr).into_option(),
+<a href=#86 id=86 data-nosnippet>86</a>            OpResets::from_recompute(extra.keep_bn, inputs.origin_bhpr).into_option(),
 <a href=#87 id=87 data-nosnippet>87</a>            OpSeeds::from_recompute(extra.seeded, inputs.seed_bnhpr).into_option(),
 <a href=#88 id=88 data-nosnippet>88</a>        );
 <a href=#89 id=89 data-nosnippet>89</a>        Inputs {
@@ -113,10 +113,10 @@
 <a href=#113 id=113 data-nosnippet>113</a>        initial_state_bhpr: FloatTensor&lt;<span class="self">Self</span>&gt;,
 <a href=#114 id=114 data-nosnippet>114</a>        read_stride: usize,
 <a href=#115 id=115 data-nosnippet>115</a>        siso_specialization: bool,
-<a href=#116 id=116 data-nosnippet>116</a>        restarts: OpRestarts&lt;<span class="self">Self</span>&gt;,
+<a href=#116 id=116 data-nosnippet>116</a>        resets: OpResets&lt;<span class="self">Self</span>&gt;,
 <a href=#117 id=117 data-nosnippet>117</a>        seeds: OpSeeds&lt;<span class="self">Self</span>&gt;,
 <a href=#118 id=118 data-nosnippet>118</a>    ) -&gt; (FloatTensor&lt;<span class="self">Self</span>&gt;, FloatTensor&lt;<span class="self">Self</span>&gt;) {
-<a href=#119 id=119 data-nosnippet>119</a>        <span class="kw">let </span>(keep_bn, origin_bhpr) = restarts.into_recompute(<span class="kw-2">&amp;</span>v_bnlmhp);
+<a href=#119 id=119 data-nosnippet>119</a>        <span class="kw">let </span>(keep_bn, origin_bhpr) = resets.into_recompute(<span class="kw-2">&amp;</span>v_bnlmhp);
 <a href=#120 id=120 data-nosnippet>120</a>        <span class="kw">let </span>(seeded, seed_bnhpr) = seeds.into_recompute(<span class="kw-2">&amp;</span>v_bnlmhp);
 <a href=#121 id=121 data-nosnippet>121</a>        recompute_pair::&lt;B, C, SsdRecompute, <span class="kw">_</span>&gt;(
 <a href=#122 id=122 data-nosnippet>122</a>            Inputs {

@@ -94,12 +94,12 @@
 <a href=#94 id=94 data-nosnippet>94</a>    /// - `[nheads, per_head_dim, state_rank]`
 <a href=#95 id=95 data-nosnippet>95</a>    </span><span class="kw">pub </span>init_state_hpr: <span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">3</span>&gt;&gt;,
 <a href=#96 id=96 data-nosnippet>96</a>    <span class="doccomment">/// The chunks that start a new segment of a packed row, and the origin
-<a href=#97 id=97 data-nosnippet>97</a>    /// state. The carry into each of these chunks restarts from the origin
+<a href=#97 id=97 data-nosnippet>97</a>    /// state. The start state of each of these chunks is the origin state
 <a href=#98 id=98 data-nosnippet>98</a>    /// (see [`crate::packing`]). The call itself starts from
 <a href=#99 id=99 data-nosnippet>99</a>    /// `initial_state_bhpr`.
 <a href=#100 id=100 data-nosnippet>100</a>    /// `None` ⇒ no reset. Only the two serial paths take it.
 <a href=#101 id=101 data-nosnippet>101</a>    /// [`Mamba2SsdPath::Minimal`] panics when it is `Some`.
-<a href=#102 id=102 data-nosnippet>102</a>    </span><span class="kw">pub </span>restarts: <span class="prelude-ty">Option</span>&lt;<span class="kw">crate</span>::packing::Restarts&gt;,
+<a href=#102 id=102 data-nosnippet>102</a>    </span><span class="kw">pub </span>resets: <span class="prelude-ty">Option</span>&lt;<span class="kw">crate</span>::packing::SsdResets&gt;,
 <a href=#103 id=103 data-nosnippet>103</a>}
 <a href=#104 id=104 data-nosnippet>104</a>
 <a href=#105 id=105 data-nosnippet>105</a><span class="kw">impl </span>Mamba2SsdInput {
@@ -165,7 +165,7 @@
 <a href=#165 id=165 data-nosnippet>165</a>        <span class="kw">match </span>path {
 <a href=#166 id=166 data-nosnippet>166</a>            Mamba2SsdPath::Minimal(<span class="kw">_</span>) =&gt; {
 <a href=#167 id=167 data-nosnippet>167</a>                <span class="macro">assert!</span>(
-<a href=#168 id=168 data-nosnippet>168</a>                    <span class="self">self</span>.restarts.is_none(),
+<a href=#168 id=168 data-nosnippet>168</a>                    <span class="self">self</span>.resets.is_none(),
 <a href=#169 id=169 data-nosnippet>169</a>                    <span class="string">"Minimal does not take resets: use Serial or SerialRecalculated"
 <a href=#170 id=170 data-nosnippet>170</a>                </span>);
 <a href=#171 id=171 data-nosnippet>171</a>                <span class="self">self</span>.ssd_minimal()

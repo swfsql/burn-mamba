@@ -123,20 +123,20 @@
 <a href=#123 id=123 data-nosnippet>123</a>    </span><span class="kw">pub </span>siso_specialization: bool,
 <a href=#124 id=124 data-nosnippet>124</a>
 <a href=#125 id=125 data-nosnippet>125</a>    <span class="doccomment">/// The chunks that start a new segment of a packed row, and the origin
-<a href=#126 id=126 data-nosnippet>126</a>    /// state. The carry into each of these chunks restarts from the origin
+<a href=#126 id=126 data-nosnippet>126</a>    /// state. The start state of each of these chunks comes from the origin
 <a href=#127 id=127 data-nosnippet>127</a>    /// (see [`crate::packing`]). `None` ⇒ no reset. Only the two serial paths
 <a href=#128 id=128 data-nosnippet>128</a>    /// take it. `Minimal` panics when it is `Some`.
 <a href=#129 id=129 data-nosnippet>129</a>    ///
-<a href=#130 id=130 data-nosnippet>130</a>    /// At a reset, no `ν` is paid forward across it. The chunk restarts from
-<a href=#131 id=131 data-nosnippet>131</a>    /// the origin state plus its own boundary seed (`seed_bnhpr`), as a call
-<a href=#132 id=132 data-nosnippet>132</a>    /// from the origin does. The call itself starts from
+<a href=#130 id=130 data-nosnippet>130</a>    /// At a reset, no `ν` is paid forward across it. The start state of the
+<a href=#131 id=131 data-nosnippet>131</a>    /// chunk is the origin state plus its own boundary seed (`seed_bnhpr`). A
+<a href=#132 id=132 data-nosnippet>132</a>    /// call from the origin starts the same way. The call itself starts from
 <a href=#133 id=133 data-nosnippet>133</a>    /// `initial_state_bhpr`. As without resets, that accumulator holds the
 <a href=#134 id=134 data-nosnippet>134</a>    /// seed of the call.
-<a href=#135 id=135 data-nosnippet>135</a>    </span><span class="kw">pub </span>restarts: <span class="prelude-ty">Option</span>&lt;<span class="kw">crate</span>::packing::Restarts&gt;,
+<a href=#135 id=135 data-nosnippet>135</a>    </span><span class="kw">pub </span>resets: <span class="prelude-ty">Option</span>&lt;<span class="kw">crate</span>::packing::SsdResets&gt;,
 <a href=#136 id=136 data-nosnippet>136</a>
 <a href=#137 id=137 data-nosnippet>137</a>    <span class="doccomment">/// The boundary β seed of each chunk, with resets: the installments that
 <a href=#138 id=138 data-nosnippet>138</a>    /// the first `lag` positions of a chunk pay to the tap FIFO of the
-<a href=#139 id=139 data-nosnippet>139</a>    /// origin, in case the chunk restarts. `None` without resets.
+<a href=#139 id=139 data-nosnippet>139</a>    /// origin, in case the chunk has a reset. `None` without resets.
 <a href=#140 id=140 data-nosnippet>140</a>    ///
 <a href=#141 id=141 data-nosnippet>141</a>    /// # Shape
 <a href=#142 id=142 data-nosnippet>142</a>    /// - `[batch, nchunks, nheads, per_head_dim, state_rank]`
@@ -176,7 +176,7 @@
 <a href=#176 id=176 data-nosnippet>176</a>        <span class="kw">match </span>path {
 <a href=#177 id=177 data-nosnippet>177</a>            Mamba3SsdPath::Minimal(<span class="kw">_</span>) =&gt; {
 <a href=#178 id=178 data-nosnippet>178</a>                <span class="macro">assert!</span>(
-<a href=#179 id=179 data-nosnippet>179</a>                    <span class="self">self</span>.restarts.is_none(),
+<a href=#179 id=179 data-nosnippet>179</a>                    <span class="self">self</span>.resets.is_none(),
 <a href=#180 id=180 data-nosnippet>180</a>                    <span class="string">"Minimal does not take resets: use Serial or SerialRecalculated"
 <a href=#181 id=181 data-nosnippet>181</a>                </span>);
 <a href=#182 id=182 data-nosnippet>182</a>                <span class="self">self</span>.single_ssd_minimal()

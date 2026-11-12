@@ -13,7 +13,7 @@
 <a href=#13 id=13 data-nosnippet>13</a></span><span class="kw">use </span><span class="kw">crate</span>::mamba2::ssd::serial_recalculated::{
 <a href=#14 id=14 data-nosnippet>14</a>    Mamba2BackendExt, combined_backward::combined_backward,
 <a href=#15 id=15 data-nosnippet>15</a>};
-<a href=#16 id=16 data-nosnippet>16</a><span class="kw">use </span><span class="kw">crate</span>::packing::OpRestarts;
+<a href=#16 id=16 data-nosnippet>16</a><span class="kw">use </span><span class="kw">crate</span>::packing::OpResets;
 <a href=#17 id=17 data-nosnippet>17</a><span class="kw">use </span>burn::backend::Backend;
 <a href=#18 id=18 data-nosnippet>18</a><span class="kw">use </span>burn::backend::autodiff::{Autodiff, checkpoint::strategy::CheckpointStrategy};
 <a href=#19 id=19 data-nosnippet>19</a><span class="kw">use </span>burn::backend::tensor::FloatTensor;
@@ -54,7 +54,7 @@
 <a href=#54 id=54 data-nosnippet>54</a>            inputs.d_h,
 <a href=#55 id=55 data-nosnippet>55</a>            inputs.initial_state_bhpr,
 <a href=#56 id=56 data-nosnippet>56</a>            inputs.a_decay_h,
-<a href=#57 id=57 data-nosnippet>57</a>            OpRestarts::from_recompute(extra.keep_bn.clone(), inputs.origin_bhpr),
+<a href=#57 id=57 data-nosnippet>57</a>            OpResets::from_recompute(extra.keep_bn.clone(), inputs.origin_bhpr),
 <a href=#58 id=58 data-nosnippet>58</a>        )
 <a href=#59 id=59 data-nosnippet>59</a>    }
 <a href=#60 id=60 data-nosnippet>60</a>
@@ -74,7 +74,7 @@
 <a href=#74 id=74 data-nosnippet>74</a>            F::new(inputs.d_h),
 <a href=#75 id=75 data-nosnippet>75</a>            F::new(inputs.initial_state_bhpr),
 <a href=#76 id=76 data-nosnippet>76</a>            F::new(inputs.a_decay_h),
-<a href=#77 id=77 data-nosnippet>77</a>            OpRestarts::from_recompute(extra.keep_bn, inputs.origin_bhpr).into_option(),
+<a href=#77 id=77 data-nosnippet>77</a>            OpResets::from_recompute(extra.keep_bn, inputs.origin_bhpr).into_option(),
 <a href=#78 id=78 data-nosnippet>78</a>        );
 <a href=#79 id=79 data-nosnippet>79</a>        Inputs {
 <a href=#80 id=80 data-nosnippet>80</a>            x_bnlhp: <span class="prelude-val">Some</span>(grads.d_x_bnlhp.inner()),
@@ -98,9 +98,9 @@
 <a href=#98 id=98 data-nosnippet>98</a>        d_h: FloatTensor&lt;<span class="self">Self</span>&gt;,
 <a href=#99 id=99 data-nosnippet>99</a>        initial_state_bhpr: FloatTensor&lt;<span class="self">Self</span>&gt;,
 <a href=#100 id=100 data-nosnippet>100</a>        a_decay_h: FloatTensor&lt;<span class="self">Self</span>&gt;,
-<a href=#101 id=101 data-nosnippet>101</a>        restarts: OpRestarts&lt;<span class="self">Self</span>&gt;,
+<a href=#101 id=101 data-nosnippet>101</a>        resets: OpResets&lt;<span class="self">Self</span>&gt;,
 <a href=#102 id=102 data-nosnippet>102</a>    ) -&gt; (FloatTensor&lt;<span class="self">Self</span>&gt;, FloatTensor&lt;<span class="self">Self</span>&gt;) {
-<a href=#103 id=103 data-nosnippet>103</a>        <span class="kw">let </span>(keep_bn, origin_bhpr) = restarts.into_recompute(<span class="kw-2">&amp;</span>x_bnlhp);
+<a href=#103 id=103 data-nosnippet>103</a>        <span class="kw">let </span>(keep_bn, origin_bhpr) = resets.into_recompute(<span class="kw-2">&amp;</span>x_bnlhp);
 <a href=#104 id=104 data-nosnippet>104</a>        recompute_pair::&lt;B, C, SsdRecompute, <span class="kw">_</span>&gt;(
 <a href=#105 id=105 data-nosnippet>105</a>            Inputs {
 <a href=#106 id=106 data-nosnippet>106</a>                x_bnlhp,

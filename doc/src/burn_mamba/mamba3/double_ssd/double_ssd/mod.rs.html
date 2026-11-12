@@ -153,8 +153,8 @@
 <a href=#153 id=153 data-nosnippet>153</a>                    <span class="kw">let </span>TapFifo { b_bumhr: b_head_bumhr, x_buhp: x_head_buhp } =
 <a href=#154 id=154 data-nosnippet>154</a>                        head(<span class="kw-2">&amp;</span>p.origin.frame.tap_fifo, lag);
 <a href=#155 id=155 data-nosnippet>155</a>                    (
-<a href=#156 id=156 data-nosnippet>156</a>                        p.segments.restart_heads(x_prev_bshp, <span class="number">1</span>, x_head_buhp),
-<a href=#157 id=157 data-nosnippet>157</a>                        p.segments.restart_heads(b_prev_bsmhr, <span class="number">1</span>, b_head_bumhr),
+<a href=#156 id=156 data-nosnippet>156</a>                        p.segments.origin_heads(x_prev_bshp, <span class="number">1</span>, x_head_buhp),
+<a href=#157 id=157 data-nosnippet>157</a>                        p.segments.origin_heads(b_prev_bsmhr, <span class="number">1</span>, b_head_bumhr),
 <a href=#158 id=158 data-nosnippet>158</a>                    )
 <a href=#159 id=159 data-nosnippet>159</a>                }
 <a href=#160 id=160 data-nosnippet>160</a>                <span class="prelude-val">None </span>=&gt; (x_prev_bshp, b_prev_bsmhr),
@@ -249,9 +249,9 @@
 <a href=#249 id=249 data-nosnippet>249</a>        </span><span class="kw">let </span>mimo_x_hmp = <span class="self">self</span>.mimo_x_hmp.as_ref().map(|p| p.val());
 <a href=#250 id=250 data-nosnippet>250</a>        <span class="kw">let </span>v_gamma_bnlmhp =
 <a href=#251 id=251 data-nosnippet>251</a>            helpers::build_v_with_mimo::&lt;<span class="number">5</span>, <span class="number">6</span>&gt;(x_gamma_bnlhp.clone(), mimo_x_hmp.as_ref(), <span class="number">3</span>);
-<a href=#252 id=252 data-nosnippet>252</a>        <span class="comment">// Every pass restarts its carry at the same chunks: the passes are
-<a href=#253 id=253 data-nosnippet>253</a>        // the terms of one state. The γ pass holds the state of the origin,
-<a href=#254 id=254 data-nosnippet>254</a>        // and a β pass restarts from zero, as it starts a call.
+<a href=#252 id=252 data-nosnippet>252</a>        <span class="comment">// Every pass has the same resets: the passes are the terms of one
+<a href=#253 id=253 data-nosnippet>253</a>        // state. The γ pass holds the state of the origin. The start state of
+<a href=#254 id=254 data-nosnippet>254</a>        // a β pass is zero, as at the start of a call.
 <a href=#255 id=255 data-nosnippet>255</a>        </span><span class="kw">let </span>reset_bn = packed.as_ref().map(|p| p.segments.reset_bn.clone());
 <a href=#256 id=256 data-nosnippet>256</a>
 <a href=#257 id=257 data-nosnippet>257</a>        <span class="kw">let </span>input_gamma = Mamba3DoubleSsdInput {
@@ -262,7 +262,7 @@
 <a href=#262 id=262 data-nosnippet>262</a>            initial_state_bhpr: cache.ssm_bhpr,
 <a href=#263 id=263 data-nosnippet>263</a>            init_state_hpr: <span class="self">self</span>.init_state_hpr.as_ref().map(|s| s.val()),
 <a href=#264 id=264 data-nosnippet>264</a>            read_stride: u,
-<a href=#265 id=265 data-nosnippet>265</a>            restarts: packed.as_ref().map(|p| <span class="kw">crate</span>::packing::Restarts {
+<a href=#265 id=265 data-nosnippet>265</a>            resets: packed.as_ref().map(|p| <span class="kw">crate</span>::packing::SsdResets {
 <a href=#266 id=266 data-nosnippet>266</a>                reset_bn: p.segments.reset_bn.clone(),
 <a href=#267 id=267 data-nosnippet>267</a>                origin_bhpr: p.origin.ssm_bhpr.clone(),
 <a href=#268 id=268 data-nosnippet>268</a>            }),
@@ -287,7 +287,7 @@
 <a href=#287 id=287 data-nosnippet>287</a>                    initial_state_bhpr: zero_bhpr.clone(),
 <a href=#288 id=288 data-nosnippet>288</a>                    init_state_hpr: <span class="prelude-val">None</span>,
 <a href=#289 id=289 data-nosnippet>289</a>                    read_stride: u,
-<a href=#290 id=290 data-nosnippet>290</a>                    restarts: reset_bn.clone().map(|reset_bn| <span class="kw">crate</span>::packing::Restarts {
+<a href=#290 id=290 data-nosnippet>290</a>                    resets: reset_bn.clone().map(|reset_bn| <span class="kw">crate</span>::packing::SsdResets {
 <a href=#291 id=291 data-nosnippet>291</a>                        reset_bn,
 <a href=#292 id=292 data-nosnippet>292</a>                        origin_bhpr: zero_bhpr,
 <a href=#293 id=293 data-nosnippet>293</a>                    }),

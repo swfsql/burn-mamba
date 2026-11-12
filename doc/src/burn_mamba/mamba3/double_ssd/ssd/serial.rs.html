@@ -88,7 +88,7 @@
 <a href=#88 id=88 data-nosnippet>88</a>                intra_chunk_state_bnhpr,
 <a href=#89 id=89 data-nosnippet>89</a>                da_chunk_end_bhn,
 <a href=#90 id=90 data-nosnippet>90</a>                input.initial_state_bhpr,
-<a href=#91 id=91 data-nosnippet>91</a>                input.restarts,
+<a href=#91 id=91 data-nosnippet>91</a>                input.resets,
 <a href=#92 id=92 data-nosnippet>92</a>                <span class="prelude-val">None</span>,
 <a href=#93 id=93 data-nosnippet>93</a>            );
 <a href=#94 id=94 data-nosnippet>94</a>        <span class="macro">assert_eq!</span>(
@@ -254,14 +254,14 @@
 <a href=#254 id=254 data-nosnippet>254</a>/// - `intra_chunk_state_bnhpr`: `[batch, nchunks, nheads, per_head_dim, state_rank]`
 <a href=#255 id=255 data-nosnippet>255</a>/// - `da_chunk_end_bhn`: `[batch, nheads, nchunks]` — total log-decay per chunk
 <a href=#256 id=256 data-nosnippet>256</a>/// - `initial_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
-<a href=#257 id=257 data-nosnippet>257</a>/// - `restarts`: the chunks that start a new segment of a packed row
+<a href=#257 id=257 data-nosnippet>257</a>/// - `resets`: the chunks that start a new segment of a packed row
 <a href=#258 id=258 data-nosnippet>258</a>///   ([`crate::packing`]) and the origin state, or `None`. The state that
-<a href=#259 id=259 data-nosnippet>259</a>///   goes into such a chunk is its **restart state**, as at the start of a
+<a href=#259 id=259 data-nosnippet>259</a>///   goes into such a chunk is its **start state**, as at the start of a
 <a href=#260 id=260 data-nosnippet>260</a>///   call from the origin. The select also stops the gradient to the state
 <a href=#261 id=261 data-nosnippet>261</a>///   before it.
 <a href=#262 id=262 data-nosnippet>262</a>/// - `seed_bnhpr`: the single-SSD boundary seed of each chunk (see
-<a href=#263 id=263 data-nosnippet>263</a>///   `Mamba3SingleSsdInput::seed_bnhpr`), or `None`. The restart state of
-<a href=#264 id=264 data-nosnippet>264</a>///   chunk `c` is `origin + seedᶜ`. Without it, the restart state is `origin`.
+<a href=#263 id=263 data-nosnippet>263</a>///   `Mamba3SingleSsdInput::seed_bnhpr`), or `None`. The start state of
+<a href=#264 id=264 data-nosnippet>264</a>///   chunk `c` is `origin + seedᶜ`. Without it, the start state is `origin`.
 <a href=#265 id=265 data-nosnippet>265</a>///   The call starts from `initial` either way.
 <a href=#266 id=266 data-nosnippet>266</a>///
 <a href=#267 id=267 data-nosnippet>267</a>/// # Returns
@@ -271,7 +271,7 @@
 <a href=#271 id=271 data-nosnippet>271</a>    intra_chunk_state_bnhpr: Tensor&lt;<span class="number">5</span>&gt;,
 <a href=#272 id=272 data-nosnippet>272</a>    da_chunk_end_bhn: Tensor&lt;<span class="number">3</span>&gt;,
 <a href=#273 id=273 data-nosnippet>273</a>    initial_state_bhpr: Tensor&lt;<span class="number">4</span>&gt;,
-<a href=#274 id=274 data-nosnippet>274</a>    restarts: <span class="prelude-ty">Option</span>&lt;<span class="kw">crate</span>::packing::Restarts&gt;,
+<a href=#274 id=274 data-nosnippet>274</a>    resets: <span class="prelude-ty">Option</span>&lt;<span class="kw">crate</span>::packing::SsdResets&gt;,
 <a href=#275 id=275 data-nosnippet>275</a>    seed_bnhpr: <span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">5</span>&gt;&gt;,
 <a href=#276 id=276 data-nosnippet>276</a>) -&gt; (Tensor&lt;<span class="number">5</span>&gt;, Tensor&lt;<span class="number">4</span>&gt;) {
 <a href=#277 id=277 data-nosnippet>277</a>    <span class="kw">let </span>[batch, nchunks, nheads, per_head_dim, state_rank] = intra_chunk_state_bnhpr.dims();
@@ -285,24 +285,24 @@
 <a href=#285 id=285 data-nosnippet>285</a>    chunk_input_state_vec_bhpr.push(running_state_bhpr.clone());
 <a href=#286 id=286 data-nosnippet>286</a>
 <a href=#287 id=287 data-nosnippet>287</a>    <span class="kw">for </span>i_chunk <span class="kw">in </span><span class="number">0</span>..nchunks {
-<a href=#288 id=288 data-nosnippet>288</a>        <span class="comment">// A chunk that starts a segment starts from its restart state. (A
-<a href=#289 id=289 data-nosnippet>289</a>        // learnable `init_state_hpr` would join it, but only `Minimal` takes
-<a href=#290 id=290 data-nosnippet>290</a>        // one.)
-<a href=#291 id=291 data-nosnippet>291</a>        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(restarts) = <span class="kw-2">&amp;</span>restarts {
-<a href=#292 id=292 data-nosnippet>292</a>            <span class="kw">let </span>reset_bhpr = restarts
+<a href=#288 id=288 data-nosnippet>288</a>        <span class="comment">// A chunk that starts a segment takes its start state
+<a href=#289 id=289 data-nosnippet>289</a>        // (`origin + seedᶜ`, or `origin`) in place of the carry. (A learnable
+<a href=#290 id=290 data-nosnippet>290</a>        // `init_state_hpr` would join it, but only `Minimal` takes one.)
+<a href=#291 id=291 data-nosnippet>291</a>        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(resets) = <span class="kw-2">&amp;</span>resets {
+<a href=#292 id=292 data-nosnippet>292</a>            <span class="kw">let </span>reset_bhpr = resets
 <a href=#293 id=293 data-nosnippet>293</a>                .reset_bn
 <a href=#294 id=294 data-nosnippet>294</a>                .clone()
 <a href=#295 id=295 data-nosnippet>295</a>                .slice(<span class="macro">s!</span>[.., i_chunk])
 <a href=#296 id=296 data-nosnippet>296</a>                .reshape([batch, <span class="number">1</span>, <span class="number">1</span>, <span class="number">1</span>])
 <a href=#297 id=297 data-nosnippet>297</a>                .expand([batch, nheads, per_head_dim, state_rank]);
-<a href=#298 id=298 data-nosnippet>298</a>            <span class="kw">let </span>restart_bhpr = <span class="kw">match </span><span class="kw-2">&amp;</span>seed_bnhpr {
+<a href=#298 id=298 data-nosnippet>298</a>            <span class="kw">let </span>start_state_bhpr = <span class="kw">match </span><span class="kw-2">&amp;</span>seed_bnhpr {
 <a href=#299 id=299 data-nosnippet>299</a>                <span class="prelude-val">Some</span>(seed_bnhpr) =&gt; {
-<a href=#300 id=300 data-nosnippet>300</a>                    restarts.origin_bhpr.clone()
+<a href=#300 id=300 data-nosnippet>300</a>                    resets.origin_bhpr.clone()
 <a href=#301 id=301 data-nosnippet>301</a>                        + seed_bnhpr.clone().narrow(<span class="number">1</span>, i_chunk, <span class="number">1</span>).squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>)
 <a href=#302 id=302 data-nosnippet>302</a>                }
-<a href=#303 id=303 data-nosnippet>303</a>                <span class="prelude-val">None </span>=&gt; restarts.origin_bhpr.clone(),
+<a href=#303 id=303 data-nosnippet>303</a>                <span class="prelude-val">None </span>=&gt; resets.origin_bhpr.clone(),
 <a href=#304 id=304 data-nosnippet>304</a>            };
-<a href=#305 id=305 data-nosnippet>305</a>            running_state_bhpr = running_state_bhpr.mask_where(reset_bhpr, restart_bhpr);
+<a href=#305 id=305 data-nosnippet>305</a>            running_state_bhpr = running_state_bhpr.mask_where(reset_bhpr, start_state_bhpr);
 <a href=#306 id=306 data-nosnippet>306</a>            <span class="kw-2">*</span>chunk_input_state_vec_bhpr.last_mut().unwrap() = running_state_bhpr.clone();
 <a href=#307 id=307 data-nosnippet>307</a>        }
 <a href=#308 id=308 data-nosnippet>308</a>

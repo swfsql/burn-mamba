@@ -16,7 +16,7 @@
 <a href=#16 id=16 data-nosnippet>16</a>//! per-backend impls.
 <a href=#17 id=17 data-nosnippet>17</a>
 <a href=#18 id=18 data-nosnippet>18</a></span><span class="kw">use </span><span class="kw">crate</span>::mamba2::prelude::<span class="kw-2">*</span>;
-<a href=#19 id=19 data-nosnippet>19</a><span class="kw">use </span><span class="kw">crate</span>::packing::OpRestarts;
+<a href=#19 id=19 data-nosnippet>19</a><span class="kw">use </span><span class="kw">crate</span>::packing::OpResets;
 <a href=#20 id=20 data-nosnippet>20</a><span class="kw">use </span><span class="kw">crate</span>::standard_ssd;
 <a href=#21 id=21 data-nosnippet>21</a><span class="kw">use </span>burn_stack::utils::fprim::{F, san};
 <a href=#22 id=22 data-nosnippet>22</a><span class="kw">use </span>burn::backend::tensor::FloatTensor;
@@ -54,8 +54,8 @@
 <a href=#54 id=54 data-nosnippet>54</a>        );
 <a href=#55 id=55 data-nosnippet>55</a>
 <a href=#56 id=56 data-nosnippet>56</a>        <span class="comment">// The resets go into the op as a keep factor and the origin state (see
-<a href=#57 id=57 data-nosnippet>57</a>        // `Restarts::op_inputs`).
-<a href=#58 id=58 data-nosnippet>58</a>        </span><span class="kw">let </span>restarts = <span class="kw">crate</span>::packing::Restarts::op_inputs(input.restarts, <span class="kw-2">&amp;</span>input.x_bnlhp);
+<a href=#57 id=57 data-nosnippet>57</a>        // `SsdResets::op_inputs`).
+<a href=#58 id=58 data-nosnippet>58</a>        </span><span class="kw">let </span>resets = <span class="kw">crate</span>::packing::SsdResets::op_inputs(input.resets, <span class="kw-2">&amp;</span>input.x_bnlhp);
 <a href=#59 id=59 data-nosnippet>59</a>
 <a href=#60 id=60 data-nosnippet>60</a>        <span class="comment">// The custom op forms `da` itself (in forward and backward). It gets
 <a href=#61 id=61 data-nosnippet>61</a>        // `a_decay_h` directly, so `da` is not an autodiff-tracked intermediate
@@ -68,7 +68,7 @@
 <a href=#68 id=68 data-nosnippet>68</a>            input.d_h.into_dispatch(),
 <a href=#69 id=69 data-nosnippet>69</a>            input.initial_state_bhpr.into_dispatch(),
 <a href=#70 id=70 data-nosnippet>70</a>            input.a_decay_h.into_dispatch(),
-<a href=#71 id=71 data-nosnippet>71</a>            restarts,
+<a href=#71 id=71 data-nosnippet>71</a>            resets,
 <a href=#72 id=72 data-nosnippet>72</a>        );
 <a href=#73 id=73 data-nosnippet>73</a>        <span class="kw">let </span>y_bnlhp = Tensor::from_dispatch(y_bnlhp);
 <a href=#74 id=74 data-nosnippet>74</a>        <span class="kw">let </span>final_state_bhpr = Tensor::from_dispatch(final_state_bhpr);
@@ -90,8 +90,8 @@
 <a href=#90 id=90 data-nosnippet>90</a>    Autodiff:  cfg(feature = <span class="string">"autodiff"</span>),
 <a href=#91 id=91 data-nosnippet>91</a>)]
 <a href=#92 id=92 data-nosnippet>92</a></span><span class="kw">pub trait </span>Mamba2BackendExt: Backend {
-<a href=#93 id=93 data-nosnippet>93</a>    <span class="doccomment">/// `restarts` gives the chunks that start a new segment of a packed row,
-<a href=#94 id=94 data-nosnippet>94</a>    /// and the state that they start from ([`OpRestarts`]).
+<a href=#93 id=93 data-nosnippet>93</a>    <span class="doccomment">/// `resets` gives the chunks that start a new segment of a packed row,
+<a href=#94 id=94 data-nosnippet>94</a>    /// and the state that they start from ([`OpResets`]).
 <a href=#95 id=95 data-nosnippet>95</a>    ///
 <a href=#96 id=96 data-nosnippet>96</a>    /// Returns:
 <a href=#97 id=97 data-nosnippet>97</a>    /// - `y_bnlhp`.
@@ -105,7 +105,7 @@
 <a href=#105 id=105 data-nosnippet>105</a>        d_h: FloatTensor&lt;<span class="self">Self</span>&gt;,
 <a href=#106 id=106 data-nosnippet>106</a>        initial_state_bhpr: FloatTensor&lt;<span class="self">Self</span>&gt;,
 <a href=#107 id=107 data-nosnippet>107</a>        a_decay_h: FloatTensor&lt;<span class="self">Self</span>&gt;,
-<a href=#108 id=108 data-nosnippet>108</a>        <span class="attr">#[extension_type] </span>restarts: OpRestarts&lt;<span class="self">Self</span>&gt;,
+<a href=#108 id=108 data-nosnippet>108</a>        <span class="attr">#[extension_type] </span>resets: OpResets&lt;<span class="self">Self</span>&gt;,
 <a href=#109 id=109 data-nosnippet>109</a>    ) -&gt; (FloatTensor&lt;<span class="self">Self</span>&gt;, FloatTensor&lt;<span class="self">Self</span>&gt;) {
 <a href=#110 id=110 data-nosnippet>110</a>        <span class="comment">// This body runs under a generic `B`, where the high-level `Tensor`
 <a href=#111 id=111 data-nosnippet>111</a>        // (pinned to `Dispatch`) is not available. So the math uses the
@@ -113,7 +113,7 @@
 <a href=#113 id=113 data-nosnippet>113</a>        </span><span class="kw">let </span>x_bnlhp = F::&lt;<span class="self">Self</span>, <span class="number">5</span>&gt;::new(x_bnlhp);
 <a href=#114 id=114 data-nosnippet>114</a>        <span class="kw">let </span>dt_bnlh = F::&lt;<span class="self">Self</span>, <span class="number">4</span>&gt;::new(dt_discretized_bhnl).permute([<span class="number">0</span>, <span class="number">2</span>, <span class="number">3</span>, <span class="number">1</span>]);
 <a href=#115 id=115 data-nosnippet>115</a>        <span class="kw">let </span>a_decay_111h = F::&lt;<span class="self">Self</span>, <span class="number">1</span>&gt;::new(a_decay_h).unsqueeze_dims::&lt;<span class="number">4</span>&gt;(<span class="kw-2">&amp;</span>[<span class="number">0</span>, <span class="number">1</span>, <span class="number">2</span>]);
-<a href=#116 id=116 data-nosnippet>116</a>        <span class="kw">let </span>restarts = restarts.into_option();
+<a href=#116 id=116 data-nosnippet>116</a>        <span class="kw">let </span>resets = resets.into_option();
 <a href=#117 id=117 data-nosnippet>117</a>
 <a href=#118 id=118 data-nosnippet>118</a>        <span class="kw">let </span>(v_bnlhp, da_bnlh) = scan_inputs(x_bnlhp.clone(), dt_bnlh, a_decay_111h);
 <a href=#119 id=119 data-nosnippet>119</a>        <span class="kw">let </span>(y_bnl1hp, final_state_bhpr) = standard_ssd::forward::&lt;<span class="self">Self</span>&gt;(
@@ -123,7 +123,7 @@
 <a href=#123 id=123 data-nosnippet>123</a>            F::&lt;<span class="self">Self</span>, <span class="number">5</span>&gt;::new(c_bnlhr).unsqueeze_dim::&lt;<span class="number">6</span>&gt;(<span class="number">3</span>),
 <a href=#124 id=124 data-nosnippet>124</a>            F::new(initial_state_bhpr),
 <a href=#125 id=125 data-nosnippet>125</a>            <span class="number">1</span>,
-<a href=#126 id=126 data-nosnippet>126</a>            restarts,
+<a href=#126 id=126 data-nosnippet>126</a>            resets,
 <a href=#127 id=127 data-nosnippet>127</a>        );
 <a href=#128 id=128 data-nosnippet>128</a>
 <a href=#129 id=129 data-nosnippet>129</a>        <span class="comment">// ── SKIP: D[h] · x[l,p] ─────────────────────────────────────────────────

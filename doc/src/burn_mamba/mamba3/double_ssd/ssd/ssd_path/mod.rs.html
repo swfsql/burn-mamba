@@ -68,12 +68,12 @@
 <a href=#68 id=68 data-nosnippet>68</a>    </span><span class="kw">pub </span>init_state_hpr: <span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">3</span>&gt;&gt;,
 <a href=#69 id=69 data-nosnippet>69</a>
 <a href=#70 id=70 data-nosnippet>70</a>    <span class="doccomment">/// The chunks that start a new segment of a packed row, and the origin
-<a href=#71 id=71 data-nosnippet>71</a>    /// state. The carry into each of these chunks restarts from the origin
+<a href=#71 id=71 data-nosnippet>71</a>    /// state. The start state of each of these chunks is the origin state
 <a href=#72 id=72 data-nosnippet>72</a>    /// (see [`crate::packing`]). The call itself starts from
 <a href=#73 id=73 data-nosnippet>73</a>    /// `initial_state_bhpr`.
 <a href=#74 id=74 data-nosnippet>74</a>    /// `None` ⇒ no reset. Only the two serial paths take it. `Minimal` panics
 <a href=#75 id=75 data-nosnippet>75</a>    /// when it is `Some`.
-<a href=#76 id=76 data-nosnippet>76</a>    </span><span class="kw">pub </span>restarts: <span class="prelude-ty">Option</span>&lt;<span class="kw">crate</span>::packing::Restarts&gt;,
+<a href=#76 id=76 data-nosnippet>76</a>    </span><span class="kw">pub </span>resets: <span class="prelude-ty">Option</span>&lt;<span class="kw">crate</span>::packing::SsdResets&gt;,
 <a href=#77 id=77 data-nosnippet>77</a>}
 <a href=#78 id=78 data-nosnippet>78</a>
 <a href=#79 id=79 data-nosnippet>79</a><span class="kw">impl </span>Mamba3DoubleSsdInput {
@@ -104,7 +104,7 @@
 <a href=#104 id=104 data-nosnippet>104</a>        <span class="kw">match </span>path {
 <a href=#105 id=105 data-nosnippet>105</a>            Mamba3SsdPath::Minimal(<span class="kw">_</span>) =&gt; {
 <a href=#106 id=106 data-nosnippet>106</a>                <span class="macro">assert!</span>(
-<a href=#107 id=107 data-nosnippet>107</a>                    <span class="self">self</span>.restarts.is_none(),
+<a href=#107 id=107 data-nosnippet>107</a>                    <span class="self">self</span>.resets.is_none(),
 <a href=#108 id=108 data-nosnippet>108</a>                    <span class="string">"Minimal does not take resets: use Serial or SerialRecalculated"
 <a href=#109 id=109 data-nosnippet>109</a>                </span>);
 <a href=#110 id=110 data-nosnippet>110</a>                <span class="self">self</span>.double_ssd_minimal()

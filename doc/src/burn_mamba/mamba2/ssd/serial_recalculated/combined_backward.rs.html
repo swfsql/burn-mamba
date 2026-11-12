@@ -56,7 +56,7 @@
 <a href=#56 id=56 data-nosnippet>56</a>/// - `d_final_bhpr` — upstream gradient of the final state
 <a href=#57 id=57 data-nosnippet>57</a>/// - `x_bnlhp`, `dt_discretized_bhnl`, `b_bnlhr`, `c_bnlhr`, `d_h`,
 <a href=#58 id=58 data-nosnippet>58</a>///   `initial_state_bhpr`, `a_decay_h` — the seven saved forward inputs
-<a href=#59 id=59 data-nosnippet>59</a>/// - `restarts` — `(keep_bn, origin_bhpr)`, or `None`. `keep_bn` is the
+<a href=#59 id=59 data-nosnippet>59</a>/// - `resets` — `(keep_bn, origin_bhpr)`, or `None`. `keep_bn` is the
 <a href=#60 id=60 data-nosnippet>60</a>///   constant reset factor of the forward (`0` at a chunk that starts a new
 <a href=#61 id=61 data-nosnippet>61</a>///   segment). `origin_bhpr` is the state that those chunks start from.
 <a href=#62 id=62 data-nosnippet>62</a>///
@@ -75,7 +75,7 @@
 <a href=#75 id=75 data-nosnippet>75</a>    d_h: F&lt;B, <span class="number">1</span>&gt;,
 <a href=#76 id=76 data-nosnippet>76</a>    initial_state_bhpr: F&lt;B, <span class="number">4</span>&gt;,
 <a href=#77 id=77 data-nosnippet>77</a>    a_decay_h: F&lt;B, <span class="number">1</span>&gt;,
-<a href=#78 id=78 data-nosnippet>78</a>    restarts: <span class="prelude-ty">Option</span>&lt;(F&lt;B, <span class="number">2</span>&gt;, F&lt;B, <span class="number">4</span>&gt;)&gt;,
+<a href=#78 id=78 data-nosnippet>78</a>    resets: <span class="prelude-ty">Option</span>&lt;(F&lt;B, <span class="number">2</span>&gt;, F&lt;B, <span class="number">4</span>&gt;)&gt;,
 <a href=#79 id=79 data-nosnippet>79</a>) -&gt; CombinedGrads&lt;B&gt; {
 <a href=#80 id=80 data-nosnippet>80</a>    <span class="kw">let </span>[batch, nchunks, chunk_len, nheads, per_head_dim] = x_bnlhp.dims();
 <a href=#81 id=81 data-nosnippet>81</a>
@@ -97,7 +97,7 @@
 <a href=#97 id=97 data-nosnippet>97</a>        c_bnlhr.unsqueeze_dim::&lt;<span class="number">6</span>&gt;(<span class="number">3</span>),
 <a href=#98 id=98 data-nosnippet>98</a>        initial_state_bhpr,
 <a href=#99 id=99 data-nosnippet>99</a>        <span class="number">1</span>,
-<a href=#100 id=100 data-nosnippet>100</a>        restarts,
+<a href=#100 id=100 data-nosnippet>100</a>        resets,
 <a href=#101 id=101 data-nosnippet>101</a>    );
 <a href=#102 id=102 data-nosnippet>102</a>    <span class="kw">let </span>d_v_bnlhp = grads.d_v_bnlmhp.squeeze_dim::&lt;<span class="number">5</span>&gt;(<span class="number">3</span>);
 <a href=#103 id=103 data-nosnippet>103</a>    <span class="kw">let </span>d_da_bnlh = grads.d_da_bnlh;

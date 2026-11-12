@@ -714,7 +714,7 @@
 <a href=#714 id=714 data-nosnippet>714</a>    /// `origin` has no effect without resets. See [`crate::packing`].
 <a href=#715 id=715 data-nosnippet>715</a>    ///
 <a href=#716 id=716 data-nosnippet>716</a>    /// At a start, the conv reads the window of `origin` in place of the
-<a href=#717 id=717 data-nosnippet>717</a>    /// positions before it, and the SSD carry between chunks restarts from the state of
+<a href=#717 id=717 data-nosnippet>717</a>    /// positions before it, and the SSD carry between chunks starts again from the state of
 <a href=#718 id=718 data-nosnippet>718</a>    /// `origin`. Only [`Mamba2SsdPath::Serial`] and
 <a href=#719 id=719 data-nosnippet>719</a>    /// [`Mamba2SsdPath::SerialRecalculated`] take resets.
 <a href=#720 id=720 data-nosnippet>720</a>    </span><span class="attr">#[allow(non_snake_case)]
@@ -750,7 +750,7 @@
 <a href=#750 id=750 data-nosnippet>750</a>        <span class="macro">assert!</span>(chunk_len &gt; <span class="number">0</span>);
 <a href=#751 id=751 data-nosnippet>751</a>        <span class="kw">let </span>reset_bn = reset_bs.map(|reset_bs| <span class="kw">crate</span>::packing::chunk_resets(reset_bs, chunk_len));
 <a href=#752 id=752 data-nosnippet>752</a>        <span class="comment">// A conv tap reads `conv_kernel − 1` positions back, and only the first
-<a href=#753 id=753 data-nosnippet>753</a>        // chunk of a segment checks for a restart (see [`crate::packing`]).
+<a href=#753 id=753 data-nosnippet>753</a>        // chunk of a segment checks for a reset (see [`crate::packing`]).
 <a href=#754 id=754 data-nosnippet>754</a>        </span><span class="macro">assert!</span>(
 <a href=#755 id=755 data-nosnippet>755</a>            reset_bn.is_none() || chunk_len + <span class="number">1 </span>&gt;= conv_kernel,
 <a href=#756 id=756 data-nosnippet>756</a>            <span class="string">"a packed call needs chunk_len {chunk_len} ≥ conv_kernel − 1 = {}"</span>,
@@ -953,7 +953,7 @@
 <a href=#953 id=953 data-nosnippet>953</a>            d_h: <span class="self">self</span>.d_h.val(),
 <a href=#954 id=954 data-nosnippet>954</a>            initial_state_bhpr: cache.ssm_bhpr,
 <a href=#955 id=955 data-nosnippet>955</a>            init_state_hpr: <span class="self">self</span>.init_state_hpr.as_ref().map(|s| s.val()),
-<a href=#956 id=956 data-nosnippet>956</a>            restarts: reset_bn.zip(origin).map(|(reset_bn, origin)| <span class="kw">crate</span>::packing::Restarts {
+<a href=#956 id=956 data-nosnippet>956</a>            resets: reset_bn.zip(origin).map(|(reset_bn, origin)| <span class="kw">crate</span>::packing::SsdResets {
 <a href=#957 id=957 data-nosnippet>957</a>                reset_bn,
 <a href=#958 id=958 data-nosnippet>958</a>                origin_bhpr: origin.ssm_bhpr,
 <a href=#959 id=959 data-nosnippet>959</a>            }),
@@ -1046,7 +1046,7 @@
 <a href=#1046 id=1046 data-nosnippet>1046</a>                <span class="comment">// The padding is the newest `conv_kernel − 1` columns of the
 <a href=#1047 id=1047 data-nosnippet>1047</a>                // window, so column `c` of the padding is `c + 1` of it.
 <a href=#1048 id=1048 data-nosnippet>1048</a>                </span><span class="kw">let </span>head_bvk = origin_bvk.clone().narrow(<span class="number">2</span>, i + <span class="number">1</span>, back);
-<a href=#1049 id=1049 data-nosnippet>1049</a>                <span class="kw">crate</span>::packing::restart_heads(tap_bvs, <span class="number">2</span>, head_bvk, reset_bn, chunk_len)
+<a href=#1049 id=1049 data-nosnippet>1049</a>                <span class="kw">crate</span>::packing::origin_heads(tap_bvs, <span class="number">2</span>, head_bvk, reset_bn, chunk_len)
 <a href=#1050 id=1050 data-nosnippet>1050</a>            };
 <a href=#1051 id=1051 data-nosnippet>1051</a>            <span class="kw">let </span>w_bvs = weight_vk
 <a href=#1052 id=1052 data-nosnippet>1052</a>                .clone()

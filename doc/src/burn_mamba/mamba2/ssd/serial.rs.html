@@ -108,7 +108,7 @@
 <a href=#108 id=108 data-nosnippet>108</a>                intra_chunk_state_bnhpr.clone(),
 <a href=#109 id=109 data-nosnippet>109</a>                da_chunk_end_bhn.clone(),
 <a href=#110 id=110 data-nosnippet>110</a>                input.initial_state_bhpr,
-<a href=#111 id=111 data-nosnippet>111</a>                input.restarts,
+<a href=#111 id=111 data-nosnippet>111</a>                input.resets,
 <a href=#112 id=112 data-nosnippet>112</a>            );
 <a href=#113 id=113 data-nosnippet>113</a>        <span class="macro">assert_eq!</span>(
 <a href=#114 id=114 data-nosnippet>114</a>            [batch, nchunks, nheads, per_head_dim, state_rank],
@@ -280,7 +280,7 @@
 <a href=#280 id=280 data-nosnippet>280</a>
 <a href=#281 id=281 data-nosnippet>281</a><span class="doccomment">/// Based on the Kernel 4 Triton reference `_state_passing_fwd_kernel` (`ssd_state_passing.py`).
 <a href=#282 id=282 data-nosnippet>282</a>///
-<a href=#283 id=283 data-nosnippet>283</a>/// `restarts` (`None` ⇒ no reset) marks the chunks that start a new segment of
+<a href=#283 id=283 data-nosnippet>283</a>/// `resets` (`None` ⇒ no reset) marks the chunks that start a new segment of
 <a href=#284 id=284 data-nosnippet>284</a>/// a packed row ([`crate::packing`]). The state that goes into such a chunk is
 <a href=#285 id=285 data-nosnippet>285</a>/// the origin state. The select also stops the gradient to the state before
 <a href=#286 id=286 data-nosnippet>286</a>/// it, and sends it to the origin instead.
@@ -292,7 +292,7 @@
 <a href=#292 id=292 data-nosnippet>292</a>    intra_chunk_state_bnhpr: Tensor&lt;<span class="number">5</span>&gt;,
 <a href=#293 id=293 data-nosnippet>293</a>    da_chunk_end_bhn: Tensor&lt;<span class="number">3</span>&gt;,
 <a href=#294 id=294 data-nosnippet>294</a>    initial_state_bhpr: Tensor&lt;<span class="number">4</span>&gt;,
-<a href=#295 id=295 data-nosnippet>295</a>    restarts: <span class="prelude-ty">Option</span>&lt;<span class="kw">crate</span>::packing::Restarts&gt;,
+<a href=#295 id=295 data-nosnippet>295</a>    resets: <span class="prelude-ty">Option</span>&lt;<span class="kw">crate</span>::packing::SsdResets&gt;,
 <a href=#296 id=296 data-nosnippet>296</a>) -&gt; (Tensor&lt;<span class="number">5</span>&gt;, Tensor&lt;<span class="number">4</span>&gt;) {
 <a href=#297 id=297 data-nosnippet>297</a>    <span class="kw">let </span>[batch, nchunks, nheads, per_head_dim, state_rank] = intra_chunk_state_bnhpr.dims();
 <a href=#298 id=298 data-nosnippet>298</a>    <span class="kw">let </span>flat_state_dim = per_head_dim * state_rank;
@@ -313,14 +313,14 @@
 <a href=#313 id=313 data-nosnippet>313</a>        <span class="comment">// A chunk that starts a segment starts from the origin state. (A
 <a href=#314 id=314 data-nosnippet>314</a>        // learnable `init_state_hpr` would join it, but only `Minimal` takes
 <a href=#315 id=315 data-nosnippet>315</a>        // one.)
-<a href=#316 id=316 data-nosnippet>316</a>        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(restarts) = <span class="kw-2">&amp;</span>restarts {
-<a href=#317 id=317 data-nosnippet>317</a>            <span class="kw">let </span>reset_bhpr = restarts
+<a href=#316 id=316 data-nosnippet>316</a>        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(resets) = <span class="kw-2">&amp;</span>resets {
+<a href=#317 id=317 data-nosnippet>317</a>            <span class="kw">let </span>reset_bhpr = resets
 <a href=#318 id=318 data-nosnippet>318</a>                .reset_bn
 <a href=#319 id=319 data-nosnippet>319</a>                .clone()
 <a href=#320 id=320 data-nosnippet>320</a>                .slice(<span class="macro">s!</span>[.., i_chunk])
 <a href=#321 id=321 data-nosnippet>321</a>                .reshape([batch, <span class="number">1</span>, <span class="number">1</span>, <span class="number">1</span>])
 <a href=#322 id=322 data-nosnippet>322</a>                .expand([batch, nheads, per_head_dim, state_rank]);
-<a href=#323 id=323 data-nosnippet>323</a>            running_state_bhpr = running_state_bhpr.mask_where(reset_bhpr, restarts.origin_bhpr.clone());
+<a href=#323 id=323 data-nosnippet>323</a>            running_state_bhpr = running_state_bhpr.mask_where(reset_bhpr, resets.origin_bhpr.clone());
 <a href=#324 id=324 data-nosnippet>324</a>            <span class="kw-2">*</span>chunk_input_state_vec_bhpr.last_mut().unwrap() = running_state_bhpr.clone();
 <a href=#325 id=325 data-nosnippet>325</a>        }
 <a href=#326 id=326 data-nosnippet>326</a>

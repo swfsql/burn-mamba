@@ -22,7 +22,7 @@
 <a href=#22 id=22 data-nosnippet>22</a>
 <a href=#23 id=23 data-nosnippet>23</a></span><span class="kw">use </span><span class="kw">crate</span>::mamba3::single_ssd::prelude::<span class="kw-2">*</span>;
 <a href=#24 id=24 data-nosnippet>24</a><span class="kw">use </span><span class="kw">crate</span>::mamba3::single_ssd::ssd::serial_recalculated::diag::y_diag_correction;
-<a href=#25 id=25 data-nosnippet>25</a><span class="kw">use </span><span class="kw">crate</span>::packing::OpRestarts;
+<a href=#25 id=25 data-nosnippet>25</a><span class="kw">use </span><span class="kw">crate</span>::packing::OpResets;
 <a href=#26 id=26 data-nosnippet>26</a><span class="kw">use </span><span class="kw">crate</span>::standard_ssd::kernels::{
 <a href=#27 id=27 data-nosnippet>27</a>    k1_ssd_chunk_cumsum, k2_ssd_bmm, k3_ssd_chunk_state, k4_ssd_state_passing,
 <a href=#28 id=28 data-nosnippet>28</a>};
@@ -54,7 +54,7 @@
 <a href=#54 id=54 data-nosnippet>54</a>            <span class="string">"init_state_hpr not yet implemented for single_ssd_serial_recalculated"
 <a href=#55 id=55 data-nosnippet>55</a>        </span>);
 <a href=#56 id=56 data-nosnippet>56</a>
-<a href=#57 id=57 data-nosnippet>57</a>        <span class="kw">let </span>restarts = <span class="kw">crate</span>::packing::Restarts::op_inputs(input.restarts, <span class="kw-2">&amp;</span>input.v_bnlmhp);
+<a href=#57 id=57 data-nosnippet>57</a>        <span class="kw">let </span>resets = <span class="kw">crate</span>::packing::SsdResets::op_inputs(input.resets, <span class="kw-2">&amp;</span>input.v_bnlmhp);
 <a href=#58 id=58 data-nosnippet>58</a>        <span class="kw">let </span>seeds = <span class="kw">match </span>input.seed_bnhpr {
 <a href=#59 id=59 data-nosnippet>59</a>            <span class="prelude-val">Some</span>(seed_bnhpr) =&gt; OpSeeds::Some { seed_bnhpr: seed_bnhpr.into_dispatch() },
 <a href=#60 id=60 data-nosnippet>60</a>            <span class="prelude-val">None </span>=&gt; OpSeeds::None,
@@ -70,7 +70,7 @@
 <a href=#70 id=70 data-nosnippet>70</a>                input.initial_state_bhpr.into_dispatch(),
 <a href=#71 id=71 data-nosnippet>71</a>                input.read_stride,
 <a href=#72 id=72 data-nosnippet>72</a>                input.siso_specialization,
-<a href=#73 id=73 data-nosnippet>73</a>                restarts,
+<a href=#73 id=73 data-nosnippet>73</a>                resets,
 <a href=#74 id=74 data-nosnippet>74</a>                seeds,
 <a href=#75 id=75 data-nosnippet>75</a>            );
 <a href=#76 id=76 data-nosnippet>76</a>        <span class="kw">let </span>y_bntmhp = Tensor::from_dispatch(y_bntmhp);
@@ -112,9 +112,9 @@
 <a href=#112 id=112 data-nosnippet>112</a>    /// - `siso_specialization`: allow the specialized `mimo_rank == 1`
 <a href=#113 id=113 data-nosnippet>113</a>    ///   γ-correction (performance-only; see
 <a href=#114 id=114 data-nosnippet>114</a>    ///   [`Mamba3Config::siso_specialization`](crate::mamba3::mamba3::Mamba3Config::siso_specialization))
-<a href=#115 id=115 data-nosnippet>115</a>    /// - `restarts`:           the chunks that start a new segment of a packed
+<a href=#115 id=115 data-nosnippet>115</a>    /// - `resets`:             the chunks that start a new segment of a packed
 <a href=#116 id=116 data-nosnippet>116</a>    ///   row, and the accumulator that they start from, before their seed
-<a href=#117 id=117 data-nosnippet>117</a>    ///   ([`OpRestarts`])
+<a href=#117 id=117 data-nosnippet>117</a>    ///   ([`OpResets`])
 <a href=#118 id=118 data-nosnippet>118</a>    /// - `seeds`:              the boundary seed of each chunk ([`OpSeeds`])
 <a href=#119 id=119 data-nosnippet>119</a>    ///
 <a href=#120 id=120 data-nosnippet>120</a>    /// # Returns
@@ -131,7 +131,7 @@
 <a href=#131 id=131 data-nosnippet>131</a>        initial_state_bhpr: FloatTensor&lt;<span class="self">Self</span>&gt;,
 <a href=#132 id=132 data-nosnippet>132</a>        read_stride: usize,
 <a href=#133 id=133 data-nosnippet>133</a>        siso_specialization: bool,
-<a href=#134 id=134 data-nosnippet>134</a>        <span class="attr">#[extension_type] </span>restarts: OpRestarts&lt;<span class="self">Self</span>&gt;,
+<a href=#134 id=134 data-nosnippet>134</a>        <span class="attr">#[extension_type] </span>resets: OpResets&lt;<span class="self">Self</span>&gt;,
 <a href=#135 id=135 data-nosnippet>135</a>        <span class="attr">#[extension_type] </span>seeds: OpSeeds&lt;<span class="self">Self</span>&gt;,
 <a href=#136 id=136 data-nosnippet>136</a>    ) -&gt; (FloatTensor&lt;<span class="self">Self</span>&gt;, FloatTensor&lt;<span class="self">Self</span>&gt;) {
 <a href=#137 id=137 data-nosnippet>137</a>        <span class="comment">// Default impl: replicate the single-ssd form K1–K5 on primitives.
@@ -142,7 +142,7 @@
 <a href=#142 id=142 data-nosnippet>142</a>        <span class="kw">let </span>gamma_bnth = F::&lt;<span class="self">Self</span>, <span class="number">4</span>&gt;::new(gamma_bnth);
 <a href=#143 id=143 data-nosnippet>143</a>        <span class="kw">let </span>scale_bnlh = F::&lt;<span class="self">Self</span>, <span class="number">4</span>&gt;::new(scale_bnlh);
 <a href=#144 id=144 data-nosnippet>144</a>        <span class="kw">let </span>initial_state_bhpr = F::&lt;<span class="self">Self</span>, <span class="number">4</span>&gt;::new(initial_state_bhpr);
-<a href=#145 id=145 data-nosnippet>145</a>        <span class="kw">let </span>restarts = restarts.into_option();
+<a href=#145 id=145 data-nosnippet>145</a>        <span class="kw">let </span>resets = resets.into_option();
 <a href=#146 id=146 data-nosnippet>146</a>        <span class="kw">let </span>seed_bnhpr = seeds.into_option();
 <a href=#147 id=147 data-nosnippet>147</a>
 <a href=#148 id=148 data-nosnippet>148</a>        <span class="comment">// K1 — chunk cumulative decay.
@@ -165,7 +165,7 @@
 <a href=#165 id=165 data-nosnippet>165</a>            intra_chunk_state_bnhpr,
 <a href=#166 id=166 data-nosnippet>166</a>            da_chunk_end_bhn,
 <a href=#167 id=167 data-nosnippet>167</a>            initial_state_bhpr,
-<a href=#168 id=168 data-nosnippet>168</a>            restarts,
+<a href=#168 id=168 data-nosnippet>168</a>            resets,
 <a href=#169 id=169 data-nosnippet>169</a>            seed_bnhpr,
 <a href=#170 id=170 data-nosnippet>170</a>        );
 <a href=#171 id=171 data-nosnippet>171</a>        san(<span class="kw-2">&amp;</span>chunk_input_state_bnhpr);
@@ -192,7 +192,7 @@
 <a href=#192 id=192 data-nosnippet>192</a>
 <a href=#193 id=193 data-nosnippet>193</a><span class="doccomment">/// The boundary seeds of a single-SSD op, on the primitives of `B`. An op
 <a href=#194 id=194 data-nosnippet>194</a>/// argument of this type has `#[extension_type]`. This enum takes the place of
-<a href=#195 id=195 data-nosnippet>195</a>/// an `Option`, for the reason of [`OpRestarts`].
+<a href=#195 id=195 data-nosnippet>195</a>/// an `Option`, for the reason of [`OpResets`].
 <a href=#196 id=196 data-nosnippet>196</a></span><span class="attr">#[derive(ExtensionType)]
 <a href=#197 id=197 data-nosnippet>197</a></span><span class="kw">pub enum </span>OpSeeds&lt;B: Backend&gt; {
 <a href=#198 id=198 data-nosnippet>198</a>    <span class="doccomment">/// No seeds: the call has no resets.

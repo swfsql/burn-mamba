@@ -27,7 +27,7 @@
 <a href=#27 id=27 data-nosnippet>27</a>//! - its chunk starts with a reset,
 <a href=#28 id=28 data-nosnippet>28</a>//! - it reads further back than its own index in the chunk.
 <a href=#29 id=29 data-nosnippet>29</a>//!
-<a href=#30 id=30 data-nosnippet>30</a>//! Such a read takes the value of the origin instead (`restart_heads`). So a
+<a href=#30 id=30 data-nosnippet>30</a>//! Such a read takes the value of the origin instead (`origin_heads`). So a
 <a href=#31 id=31 data-nosnippet>31</a>//! per-chunk flag is all that those sites need, and no scan runs over the row
 <a href=#32 id=32 data-nosnippet>32</a>//! for them. This needs a read that reaches back one chunk at most:
 <a href=#33 id=33 data-nosnippet>33</a>//!
@@ -62,10 +62,10 @@
 <a href=#62 id=62 data-nosnippet>62</a><span class="kw">use </span>burn::prelude::<span class="kw-2">*</span>;
 <a href=#63 id=63 data-nosnippet>63</a><span class="kw">use </span>burn_stack::utils::fprim::F;
 <a href=#64 id=64 data-nosnippet>64</a>
-<a href=#65 id=65 data-nosnippet>65</a><span class="doccomment">/// The resets of a packed row as an SSD pass takes them: the chunks that
-<a href=#66 id=66 data-nosnippet>66</a>/// restart, and the state that they restart from.
+<a href=#65 id=65 data-nosnippet>65</a><span class="doccomment">/// The resets of a packed row as an SSD pass takes them: the chunks with a
+<a href=#66 id=66 data-nosnippet>66</a>/// reset, and the state that they start from.
 <a href=#67 id=67 data-nosnippet>67</a></span><span class="attr">#[derive(Clone, Debug)]
-<a href=#68 id=68 data-nosnippet>68</a></span><span class="kw">pub struct </span>Restarts {
+<a href=#68 id=68 data-nosnippet>68</a></span><span class="kw">pub struct </span>SsdResets {
 <a href=#69 id=69 data-nosnippet>69</a>    <span class="doccomment">/// `[batch, nchunks]`: `true` at a chunk that starts a new segment.
 <a href=#70 id=70 data-nosnippet>70</a>    </span><span class="kw">pub </span>reset_bn: Tensor&lt;<span class="number">2</span>, Bool&gt;,
 <a href=#71 id=71 data-nosnippet>71</a>    <span class="doccomment">/// `[batch, nheads, per_head_dim, state_rank]`: the state of the origin
@@ -73,37 +73,37 @@
 <a href=#73 id=73 data-nosnippet>73</a>    </span><span class="kw">pub </span>origin_bhpr: Tensor&lt;<span class="number">4</span>&gt;,
 <a href=#74 id=74 data-nosnippet>74</a>}
 <a href=#75 id=75 data-nosnippet>75</a>
-<a href=#76 id=76 data-nosnippet>76</a><span class="kw">impl </span>Restarts {
-<a href=#77 id=77 data-nosnippet>77</a>    <span class="doccomment">/// The restarts as an SSD op takes them ([`OpRestarts`]). `keep_bn` gets
-<a href=#78 id=78 data-nosnippet>78</a>    /// the dtype of `like`, and `like` is `[batch, nchunks, …]`.
+<a href=#76 id=76 data-nosnippet>76</a><span class="kw">impl </span>SsdResets {
+<a href=#77 id=77 data-nosnippet>77</a>    <span class="doccomment">/// The resets as an SSD op takes them ([`OpResets`]). `keep_bn` gets the
+<a href=#78 id=78 data-nosnippet>78</a>    /// dtype of `like`, and `like` is `[batch, nchunks, …]`.
 <a href=#79 id=79 data-nosnippet>79</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>op_inputs&lt;<span class="kw">const </span>D: usize&gt;(
-<a href=#80 id=80 data-nosnippet>80</a>        restarts: <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>&gt;,
+<a href=#80 id=80 data-nosnippet>80</a>        resets: <span class="prelude-ty">Option</span>&lt;<span class="self">Self</span>&gt;,
 <a href=#81 id=81 data-nosnippet>81</a>        like: <span class="kw-2">&amp;</span>Tensor&lt;D&gt;,
-<a href=#82 id=82 data-nosnippet>82</a>    ) -&gt; OpRestarts&lt;Dispatch&gt; {
-<a href=#83 id=83 data-nosnippet>83</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(Restarts { reset_bn, origin_bhpr }) = restarts <span class="kw">else </span>{
-<a href=#84 id=84 data-nosnippet>84</a>            <span class="kw">return </span>OpRestarts::None;
+<a href=#82 id=82 data-nosnippet>82</a>    ) -&gt; OpResets&lt;Dispatch&gt; {
+<a href=#83 id=83 data-nosnippet>83</a>        <span class="kw">let </span><span class="prelude-val">Some</span>(SsdResets { reset_bn, origin_bhpr }) = resets <span class="kw">else </span>{
+<a href=#84 id=84 data-nosnippet>84</a>            <span class="kw">return </span>OpResets::None;
 <a href=#85 id=85 data-nosnippet>85</a>        };
 <a href=#86 id=86 data-nosnippet>86</a>        <span class="kw">let </span>dims = like.dims();
 <a href=#87 id=87 data-nosnippet>87</a>        <span class="kw">let </span>options = (<span class="kw-2">&amp;</span>like.device(), like.dtype());
 <a href=#88 id=88 data-nosnippet>88</a>        <span class="kw">let </span>keep_bn = Tensor::&lt;<span class="number">2</span>&gt;::ones([dims[<span class="number">0</span>], dims[<span class="number">1</span>]], options).mask_fill(reset_bn, <span class="number">0.0</span>);
-<a href=#89 id=89 data-nosnippet>89</a>        OpRestarts::Some {
+<a href=#89 id=89 data-nosnippet>89</a>        OpResets::Some {
 <a href=#90 id=90 data-nosnippet>90</a>            keep_bn: keep_bn.into_dispatch(),
 <a href=#91 id=91 data-nosnippet>91</a>            origin_bhpr: origin_bhpr.into_dispatch(),
 <a href=#92 id=92 data-nosnippet>92</a>        }
 <a href=#93 id=93 data-nosnippet>93</a>    }
 <a href=#94 id=94 data-nosnippet>94</a>}
 <a href=#95 id=95 data-nosnippet>95</a>
-<a href=#96 id=96 data-nosnippet>96</a><span class="doccomment">/// The restarts of a packed row as an SSD op takes them, on the primitives of
+<a href=#96 id=96 data-nosnippet>96</a><span class="doccomment">/// The resets of a packed row as an SSD op takes them, on the primitives of
 <a href=#97 id=97 data-nosnippet>97</a>/// `B`. An op argument of this type has `#[extension_type]`.
 <a href=#98 id=98 data-nosnippet>98</a>///
 <a href=#99 id=99 data-nosnippet>99</a>/// This enum takes the place of an `Option` of the two tensors. Burn has no
 <a href=#100 id=100 data-nosnippet>100</a>/// `ExtensionType` for `Option`, and the orphan rule stops this crate from
 <a href=#101 id=101 data-nosnippet>101</a>/// adding one.
 <a href=#102 id=102 data-nosnippet>102</a></span><span class="attr">#[derive(ExtensionType)]
-<a href=#103 id=103 data-nosnippet>103</a></span><span class="kw">pub enum </span>OpRestarts&lt;B: Backend&gt; {
-<a href=#104 id=104 data-nosnippet>104</a>    <span class="doccomment">/// No chunk of the call restarts.
+<a href=#103 id=103 data-nosnippet>103</a></span><span class="kw">pub enum </span>OpResets&lt;B: Backend&gt; {
+<a href=#104 id=104 data-nosnippet>104</a>    <span class="doccomment">/// No chunk of the call has a reset.
 <a href=#105 id=105 data-nosnippet>105</a>    </span><span class="prelude-val">None</span>,
-<a href=#106 id=106 data-nosnippet>106</a>    <span class="doccomment">/// The chunks that restart, and the state that they restart from.
+<a href=#106 id=106 data-nosnippet>106</a>    <span class="doccomment">/// The chunks with a reset, and the state that they start from.
 <a href=#107 id=107 data-nosnippet>107</a>    </span><span class="prelude-val">Some </span>{
 <a href=#108 id=108 data-nosnippet>108</a>        <span class="doccomment">/// `[batch, nchunks]`: `0` at a chunk that starts a new segment, `1`
 <a href=#109 id=109 data-nosnippet>109</a>        /// elsewhere. It is a constant: the op registers no gradient for it.
@@ -114,32 +114,32 @@
 <a href=#114 id=114 data-nosnippet>114</a>    },
 <a href=#115 id=115 data-nosnippet>115</a>}
 <a href=#116 id=116 data-nosnippet>116</a>
-<a href=#117 id=117 data-nosnippet>117</a><span class="kw">impl</span>&lt;B: Backend&gt; OpRestarts&lt;B&gt; {
+<a href=#117 id=117 data-nosnippet>117</a><span class="kw">impl</span>&lt;B: Backend&gt; OpResets&lt;B&gt; {
 <a href=#118 id=118 data-nosnippet>118</a>    <span class="doccomment">/// The pair `(keep_bn, origin_bhpr)` that the standard SSD scan takes.
 <a href=#119 id=119 data-nosnippet>119</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>into_option(<span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;(F&lt;B, <span class="number">2</span>&gt;, F&lt;B, <span class="number">4</span>&gt;)&gt; {
 <a href=#120 id=120 data-nosnippet>120</a>        <span class="kw">match </span><span class="self">self </span>{
-<a href=#121 id=121 data-nosnippet>121</a>            OpRestarts::None =&gt; <span class="prelude-val">None</span>,
-<a href=#122 id=122 data-nosnippet>122</a>            OpRestarts::Some { keep_bn, origin_bhpr } =&gt; {
+<a href=#121 id=121 data-nosnippet>121</a>            OpResets::None =&gt; <span class="prelude-val">None</span>,
+<a href=#122 id=122 data-nosnippet>122</a>            OpResets::Some { keep_bn, origin_bhpr } =&gt; {
 <a href=#123 id=123 data-nosnippet>123</a>                <span class="prelude-val">Some</span>((F::new(keep_bn), F::new(origin_bhpr)))
 <a href=#124 id=124 data-nosnippet>124</a>            }
 <a href=#125 id=125 data-nosnippet>125</a>        }
 <a href=#126 id=126 data-nosnippet>126</a>    }
 <a href=#127 id=127 data-nosnippet>127</a>
-<a href=#128 id=128 data-nosnippet>128</a>    <span class="doccomment">/// The restarts from the two parts that a recompute node keeps (see
-<a href=#129 id=129 data-nosnippet>129</a>    /// [`OpRestarts::into_recompute`]). `origin_bhpr` stays unread when
+<a href=#128 id=128 data-nosnippet>128</a>    <span class="doccomment">/// The resets from the two parts that a recompute node keeps (see
+<a href=#129 id=129 data-nosnippet>129</a>    /// [`OpResets::into_recompute`]). `origin_bhpr` stays unread when
 <a href=#130 id=130 data-nosnippet>130</a>    /// `keep_bn` is `None`.
 <a href=#131 id=131 data-nosnippet>131</a>    </span><span class="attr">#[cfg(feature = <span class="string">"autodiff"</span>)]
 <a href=#132 id=132 data-nosnippet>132</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>from_recompute(keep_bn: <span class="prelude-ty">Option</span>&lt;FloatTensor&lt;B&gt;&gt;, origin_bhpr: FloatTensor&lt;B&gt;) -&gt; <span class="self">Self </span>{
 <a href=#133 id=133 data-nosnippet>133</a>        <span class="kw">match </span>keep_bn {
-<a href=#134 id=134 data-nosnippet>134</a>            <span class="prelude-val">Some</span>(keep_bn) =&gt; OpRestarts::Some { keep_bn, origin_bhpr },
-<a href=#135 id=135 data-nosnippet>135</a>            <span class="prelude-val">None </span>=&gt; OpRestarts::None,
+<a href=#134 id=134 data-nosnippet>134</a>            <span class="prelude-val">Some</span>(keep_bn) =&gt; OpResets::Some { keep_bn, origin_bhpr },
+<a href=#135 id=135 data-nosnippet>135</a>            <span class="prelude-val">None </span>=&gt; OpResets::None,
 <a href=#136 id=136 data-nosnippet>136</a>        }
 <a href=#137 id=137 data-nosnippet>137</a>    }
 <a href=#138 id=138 data-nosnippet>138</a>}
 <a href=#139 id=139 data-nosnippet>139</a>
 <a href=#140 id=140 data-nosnippet>140</a><span class="attr">#[cfg(feature = <span class="string">"autodiff"</span>)]
-<a href=#141 id=141 data-nosnippet>141</a></span><span class="kw">impl</span>&lt;B: Backend, C: CheckpointStrategy&gt; OpRestarts&lt;Autodiff&lt;B, C&gt;&gt; {
-<a href=#142 id=142 data-nosnippet>142</a>    <span class="doccomment">/// The restarts as the `Autodiff` impl of an SSD op gives them to its
+<a href=#141 id=141 data-nosnippet>141</a></span><span class="kw">impl</span>&lt;B: Backend, C: CheckpointStrategy&gt; OpResets&lt;Autodiff&lt;B, C&gt;&gt; {
+<a href=#142 id=142 data-nosnippet>142</a>    <span class="doccomment">/// The resets as the `Autodiff` impl of an SSD op gives them to its
 <a href=#143 id=143 data-nosnippet>143</a>    /// recompute node:
 <a href=#144 id=144 data-nosnippet>144</a>    ///
 <a href=#145 id=145 data-nosnippet>145</a>    /// - `keep_bn`, on the primitives of `B`: a constant, with no gradient.
@@ -149,8 +149,8 @@
 <a href=#149 id=149 data-nosnippet>149</a>        like: <span class="kw-2">&amp;</span>FloatTensor&lt;Autodiff&lt;B, C&gt;&gt;,
 <a href=#150 id=150 data-nosnippet>150</a>    ) -&gt; (<span class="prelude-ty">Option</span>&lt;FloatTensor&lt;B&gt;&gt;, FloatTensor&lt;Autodiff&lt;B, C&gt;&gt;) {
 <a href=#151 id=151 data-nosnippet>151</a>        <span class="kw">match </span><span class="self">self </span>{
-<a href=#152 id=152 data-nosnippet>152</a>            OpRestarts::Some { keep_bn, origin_bhpr } =&gt; (<span class="prelude-val">Some</span>(keep_bn.into_primitive()), origin_bhpr),
-<a href=#153 id=153 data-nosnippet>153</a>            OpRestarts::None =&gt; (<span class="prelude-val">None</span>, placeholder::&lt;B, C, <span class="number">4</span>&gt;(like)),
+<a href=#152 id=152 data-nosnippet>152</a>            OpResets::Some { keep_bn, origin_bhpr } =&gt; (<span class="prelude-val">Some</span>(keep_bn.into_primitive()), origin_bhpr),
+<a href=#153 id=153 data-nosnippet>153</a>            OpResets::None =&gt; (<span class="prelude-val">None</span>, placeholder::&lt;B, C, <span class="number">4</span>&gt;(like)),
 <a href=#154 id=154 data-nosnippet>154</a>        }
 <a href=#155 id=155 data-nosnippet>155</a>    }
 <a href=#156 id=156 data-nosnippet>156</a>}
@@ -226,7 +226,7 @@
 <a href=#226 id=226 data-nosnippet>226</a>/// every chunk that starts with a reset. `head` holds the values of the origin
 <a href=#227 id=227 data-nosnippet>227</a>/// cache that those positions read at a reset: `x` with `width` entries
 <a href=#228 id=228 data-nosnippet>228</a>/// along `axis`, one set per row. Axis 0 is the batch.
-<a href=#229 id=229 data-nosnippet>229</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>restart_heads&lt;<span class="kw">const </span>D: usize&gt;(
+<a href=#229 id=229 data-nosnippet>229</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>origin_heads&lt;<span class="kw">const </span>D: usize&gt;(
 <a href=#230 id=230 data-nosnippet>230</a>    x: Tensor&lt;D&gt;,
 <a href=#231 id=231 data-nosnippet>231</a>    axis: usize,
 <a href=#232 id=232 data-nosnippet>232</a>    head: Tensor&lt;D&gt;,
@@ -304,9 +304,9 @@
 <a href=#304 id=304 data-nosnippet>304</a>        chunk_heads(<span class="kw-2">&amp;</span><span class="self">self</span>.reset_bn, <span class="self">self</span>.chunk_len, width, len)
 <a href=#305 id=305 data-nosnippet>305</a>    }
 <a href=#306 id=306 data-nosnippet>306</a>
-<a href=#307 id=307 data-nosnippet>307</a>    <span class="doccomment">/// See [`restart_heads`].
-<a href=#308 id=308 data-nosnippet>308</a>    </span><span class="kw">pub fn </span>restart_heads&lt;<span class="kw">const </span>D: usize&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, x: Tensor&lt;D&gt;, axis: usize, head: Tensor&lt;D&gt;) -&gt; Tensor&lt;D&gt; {
-<a href=#309 id=309 data-nosnippet>309</a>        restart_heads(x, axis, head, <span class="kw-2">&amp;</span><span class="self">self</span>.reset_bn, <span class="self">self</span>.chunk_len)
+<a href=#307 id=307 data-nosnippet>307</a>    <span class="doccomment">/// See [`origin_heads`].
+<a href=#308 id=308 data-nosnippet>308</a>    </span><span class="kw">pub fn </span>origin_heads&lt;<span class="kw">const </span>D: usize&gt;(<span class="kw-2">&amp;</span><span class="self">self</span>, x: Tensor&lt;D&gt;, axis: usize, head: Tensor&lt;D&gt;) -&gt; Tensor&lt;D&gt; {
+<a href=#309 id=309 data-nosnippet>309</a>        origin_heads(x, axis, head, <span class="kw-2">&amp;</span><span class="self">self</span>.reset_bn, <span class="self">self</span>.chunk_len)
 <a href=#310 id=310 data-nosnippet>310</a>    }
 <a href=#311 id=311 data-nosnippet>311</a>}
 <a href=#312 id=312 data-nosnippet>312</a>
