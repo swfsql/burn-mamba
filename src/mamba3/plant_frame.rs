@@ -283,13 +283,13 @@ impl Mamba3 {
         san(&c_btmhr);
         new_rotation.sanity();
 
-        // ── Save the B and x of the last `lag` positions for the cache ────────
+        // ── Save the tap FIFO: the B and x of the last `lag` positions ────────
         // These are exactly the positions whose taps the next call must pay.
         // So the trapezoid continues unchanged across a split prefill (at
         // `lag = u`, these positions are exactly the last token). Each row
         // reads them at its row end. With no β tap there is nothing to
-        // continue, and the FIFO stays empty.
-        let new_tap_fifo = self.save_tap_slots(
+        // continue, and the tap FIFO stays `None`.
+        let new_tap_fifo = self.save_tap_fifo(
             &b_bsmhr,
             &x_bshp,
             &da_bsh,

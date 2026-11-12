@@ -252,7 +252,7 @@ impl Mamba3 {
             [batch, self.nheads(), self.per_head_dim(), self.state_rank],
             device,
         );
-        let tap_fifo = self.zero_tap_slots(batch, device);
+        let tap_fifo = self.zero_tap_fifo(batch, device);
         let rotation = self.zero_rotation_state(batch, device);
         let (log_precision_bh, tropical_bh) = self.zero_positive_state(batch, device);
         let frame = Mamba3FrameCache { tap_fifo, rotation, log_precision_bh, tropical_bh };

@@ -1639,7 +1639,7 @@ impl Mamba3 {
     /// The tap FIFO of the trapezoid, filled with zeros: [`Self::tap_lag`]
     /// slots, oldest first. `None` (no allocation) under a pattern with no `β`
     /// tap.
-    pub fn zero_tap_slots(&self, batch: usize, device: &Device) -> Option<TapFifo> {
+    pub fn zero_tap_fifo(&self, batch: usize, device: &Device) -> Option<TapFifo> {
         let slots = self.tap_lag();
         (slots > 0).then(|| {
             TapFifo::zeros(
@@ -1663,10 +1663,11 @@ impl Mamba3 {
     /// empty, and the slot is the plain last `x`. Both pathways use this
     /// function, so their caches stay field-identical.
     ///
-    /// `row_end` reads the slots: the last `lag` write positions before the
-    /// row end of each row ([`crate::row_end`]). It reads them from `incoming`
-    /// (the FIFO of the cache) followed by this call. For a row with no real
-    /// position, the slots are the FIFO that its last segment starts from.
+    /// `row_end` reads the positions of the new tap FIFO: the last `lag` write
+    /// positions before the row end of each row ([`crate::row_end`]). It reads
+    /// them from `incoming` (the tap FIFO of the cache) followed by this call.
+    /// For a row with no real position, the new tap FIFO is the FIFO that its
+    /// last segment starts from.
     ///
     /// `origin` is the FIFO of the origin of a packed call
     /// ([`crate::packing`]). The last segment of a row with a reset starts from
@@ -1678,7 +1679,7 @@ impl Mamba3 {
     /// - `x_bshp`  : `[batch, sequence, nheads, per_head_dim]`
     /// - `da_bsh`  : `[batch, sequence, nheads]`
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn save_tap_slots(
+    pub(crate) fn save_tap_fifo(
         &self,
         b_bsmhr: &Tensor<5>,
         x_bshp: &Tensor<4>,
