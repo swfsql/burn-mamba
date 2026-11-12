@@ -1,6 +1,6 @@
 # 11: Follow the derived cache hop and the one zero cache of burn-stack
 
-Status: ready-for-agent
+Status: resolved
 
 Blocked by: `06-cache-field-lists.md`, `../burn-stack/.scratch/arch-review-backlog/issues/08-cache-traversal.md`
 

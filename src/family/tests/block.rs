@@ -346,12 +346,17 @@ fn cache_stack_and_traversal() {
         let (_, again) = net.forward(x, Some(detached), path, None, None);
         assert_eq!(again.slot_count(), 2, "{tag}: a forward continues from detached caches");
 
-        // The block builds the zero caches.
-        let block = &net.layers.real_layers[0].block;
-        let zeros = block.zero_caches_3d(&Tensor::zeros([2, 6, D_MODEL], &device), 3);
-        assert_eq!(zeros.slot_count(), 3, "{tag}");
-        let zeros = block.zero_caches_2d(&Tensor::zeros([2, D_MODEL], &device), 2);
-        let (_, c) = net.step(Tensor::zeros([2, 3], &device), Some(zeros), None);
+        // The stack builds the zero cache of each virtual layer through the
+        // block. A step from these caches checks the family tag of each one.
+        // The batch (3) differs from the count of virtual layers (2).
+        let zeros = net.layers.zero_caches(3, &device);
+        assert_eq!(zeros.slot_count(), 2, "{tag}");
+        // A missing cache selects the single-SSD pathway.
+        #[cfg(feature = "mamba3")]
+        if let Some(Some(MambaCache::Mamba3(zero))) = zeros.slots.first() {
+            assert!(matches!(zero, Mamba3Cache::SingleSsd(_)), "{tag}: a zero cache is single-SSD");
+        }
+        let (_, c) = net.step(Tensor::zeros([3, 3], &device), Some(zeros), None);
         assert_eq!(c.slot_count(), 2, "{tag}");
     }
 }
@@ -606,10 +611,7 @@ fn mixed_stack_rules() {
     let step = catch_unwind(AssertUnwindSafe(|| net.step(x0.clone(), None, None)));
     assert!(step.is_err(), "a mixed stack must panic at a step with no cache");
 
-    let zeros_bd: Tensor<2> = Tensor::zeros([2, D_MODEL], &device);
-    let first = net.layers.real_layers[0].block.zero_caches_2d(&zeros_bd, 1).into_slots();
-    let second = net.layers.real_layers[1].block.zero_caches_2d(&zeros_bd, 1).into_slots();
-    let slots = first.into_iter().chain(second).collect();
+    let slots = net.layers.real_layers.iter().map(|layer| Some(layer.block.zero_cache(2, &device))).collect();
     let (y, _) = net.step(x0, Some(MambaCaches::from_slots(slots)), None);
     assert_eq!(y.dims(), [2, 5]);
 }

@@ -70,66 +70,6 @@ impl Mamba3Caches {
             Self::SingleSsd(caches) => Some(caches),
         }
     }
-
-    /// Number of per-layer caches (independent of pathway).
-    pub fn caches_len(&self) -> usize {
-        match self {
-            Self::DoubleSsd(caches) => caches.caches.len(),
-            Self::SingleSsd(caches) => caches.caches.len(),
-        }
-    }
-
-    /// Collect per-layer caches into a pathway-tagged bundle. The first element
-    /// gives the pathway (an empty vec gives single-SSD). Panics if the
-    /// elements mix pathways.
-    pub fn from_vec(vec: Vec<Mamba3Cache>) -> Self {
-        // Look at the first element. Empty means single_ssd.
-        let is_double = matches!(vec.first(), Some(Mamba3Cache::DoubleSsd(_)));
-        if is_double {
-            Mamba3DoubleSsdCaches {
-                caches: vec
-                    .into_iter()
-                    .map(Mamba3Cache::double_ssd)
-                    .map(Option::unwrap)
-                    .collect(),
-            }
-            .into()
-        } else {
-            Mamba3SingleSsdCaches {
-                caches: vec
-                    .into_iter()
-                    .map(Mamba3Cache::single_ssd)
-                    .map(Option::unwrap)
-                    .collect(),
-            }
-            .into()
-        }
-    }
-
-    /// Wrap each per-layer cache in `Some`, so the layer loop can `take` it
-    /// without a clone.
-    pub fn into_options(self) -> Vec<Option<Mamba3Cache>> {
-        match self {
-            Self::DoubleSsd(caches) => caches
-                .caches
-                .into_iter()
-                .map(Mamba3Cache::from)
-                .map(Some)
-                .collect(),
-            Self::SingleSsd(caches) => caches
-                .caches
-                .into_iter()
-                .map(Mamba3Cache::from)
-                .map(Some)
-                .collect(),
-        }
-    }
-
-    /// Inverse of [`Self::into_options`]: unwrap each layer cache and re-bundle.
-    pub fn from_options(options: Vec<Option<Mamba3Cache>>) -> Self {
-        let caches = options.into_iter().map(Option::unwrap).collect();
-        Self::from_vec(caches)
-    }
 }
 
 impl Mamba3Cache {

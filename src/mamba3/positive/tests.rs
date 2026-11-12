@@ -839,23 +839,21 @@ fn a_vanished_step_keeps_the_block_gradient_finite() {
     finite("ω", model.kalman_read_h.as_ref().unwrap().val().grad(&grads).map(all_finite));
 }
 
-/// A no-grad region moves every cache tensor to the inner backend and back by
-/// hand ([`CacheStack`](burn_stack::modules::CacheStack)); the two new cache
-/// fields must make the trip.
+/// In an untracked span, the stack moves every cache tensor to the inner
+/// backend and back. This hop follows from the traversal of the cache
+/// ([`CacheTensors`](burn_stack::modules::CacheTensors)). So the fields of the
+/// positive systems (`log_precision_bh`, `tropical_bh`) make the trip only if
+/// the traversal visits them.
 #[test]
 fn the_fields_survive_a_no_grad_round_trip() {
-    use crate::mamba3::cache::Mamba3Caches;
-    use burn_stack::modules::CacheStack;
+    use burn_stack::modules::{cache_from_inner, cache_to_inner};
     let device = test_device();
     let ad = device.clone().autodiff();
     let config = lattice()[1].config();
     let model = exercised(config.init(&ad), &ad);
     let input = Tensor::<3>::from_inner(uniform([2, 3, 16], -1.5, 1.5, &device)).to_device(&ad);
     let (_, cache) = model.forward(input, None, Mamba3SsdPath::default(), None);
-    let back = <Mamba3Caches as CacheStack>::cache_from_inner(
-        <Mamba3Caches as CacheStack>::cache_to_inner(cache.clone()),
-        &ad,
-    );
+    let back = cache_from_inner(cache_to_inner(cache.clone()), &ad);
     let (Mamba3Cache::SingleSsd(before), Mamba3Cache::SingleSsd(after)) = (cache, back) else {
         panic!("a missing cache is a single-SSD one");
     };

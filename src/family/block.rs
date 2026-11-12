@@ -18,11 +18,11 @@ use burn_stack::modules::{
 use burn_stack::utils::UntiedParam;
 
 #[cfg(feature = "mamba1")]
-use crate::mamba1::prelude::{Mamba1, Mamba1Cache, Mamba1Caches};
+use crate::mamba1::prelude::{Mamba1, Mamba1Cache};
 #[cfg(feature = "mamba2")]
-use crate::mamba2::prelude::{Mamba2, Mamba2Cache, Mamba2Caches, Mamba2SsdPath};
+use crate::mamba2::prelude::{Mamba2, Mamba2Cache, Mamba2SsdPath};
 #[cfg(feature = "mamba3")]
-use crate::mamba3::prelude::{Mamba3, Mamba3Cache, Mamba3Caches, Mamba3SsdPath};
+use crate::mamba3::prelude::{Mamba3, Mamba3Cache, Mamba3SsdPath};
 
 /// A Mamba block, tagged with its family.
 #[derive(Module, Debug)]
@@ -131,12 +131,6 @@ fn mamba3_path(path: MambaSsdPath) -> Mamba3SsdPath {
     }
 }
 
-fn tag_slots<C: CacheStack>(stack: C, tag: fn(C::Cache) -> MambaCache) -> MambaCaches {
-    MambaCaches {
-        slots: stack.into_slots().into_iter().map(|slot| slot.map(tag)).collect(),
-    }
-}
-
 impl Block for MambaBlock {
     type Cache = MambaCache;
     type Caches = MambaCaches;
@@ -232,25 +226,15 @@ impl Block for MambaBlock {
         }
     }
 
-    fn zero_caches_3d(&self, x: &Tensor<3>, n_virtual: usize) -> MambaCaches {
+    /// The zero cache of the family of the block, tagged with that family.
+    fn zero_cache(&self, batch: usize, device: &Device) -> MambaCache {
         match self {
             #[cfg(feature = "mamba1")]
-            Self::Mamba1(b) => tag_slots(b.zero_caches_3d(x, n_virtual), MambaCache::Mamba1),
+            Self::Mamba1(b) => MambaCache::Mamba1(Block::zero_cache(b, batch, device)),
             #[cfg(feature = "mamba2")]
-            Self::Mamba2(b) => tag_slots(b.zero_caches_3d(x, n_virtual), MambaCache::Mamba2),
+            Self::Mamba2(b) => MambaCache::Mamba2(Block::zero_cache(b, batch, device)),
             #[cfg(feature = "mamba3")]
-            Self::Mamba3(b) => tag_slots(b.zero_caches_3d(x, n_virtual), MambaCache::Mamba3),
-        }
-    }
-
-    fn zero_caches_2d(&self, x: &Tensor<2>, n_virtual: usize) -> MambaCaches {
-        match self {
-            #[cfg(feature = "mamba1")]
-            Self::Mamba1(b) => tag_slots(b.zero_caches_2d(x, n_virtual), MambaCache::Mamba1),
-            #[cfg(feature = "mamba2")]
-            Self::Mamba2(b) => tag_slots(b.zero_caches_2d(x, n_virtual), MambaCache::Mamba2),
-            #[cfg(feature = "mamba3")]
-            Self::Mamba3(b) => tag_slots(b.zero_caches_2d(x, n_virtual), MambaCache::Mamba3),
+            Self::Mamba3(b) => MambaCache::Mamba3(Block::zero_cache(b, batch, device)),
         }
     }
 
@@ -279,39 +263,6 @@ impl CacheStack for MambaCaches {
 
     fn from_slots(slots: Vec<Option<MambaCache>>) -> Self {
         Self { slots }
-    }
-
-    fn cache_to_inner(cache: MambaCache) -> MambaCache {
-        match cache {
-            #[cfg(feature = "mamba1")]
-            MambaCache::Mamba1(c) => MambaCache::Mamba1(Mamba1Caches::cache_to_inner(c)),
-            #[cfg(feature = "mamba2")]
-            MambaCache::Mamba2(c) => MambaCache::Mamba2(Mamba2Caches::cache_to_inner(c)),
-            #[cfg(feature = "mamba3")]
-            MambaCache::Mamba3(c) => MambaCache::Mamba3(Mamba3Caches::cache_to_inner(c)),
-        }
-    }
-
-    fn cache_from_inner(cache: MambaCache, device: &Device) -> MambaCache {
-        match cache {
-            #[cfg(feature = "mamba1")]
-            MambaCache::Mamba1(c) => MambaCache::Mamba1(Mamba1Caches::cache_from_inner(c, device)),
-            #[cfg(feature = "mamba2")]
-            MambaCache::Mamba2(c) => MambaCache::Mamba2(Mamba2Caches::cache_from_inner(c, device)),
-            #[cfg(feature = "mamba3")]
-            MambaCache::Mamba3(c) => MambaCache::Mamba3(Mamba3Caches::cache_from_inner(c, device)),
-        }
-    }
-
-    fn cache_device(cache: &MambaCache) -> Device {
-        match cache {
-            #[cfg(feature = "mamba1")]
-            MambaCache::Mamba1(c) => Mamba1Caches::cache_device(c),
-            #[cfg(feature = "mamba2")]
-            MambaCache::Mamba2(c) => Mamba2Caches::cache_device(c),
-            #[cfg(feature = "mamba3")]
-            MambaCache::Mamba3(c) => Mamba3Caches::cache_device(c),
-        }
     }
 }
 

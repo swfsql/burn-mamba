@@ -1,14 +1,13 @@
 //! The place where each family connects to the block-generic stack: `impl
 //! Block`, `impl BlockConfig`, `impl CacheStack`.
 //!
-//! Each family implements `CacheStack::cache_to_inner`/`cache_from_inner` by
-//! hand. `Module::map` does nothing on plain `Tensor` fields, which is all a
-//! cache holds, so a `Module`-based conversion would silently skip every field.
-//! `cache_from_inner` lifts each tensor with `burn_stack::modules::lift`, not a
-//! bare `Tensor::from_inner` (see `lift`).
+//! Each `CacheStack` impl holds only the slot logic of its family. The backend
+//! hop of a cache follows from its `CacheTensors` traversal in
+//! [`crate::family::capture`]. Each `Block::zero_cache` calls the `zero_cache`
+//! of its family.
 
 use burn::prelude::*;
-use burn_stack::modules::{Block, BlockConfig, CacheStack, lift};
+use burn_stack::modules::{Block, BlockConfig, CacheStack};
 use burn_stack::utils::UntiedParam;
 
 #[cfg(feature = "mamba1")]
@@ -28,21 +27,6 @@ mod impl_mamba1 {
             Self {
                 caches: slots.into_iter().map(Option::unwrap).collect(),
             }
-        }
-        fn cache_to_inner(c: Mamba1Cache) -> Mamba1Cache {
-            Mamba1Cache {
-                conv_bik: c.conv_bik.inner(),
-                ssm_bir: c.ssm_bir.inner(),
-            }
-        }
-        fn cache_from_inner(c: Mamba1Cache, device: &Device) -> Mamba1Cache {
-            Mamba1Cache {
-                conv_bik: lift(c.conv_bik, device),
-                ssm_bir: lift(c.ssm_bir, device),
-            }
-        }
-        fn cache_device(c: &Mamba1Cache) -> Device {
-            c.ssm_bir.device()
         }
     }
 
@@ -64,23 +48,11 @@ mod impl_mamba1 {
         fn block_step(&self, x: Tensor<2>, cache: Option<Mamba1Cache>) -> (Tensor<2>, Mamba1Cache) {
             self.step(x, cache)
         }
-        fn zero_caches_3d(&self, x: &Tensor<3>, n_virtual: usize) -> Mamba1Caches {
-            let [batch, _seq, _d] = x.dims();
-            self.make_zero(batch, n_virtual, &x.device())
-        }
-        fn zero_caches_2d(&self, x: &Tensor<2>, n_virtual: usize) -> Mamba1Caches {
-            let [batch, _d] = x.dims();
-            self.make_zero(batch, n_virtual, &x.device())
+        fn zero_cache(&self, batch: usize, device: &Device) -> Mamba1Cache {
+            self.zero_cache(batch, device)
         }
         fn untied_params(&self) -> Vec<UntiedParam> {
             self.untied_params()
-        }
-    }
-
-    impl Mamba1 {
-        fn make_zero(&self, batch: usize, n_virtual: usize, device: &Device) -> Mamba1Caches {
-            let caches = (0..n_virtual).map(|_| self.zero_cache(batch, device)).collect();
-            Mamba1Caches { caches }
         }
     }
 
@@ -116,21 +88,6 @@ mod impl_mamba2 {
             Self {
                 caches: slots.into_iter().map(Option::unwrap).collect(),
             }
-        }
-        fn cache_to_inner(c: Mamba2Cache) -> Mamba2Cache {
-            Mamba2Cache {
-                conv_bvk: c.conv_bvk.inner(),
-                ssm_bhpr: c.ssm_bhpr.inner(),
-            }
-        }
-        fn cache_from_inner(c: Mamba2Cache, device: &Device) -> Mamba2Cache {
-            Mamba2Cache {
-                conv_bvk: lift(c.conv_bvk, device),
-                ssm_bhpr: lift(c.ssm_bhpr, device),
-            }
-        }
-        fn cache_device(c: &Mamba2Cache) -> Device {
-            c.ssm_bhpr.device()
         }
     }
 
@@ -169,23 +126,11 @@ mod impl_mamba2 {
         fn block_step(&self, x: Tensor<2>, cache: Option<Mamba2Cache>) -> (Tensor<2>, Mamba2Cache) {
             self.step(x, cache)
         }
-        fn zero_caches_3d(&self, x: &Tensor<3>, n_virtual: usize) -> Mamba2Caches {
-            let [batch, _seq, _d] = x.dims();
-            self.make_zero(batch, n_virtual, &x.device())
-        }
-        fn zero_caches_2d(&self, x: &Tensor<2>, n_virtual: usize) -> Mamba2Caches {
-            let [batch, _d] = x.dims();
-            self.make_zero(batch, n_virtual, &x.device())
+        fn zero_cache(&self, batch: usize, device: &Device) -> Mamba2Cache {
+            self.zero_cache(batch, device)
         }
         fn untied_params(&self) -> Vec<UntiedParam> {
             self.untied_params()
-        }
-    }
-
-    impl Mamba2 {
-        fn make_zero(&self, batch: usize, n_virtual: usize, device: &Device) -> Mamba2Caches {
-            let caches = (0..n_virtual).map(|_| self.zero_cache(batch, device)).collect();
-            Mamba2Caches { caches }
         }
     }
 
@@ -207,102 +152,61 @@ mod impl_mamba2 {
 #[cfg(feature = "mamba3")]
 mod impl_mamba3 {
     use super::*;
-    use crate::mamba3::double_ssd::prelude::Mamba3DoubleSsdCache;
+    use crate::mamba3::double_ssd::prelude::Mamba3DoubleSsdCaches;
     use crate::mamba3::prelude::{Mamba3, Mamba3Cache, Mamba3Caches, Mamba3Config, Mamba3SsdPath};
-    use crate::mamba3::single_ssd::prelude::{Mamba3SingleSsdCache, Mamba3SingleSsdCaches};
-
-    /// Zero single-ssd caches for a batch of `batch`. (A missing cache selects
-    /// the single-ssd pathway, with ≈½ the SSD memory of double-ssd, for every
-    /// rotation kind.)
-    fn zero_single_ssd_caches(
-        mamba_block: &Mamba3,
-        batch: usize,
-        n_virtual: usize,
-        device: &Device,
-    ) -> Mamba3SingleSsdCaches {
-        let caches = (0..n_virtual).map(|_| mamba_block.zero_cache(batch, device)).collect();
-        Mamba3SingleSsdCaches { caches }
-    }
+    use crate::mamba3::single_ssd::prelude::Mamba3SingleSsdCaches;
 
     impl CacheStack for Mamba3Caches {
         type Cache = Mamba3Cache;
+        /// The number of slots, for both pathways.
         fn slot_count(&self) -> usize {
-            self.caches_len()
+            match self {
+                Self::DoubleSsd(caches) => caches.caches.len(),
+                Self::SingleSsd(caches) => caches.caches.len(),
+            }
         }
         fn into_slots(self) -> Vec<Option<Mamba3Cache>> {
-            self.into_options()
+            match self {
+                Self::DoubleSsd(caches) => caches
+                    .caches
+                    .into_iter()
+                    .map(Mamba3Cache::from)
+                    .map(Some)
+                    .collect(),
+                Self::SingleSsd(caches) => caches
+                    .caches
+                    .into_iter()
+                    .map(Mamba3Cache::from)
+                    .map(Some)
+                    .collect(),
+            }
         }
+        /// The first slot gives the pathway. An empty list gives single-SSD
+        /// caches.
+        ///
+        /// # Panics
+        ///
+        /// If a slot is empty, or if the slots mix the two pathways.
         fn from_slots(slots: Vec<Option<Mamba3Cache>>) -> Self {
-            Self::from_options(slots)
-        }
-        fn cache_to_inner(c: Mamba3Cache) -> Mamba3Cache {
-            use crate::mamba3::prelude::{Mamba3FrameCache, RotationState, TapFifo};
-            fn rot(r: RotationState) -> RotationState {
-                match r {
-                    RotationState::Real(u) => RotationState::Real(u),
-                    RotationState::Angle(t) => RotationState::Angle(t.inner()),
-                    RotationState::Quaternion(t) => RotationState::Quaternion(t.inner()),
-                    RotationState::Rotor(t) => RotationState::Rotor(t.inner()),
+            let caches: Vec<Mamba3Cache> = slots.into_iter().map(Option::unwrap).collect();
+            if matches!(caches.first(), Some(Mamba3Cache::DoubleSsd(_))) {
+                Mamba3DoubleSsdCaches {
+                    caches: caches
+                        .into_iter()
+                        .map(Mamba3Cache::double_ssd)
+                        .map(Option::unwrap)
+                        .collect(),
                 }
-            }
-            fn fifo(f: TapFifo) -> TapFifo {
-                TapFifo { b_bumhr: f.b_bumhr.inner(), x_buhp: f.x_buhp.inner() }
-            }
-            fn frame(f: Mamba3FrameCache) -> Mamba3FrameCache {
-                Mamba3FrameCache {
-                    tap_fifo: f.tap_fifo.map(fifo),
-                    rotation: rot(f.rotation),
-                    log_precision_bh: f.log_precision_bh.map(|t| t.inner()),
-                    tropical_bh: f.tropical_bh.map(|t| t.inner()),
+                .into()
+            } else {
+                Mamba3SingleSsdCaches {
+                    caches: caches
+                        .into_iter()
+                        .map(Mamba3Cache::single_ssd)
+                        .map(Option::unwrap)
+                        .collect(),
                 }
-            }
-            match c {
-                Mamba3Cache::DoubleSsd(c) => Mamba3Cache::DoubleSsd(Mamba3DoubleSsdCache {
-                    ssm_bhpr: c.ssm_bhpr.inner(),
-                    frame: frame(c.frame),
-                }),
-                Mamba3Cache::SingleSsd(c) => Mamba3Cache::SingleSsd(Mamba3SingleSsdCache {
-                    ssm_bhpr: c.ssm_bhpr.inner(),
-                    frame: frame(c.frame),
-                }),
-            }
-        }
-        fn cache_from_inner(c: Mamba3Cache, device: &Device) -> Mamba3Cache {
-            use crate::mamba3::prelude::{Mamba3FrameCache, RotationState, TapFifo};
-            fn rot(r: RotationState, device: &Device) -> RotationState {
-                match r {
-                    RotationState::Real(u) => RotationState::Real(u),
-                    RotationState::Angle(t) => RotationState::Angle(lift(t, device)),
-                    RotationState::Quaternion(t) => RotationState::Quaternion(lift(t, device)),
-                    RotationState::Rotor(t) => RotationState::Rotor(lift(t, device)),
-                }
-            }
-            fn fifo(f: TapFifo, device: &Device) -> TapFifo {
-                TapFifo { b_bumhr: lift(f.b_bumhr, device), x_buhp: lift(f.x_buhp, device) }
-            }
-            fn frame(f: Mamba3FrameCache, device: &Device) -> Mamba3FrameCache {
-                Mamba3FrameCache {
-                    tap_fifo: f.tap_fifo.map(|f| fifo(f, device)),
-                    rotation: rot(f.rotation, device),
-                    log_precision_bh: f.log_precision_bh.map(|t| lift(t, device)),
-                    tropical_bh: f.tropical_bh.map(|t| lift(t, device)),
-                }
-            }
-            match c {
-                Mamba3Cache::DoubleSsd(c) => Mamba3Cache::DoubleSsd(Mamba3DoubleSsdCache {
-                    ssm_bhpr: lift(c.ssm_bhpr, device),
-                    frame: frame(c.frame, device),
-                }),
-                Mamba3Cache::SingleSsd(c) => Mamba3Cache::SingleSsd(Mamba3SingleSsdCache {
-                    ssm_bhpr: lift(c.ssm_bhpr, device),
-                    frame: frame(c.frame, device),
-                }),
-            }
-        }
-        fn cache_device(c: &Mamba3Cache) -> Device {
-            match c {
-                Mamba3Cache::DoubleSsd(c) => c.ssm_bhpr.device(),
-                Mamba3Cache::SingleSsd(c) => c.ssm_bhpr.device(),
+                .into()
             }
         }
     }
@@ -343,13 +247,11 @@ mod impl_mamba3 {
         fn block_step(&self, x: Tensor<2>, cache: Option<Mamba3Cache>) -> (Tensor<2>, Mamba3Cache) {
             self.step(x, cache)
         }
-        fn zero_caches_3d(&self, x: &Tensor<3>, n_virtual: usize) -> Mamba3Caches {
-            let [batch, _seq, _d] = x.dims();
-            zero_single_ssd_caches(self, batch, n_virtual, &x.device()).into()
-        }
-        fn zero_caches_2d(&self, x: &Tensor<2>, n_virtual: usize) -> Mamba3Caches {
-            let [batch, _d] = x.dims();
-            zero_single_ssd_caches(self, batch, n_virtual, &x.device()).into()
+        /// A single-SSD cache, because a missing cache selects that pathway.
+        /// It holds about half the SSD memory of a double-SSD cache, for every
+        /// rotation kind.
+        fn zero_cache(&self, batch: usize, device: &Device) -> Mamba3Cache {
+            self.zero_cache(batch, device).into()
         }
         fn untied_params(&self) -> Vec<UntiedParam> {
             self.untied_params()

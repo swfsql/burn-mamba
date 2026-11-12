@@ -87,27 +87,3 @@ pub struct Mamba1Caches {
     /// weight layers.
     pub caches: Vec<Mamba1Cache>,
 }
-
-impl Mamba1Caches {
-    /// Number of per-layer caches.
-    pub fn caches_len(&self) -> usize {
-        self.caches.len()
-    }
-
-    /// Wrap a vector of per-layer caches.
-    pub fn from_vec(vec: Vec<Mamba1Cache>) -> Self {
-        Self { caches: vec }
-    }
-
-    /// Wrap each per-layer cache in `Some`, so the layer loop can `take` it
-    /// without a clone.
-    pub fn into_options(self) -> Vec<Option<Mamba1Cache>> {
-        self.caches.into_iter().map(Some).collect()
-    }
-
-    /// Inverse of [`Self::into_options`]: unwrap each layer cache and re-bundle.
-    pub fn from_options(options: Vec<Option<Mamba1Cache>>) -> Self {
-        let caches = options.into_iter().map(Option::unwrap).collect();
-        Self::from_vec(caches)
-    }
-}

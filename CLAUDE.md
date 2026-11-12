@@ -256,7 +256,7 @@ src/
    ├─ block.rs           `MambaBlock`, `MambaCache`, `MambaCaches`, the network aliases
    ├─ adapters.rs        `impl Block`/`BlockConfig`/`CacheStack` of each family
    ├─ config.rs          `MambaBlockConfig`, the `{ shape, block }` configs
-   ├─ capture.rs         `CacheTensors` of each family (captured steps)
+   ├─ capture.rs         `CacheTensors` of each family: the one field list (backend hop, captured steps)
    └─ tests/             the burn-stack containers with real blocks
 build.rs                 the `cube_backend` cfg (the cubecl `backend-*` features)
 benches/layer.rs         single-block benches, run by `bench.sh`/`kernels.sh`
