@@ -233,6 +233,13 @@ _Avoid_: gate, Kalman gate
 The positive system that adds a soft maximum `max(c + a, b)` to the readout.
 _Avoid_: max-plus gate
 
+### Padding
+
+**Row end**:
+The position after the last token of a row. A cache field that keeps the last
+samples of a row reads them before this position.
+_Avoid_: real end, window (for the read at the row end)
+
 ### Packing
 
 **Origin**:
