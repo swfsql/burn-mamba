@@ -37,3 +37,14 @@ item is lost, stop and ask the user. The fix is usually a new contract in burn-s
 - [ ] The coverage compare lists no lost item of the record.
 - [ ] `docs/agents/testing.md` has no paragraph about the gate of the move.
 - [ ] `cargo test --lib -- --test-threads=1` passes on `flex`. `scripts/check.sh` passes.
+
+## Comments
+
+### From ticket 02 (the review of the contract tests)
+
+- `src/family/tests/block_contract.rs` has its own copies of the config builders
+  `m1`/`m2`/`m3` of `block.rs`. If `block.rs` keeps tests of rule 3, put one copy in
+  `src/family/tests/mod.rs` for both files.
+- The "limits" section of the header of `block_contract.rs` names `capture.rs` as the
+  test that compares each cache field directly. If this batch moves or deletes that
+  test, update that line.

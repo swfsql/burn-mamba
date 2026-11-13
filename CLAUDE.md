@@ -258,7 +258,7 @@ src/
    ├─ adapters.rs        `impl Block`/`BlockConfig`/`CacheStack` of each family
    ├─ config.rs          `MambaBlockConfig`, the `{ shape, block }` configs
    ├─ cache_traversal.rs  the cache traversal (`CacheTensors`) of each family: the one list of the tensors (backend hop, captured steps)
-   └─ tests/             the burn-stack containers with real blocks
+   └─ tests/             the block contracts on each block setting (`block_contract.rs`), the burn-stack containers with real blocks
 build.rs                 the `cube_backend` cfg (the cubecl `backend-*` features)
 benches/layer.rs         single-block benches, run by `bench.sh`/`kernels.sh`
 info/                    derivation notes

@@ -5,10 +5,14 @@
 //! its reference block; these suites pin the same contracts against real
 //! blocks — forward/step parity, cache threading, gradient reachability across
 //! a `grad_horizon` cut, class-marker placement, and the Muon allowlist.
+//!
+//! `block_contract` runs the block contracts of burn-stack on each block
+//! setting of this crate.
 
 #[cfg(feature = "mamba2")]
 mod bidi;
 mod block;
+mod block_contract;
 mod capture;
 mod class;
 mod config;
