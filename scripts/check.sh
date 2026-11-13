@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The check of this repo. CI runs it and skips the two steps that read this box:
-# the host paths and the prose.
+# The check of this repo. CI runs it and skips the three steps that read this box:
+# the host paths, the prose and the coverage.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -55,6 +55,21 @@ check_prose() {
     return "$failed"
 }
 
+# Report the coverage of `src/` by the lib tests, with the coverage script of
+# burn-stack. A box without that script or the coverage tools skips it.
+check_coverage() {
+    local script=../burn-stack/scripts/coverage.py
+    if [ ! -f "$script" ]; then
+        echo "note: this box has no $script, so the coverage did not run." >&2
+        return 0
+    fi
+    if ! python3 "$script" --check-tools; then
+        echo "note: this box has no coverage tools, so the coverage did not run." >&2
+        return 0
+    fi
+    python3 "$script" .
+}
+
 if [ -z "${CI:-}" ]; then
     # This box gives the two roots, so this file names no path of a box.
     repo_root="/$(pwd | cut -d/ -f2)"
@@ -76,6 +91,7 @@ for family in mamba1 mamba2 mamba3; do
     no_warnings cargo check --tests --no-default-features --features "$family,backend-flex"
 done
 cargo test --lib -- --test-threads=1
+check_coverage
 cargo test --examples -j 1 -- --test-threads=1
 # The deployed docs hold the private items. The public docs run last, so
 # `target/doc` keeps them.

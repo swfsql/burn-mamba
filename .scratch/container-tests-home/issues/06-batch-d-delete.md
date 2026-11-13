@@ -21,6 +21,9 @@ both repos keeps each item of the record.
 - The header of `src/family/tests/mod.rs` says that these tests check the containers
   against real blocks. Rewrite it for what stays: the block contracts on each setting,
   and the tests that only Mamba needs.
+- After the gate, delete the paragraph about the gate of the move in the "Coverage gate"
+  section of `docs/agents/testing.md`. The record of ticket 01 goes when tickets 03–06
+  are resolved.
 
 **Pin:** move the burn-stack pin to the pushed commit of burn-stack ticket 06.
 
@@ -32,4 +35,5 @@ item is lost, stop and ask the user. The fix is usually a new contract in burn-s
 - [ ] The new contracts run on each block setting.
 - [ ] The header of the family tests and the File Map line describe what stays.
 - [ ] The coverage compare lists no lost item of the record.
+- [ ] `docs/agents/testing.md` has no paragraph about the gate of the move.
 - [ ] `cargo test --lib -- --test-threads=1` passes on `flex`. `scripts/check.sh` passes.
