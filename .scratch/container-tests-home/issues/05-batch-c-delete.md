@@ -28,3 +28,14 @@ item is lost, stop and ask the user. The fix is usually a new contract in burn-s
 - [ ] The new contracts run on each block setting.
 - [ ] The coverage compare lists no lost item of the record.
 - [ ] `cargo test --lib -- --test-threads=1` passes on `flex`. `scripts/check.sh` passes.
+
+## Comments
+
+### From burn-stack ticket 05
+
+- The new contract is `muon_projections_select_only_weights_of_the_block`. Add it to
+  the contract tests, on each block setting.
+- The user chose: the count of the Muon specs of each family is rule 3. The four
+  `*_plan_fits_the_model` tests are rule 2, but their counts stay. Move the counts
+  (Mamba-3: 2, Mamba-2: 2, Mamba-1: 3, with no MLP and no untied weight) into one small
+  rule-3 test, beside `mamba3_scalar_channels_stay_on_adamw`.
