@@ -22,7 +22,6 @@ mod hnet;
 mod layer;
 #[cfg(feature = "mamba3")]
 mod layers;
-mod multi_gate;
 #[cfg(feature = "optim")]
 mod optim;
 #[cfg(any(feature = "mamba2", feature = "mamba3"))]

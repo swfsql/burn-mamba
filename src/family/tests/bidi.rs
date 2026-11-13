@@ -1,7 +1,7 @@
 //! Tests for the bidirectional stack ([`BidiLayers`](super::BidiLayers)):
 //! virtual-layer weight-sharing over the per-pair output merge, and basic
-//! forward determinism. MultiGate-on-bidi wiring is covered by the
-//! `multi_gate` tests.
+//! forward determinism. The tests of Multi-Gate Residuals on a bidirectional
+//! stack are in `../burn-stack/src/reference/tests/multi_gate.rs`.
 
 use burn_stack::modules::ResidualsConfig;
 use burn_stack::modules::bidi::{BidiLayersBuilder, OutputMerge, OutputMergeConfig};

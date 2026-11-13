@@ -112,6 +112,8 @@ contract_tests! {
     cache_traversal_moves_every_field,
     #[cfg(feature = "optim")]
     muon_projections_name_existing_rank_2_weights,
+    #[cfg(feature = "optim")]
+    muon_projections_select_only_weights_of_the_block,
 }
 
 /// Run the contract `K` on each block setting. Panic at the end with each
