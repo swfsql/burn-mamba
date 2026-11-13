@@ -41,3 +41,18 @@ contracts, on each block setting that its family tests use.
 - [ ] A failure names its contract and its setting.
 - [ ] `cargo test --lib -- --test-threads=1` passes on `flex`. `scripts/check.sh` passes.
 - [ ] The seam row and the File Map line name the block contracts.
+
+## Comments
+
+### From burn-stack ticket 02 (the review of the contract module)
+
+- A window of a contract has 7 tokens. The default Mamba chunk is longer, so
+  with it no window holds a chunk boundary. Give each SSD path a short chunk
+  (for example `Serial(Some(4))`), so that a scan error between chunks shows.
+- Each contract starts from no cache. On Mamba-3, the cache variant selects
+  the double-SSD pathway, so no contract reaches that pathway. The settings
+  above leave it out too. Batch D decides who keeps the double-SSD check of
+  `src/family/tests/capture.rs`.
+- `cache_traversal_moves_every_field` reads outputs, not fields. A field that
+  one more step does not change stays unseen. `*_assign_moves_every_field`
+  compares each field directly.
