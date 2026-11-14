@@ -24,7 +24,7 @@ An expected value comes from a source outside the code under test:
 
 ## Coverage gate
 
-`scripts/check.sh` runs `../burn-stack/scripts/coverage.py` on this crate. The script gives the line, branch and condition coverage of `src/` by the lib tests. A box without that script, `cargo-llvm-cov` or the `llvm-tools-preview` of nightly skips it with a note.
+`scripts/check.sh` runs `../burn-stack/scripts/coverage.py` on this crate. The script gives the line, branch and condition coverage of `src/` by the lib tests. A box without that script, `cargo-llvm-cov` or the nightly toolchain skips it with a note. When nightly has no `llvm-tools-preview`, the run installs it.
 
 The "Coverage gate" section of `../burn-stack/docs/agents/testing.md` gives the rules of a coverage gate. Run its compare from the root of this repo: `python3 ../burn-stack/scripts/coverage.py . --base BASE`. A commit has no `[patch]`, so a commit base builds against its pin.
 
