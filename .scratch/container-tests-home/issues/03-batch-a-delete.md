@@ -13,7 +13,9 @@ of both repos keeps each item of the record.
 
 - Read the sorted list under `## Comments` of burn-stack ticket 03.
 - Delete each test of `src/family/tests/class.rs` that the list marks rule 1 or rule 2.
-  Keep each test of rule 3.
+  Also delete each test that the list marks "3, repeat": the user chose this in burn-stack
+  ticket 03, because a kept test of burn-mamba makes its checks. Keep each other test of
+  rule 3.
 - Add each contract that burn-stack ticket 03 added to the contract tests of ticket 02,
   on each block setting.
 - Delete a test file that has no test left, and its `mod` line.
