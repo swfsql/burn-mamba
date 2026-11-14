@@ -94,7 +94,16 @@ the log is `tmp/coverage-record/gate-04.log`. The first run passed:
 - Kept:
   - The first sentence of the header of `src/family/tests/mod.rs`, the File Map line of
     `src/family/tests/` and the seam row. Ticket 06 rewrites them for what stays.
-  - The compares of the gate list lost lines and branches. They compare the conditions
-    only as totals. The totals of burn-mamba equal the record (82 of 108). The burn-stack
-    union has 135 of 348, and the record has 134 of 347. `record.md` defines the pass by
-    the lost lines and branches, so the gate passes by its own rule.
+- Not a defect:
+  - The spec review said that the compares check the conditions only as totals. That is
+    false. `coverage.py` counts a condition as covered when the tests cover its two
+    outcomes. The compare checks each outcome of each condition of the base. So a lost
+    condition shows as a lost branch, at the span of the condition.
+  - A test showed it. `tmp/ct04/lost_condition_demo.py` sets to zero the false outcome of
+    one covered condition (`src/block_contract.rs` 165:16) in a copy of
+    `after-04/burn-stack-by-both.json`. The compare of the copy lists 1 lost branch, and
+    134 of 348 conditions in place of 135. The compares of this gate list no lost branch,
+    so they lose no condition.
+  - The compare does not name a lost condition as a condition. The ticket
+    `../burn-stack/.scratch/coverage-lost-conditions/issues/01-the-compare-names-each-lost-condition.md`
+    adds that.
