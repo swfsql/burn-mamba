@@ -68,6 +68,9 @@ whatever class markers they splice (see [<code>crate::utils::padding</code>]).</
 cache serves <code>forward</code> and <code>step</code>. A container calls it once for each
 slot, so each slot has its own buffers (a captured step writes each
 slot in place).</p>
+<p>The zero cache equals no cache: <code>block_forward</code> and <code>block_step</code> from
+it give what they give from <code>None</code>. A container starts a slot in
+either way.</p>
 </div></details><details class="toggle method-toggle" open><summary><section id="tymethod.untied_params" class="method"><h4 class="code-header">fn <a href="#tymethod.untied_params" class="fn">untied_params</a>(&amp;self) -&gt; <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;UntiedParam&gt;</h4></section></summary><div class="docblock"><p>The parameters that this block stores <strong>once per application</strong> of its
 real layer (not once), each with the axis of its copies. Empty when its
 config unties nothing. The <a href="trait.BlockConfig.html" title="trait burn_mamba::prelude::BlockConfig"><code>BlockConfig</code></a> decides which they are and
