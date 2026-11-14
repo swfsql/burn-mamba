@@ -106,6 +106,7 @@ macro_rules! contract_tests {
 contract_tests! {
     forward_equals_step_unrolled,
     forward_splits_into_windows_through_the_cache,
+    zero_cache_equals_no_cache,
     padded_rows_equal_each_row_alone,
     packed_segments_equal_each_segment_alone,
     record_round_trip_keeps_the_block,

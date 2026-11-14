@@ -12,7 +12,6 @@
 mod block;
 mod block_contract;
 mod capture;
-mod class;
 mod config;
 #[cfg(feature = "mamba3")]
 mod hnet;
