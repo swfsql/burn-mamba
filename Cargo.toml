@@ -47,7 +47,7 @@ dev-simd = ["burn/simd", "burn/std", "burn-stack/dev-simd"]
 dev-autotune = ["burn/autotune", "burn-stack/dev-autotune"]
 
 [dependencies]
-burn-stack = { git = "https://github.com/swfsql/burn-stack.git", rev = "a236fe3ffff193da761b1a74775816616300abd9", default-features = false }
+burn-stack = { git = "https://github.com/swfsql/burn-stack.git", rev = "d8d8d351088bf49961a3695361e48d121ccfda71", default-features = false }
 serde = { version = "1.0.0", features = ["derive"] }
 burn-flex = { version = "0.22.1", default-features = false, optional = true }
 # burn-flex = { git = "https://github.com/tracel-ai/burn.git", rev = "a6de085337c847ee13188d6d3085955709cccf38", default-features = false, optional = true }
@@ -72,7 +72,7 @@ burn-fusion = { version = "0.22.1", default-features = false, optional = true}
 # has the Muon items in the traits of burn-stack. This self-dependency enables
 # `optim` in this crate too, so that the impls of these items compile.
 burn-mamba = { path = ".", default-features = false, features = ["optim"] }
-burn-stack = { git = "https://github.com/swfsql/burn-stack.git", rev = "a236fe3ffff193da761b1a74775816616300abd9", default-features = false, features = ["test-helpers", "examples-common"] }
+burn-stack = { git = "https://github.com/swfsql/burn-stack.git", rev = "d8d8d351088bf49961a3695361e48d121ccfda71", default-features = false, features = ["test-helpers", "examples-common"] }
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 rand = "0.10.3"
 rand_chacha = "0.10.0"
