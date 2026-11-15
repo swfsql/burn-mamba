@@ -1,58 +1,37 @@
 //! Tests of what only the enum [`MambaBlock`] can break:
 //!
 //! - the derives, the records and the path segment of a variant,
-//! - exact outputs and the flat caches,
+//! - exact outputs, and the class markers through the enum,
+//! - the empty slots of the flat caches, and the zero cache of Mamba-3,
+//! - an H-Net with stages of one family and a main stack of another,
 //! - the mismatch panics and the mixed-stack rule.
 //!
-//! The other tests of this directory cover the containers.
+//! `block_contract.rs` runs the block contracts on the enum.
 
 // With one family enabled, the enum has one variant, and each `let .. else`
 // here is irrefutable.
 #![allow(irrefutable_let_patterns)]
 
+use super::D_MODEL;
+#[cfg(feature = "mamba1")]
+use super::m1;
+#[cfg(feature = "mamba2")]
+use super::m2;
+#[cfg(all(feature = "mamba2", feature = "mamba3", feature = "optim"))]
+use super::m2_of_width;
+#[cfg(feature = "mamba3")]
+use super::m3;
 use crate::prelude::*;
 use burn::module::{ModuleMapper, ModuleVisitor, Param};
 use burn::prelude::*;
-use burn::tensor::{Distribution, Gradients};
+use burn::tensor::Distribution;
 use burn_stack::modules::TensorZip;
 use burn_stack::utils::ClassCursors;
 use burn_stack::utils::test_helpers::{dtype_tol, max_abs_diff, max_rel_diff, test_device};
 #[cfg(all(feature = "mamba2", feature = "mamba3"))]
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-const D_MODEL: usize = 16;
 const TOL: f32 = 1e-4;
-
-#[cfg(feature = "mamba1")]
-fn m1() -> Mamba1Config {
-    Mamba1Config::new(D_MODEL).with_state_rank(8)
-}
-
-#[cfg(feature = "mamba2")]
-fn m2_of_width(d_model: usize) -> Mamba2Config {
-    Mamba2Config::new(d_model)
-        .with_expand(2)
-        .with_per_head_dim(4)
-        .with_state_rank(8)
-        .with_ngroups(1)
-        .with_conv_kernel(4)
-}
-
-#[cfg(feature = "mamba2")]
-fn m2() -> Mamba2Config {
-    m2_of_width(D_MODEL)
-}
-
-#[cfg(feature = "mamba3")]
-fn m3() -> Mamba3Config {
-    Mamba3Config::new(D_MODEL)
-        .with_expand(2)
-        .with_per_head_dim(4)
-        .with_state_rank(8)
-        .with_ngroups(1)
-        .with_mimo_rank(1)
-        .with_rotation_fraction(0.5)
-}
 
 /// Each enabled family: its tag, its block config and its SSD path.
 fn families() -> Vec<(&'static str, MambaBlockConfig, MambaSsdPath)> {
@@ -97,27 +76,6 @@ fn param_shapes(module: &impl Module) -> Vec<(String, Vec<usize>)> {
     let mut visitor = ParamShapes::default();
     module.visit(&mut visitor);
     visitor.shapes
-}
-
-struct GradCount<'a> {
-    grads: &'a Gradients,
-    some: usize,
-    all: usize,
-}
-
-impl ModuleVisitor for GradCount<'_> {
-    fn visit_float<const N: usize>(&mut self, param: &Param<Tensor<N>>) {
-        self.all += 1;
-        if param.val().grad(self.grads).is_some() {
-            self.some += 1;
-        }
-    }
-}
-
-fn grad_count(module: &impl Module, grads: &Gradients) -> (usize, usize) {
-    let mut visitor = GradCount { grads, some: 0, all: 0 };
-    module.visit(&mut visitor);
-    (visitor.some, visitor.all)
 }
 
 struct Jitter;
@@ -201,36 +159,6 @@ fn param_paths_add_only_the_variant() {
     assert_only_the_variant_segment_differs(m3(), MambaBlockConfig::Mamba3(m3()), "Mamba3");
 }
 
-/// A record survives a round trip in memory and through a file. A fresh network
-/// differs until it loads.
-#[test]
-fn record_round_trip() {
-    let device = test_device();
-    let dir = std::env::temp_dir().join(format!("burn-mamba-record-round-trip-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    for (tag, block, path) in families() {
-        let shape = latent_shape(2);
-        let net: MambaLatentNet = shape.init(block.clone(), &device);
-        let x = input(2, 6, &device);
-        let (want, _) = net.forward(x.clone(), None, path.clone(), None, None);
-
-        let fresh: MambaLatentNet = shape.init(block.clone(), &device);
-        let (other, _) = fresh.forward(x.clone(), None, path.clone(), None, None);
-        assert!(max_abs_diff(want.clone(), other) > 0.0, "{tag}");
-        let loaded = fresh.load_record(net.clone().into_record());
-        let (got, _) = loaded.forward(x.clone(), None, path.clone(), None, None);
-        assert_eq!(max_abs_diff(want.clone(), got), 0.0, "{tag}: in memory");
-
-        let file = dir.join(tag);
-        net.save_file(file.clone()).unwrap();
-        let fresh: MambaLatentNet = shape.init(block, &device);
-        let loaded = fresh.load_file(file);
-        let (got, _) = loaded.forward(x, None, path, None, None);
-        assert_eq!(max_abs_diff(want, got), 0.0, "{tag}: through a file");
-    }
-    std::fs::remove_dir_all(&dir).unwrap();
-}
-
 /// A record of one family does not load into a block of another.
 #[test]
 #[cfg(all(feature = "mamba2", feature = "mamba3"))]
@@ -311,117 +239,32 @@ fn network_output_and_gradients_are_exact() {
 // The caches
 // ---------------------------------------------------------------------------
 
+/// The flat caches hold empty slots. Each slot has its own family tag, so
+/// `from_slots` needs no family for a slot of `None`.
 #[test]
-#[cfg(feature = "autodiff")]
-fn cache_stack_and_traversal() {
-    struct Count(usize);
-    impl TensorZip for Count {
-        fn zip<const N: usize>(&mut self, a: Tensor<N>, _b: Tensor<N>) -> Tensor<N> {
-            self.0 += 1;
-            a
-        }
-    }
-    let device = test_device().autodiff();
-    for (tag, block, path) in families() {
-        let net: MambaLatentNet = latent_shape(2).init(block, &device);
-        let x = input(2, 6, &device);
-        let (_, caches) = net.forward(x.clone(), None, path.clone(), None, None);
-        assert_eq!(caches.slot_count(), 2, "{tag}");
-
-        // Take the slots, and rebuild the caches from them.
-        let rebuilt = MambaCaches::from_slots(caches.clone().into_slots());
-        let mut count = Count(0);
-        let same = rebuilt.zip_tensors(caches.clone(), &mut count);
-        assert!(count.0 >= 2, "{tag}: the traversal visits the tensors");
-
-        // All-`None` slots rebuild with no guess.
-        let empty = MambaCaches::from_slots(vec![None, None]);
-        assert_eq!(empty.slot_count(), 2);
-
-        // Move the caches to the inner backend and return them. Then run the
-        // two captured-step operations.
-        let detached = same.detach();
-        let owned = detached.clone().into_owned_buffers();
-        let _assigned = owned.assign_in_place(detached.clone());
-        let (_, again) = net.forward(x, Some(detached), path, None, None);
-        assert_eq!(again.slot_count(), 2, "{tag}: a forward continues from detached caches");
-
-        // The stack builds the zero cache of each virtual layer through the
-        // block. A step from these caches checks the family tag of each one.
-        // The batch (3) differs from the count of virtual layers (2).
-        let zeros = net.layers.zero_caches(3, &device);
-        assert_eq!(zeros.slot_count(), 2, "{tag}");
-        // A missing cache selects the single-SSD pathway.
-        #[cfg(feature = "mamba3")]
-        if let Some(Some(MambaCache::Mamba3(zero))) = zeros.slots.first() {
-            assert!(matches!(zero, Mamba3Cache::SingleSsd(_)), "{tag}: a zero cache is single-SSD");
-        }
-        let (_, c) = net.step(Tensor::zeros([3, 3], &device), Some(zeros), None);
-        assert_eq!(c.slot_count(), 2, "{tag}");
-    }
+fn the_flat_caches_keep_empty_slots() {
+    let empty = MambaCaches::from_slots(vec![None, None]);
+    assert_eq!(empty.slot_count(), 2);
+    assert!(empty.into_slots().iter().all(Option::is_none), "a slot of `None` must stay empty");
 }
 
-/// A captured step runs over the flat caches. On flex it replays eagerly, so
-/// this checks the bounds and the write-back.
+/// The zero cache of a Mamba-3 block in the enum is a single-SSD cache,
+/// because a missing cache selects that pathway.
 #[test]
 #[cfg(feature = "mamba3")]
-fn captured_step_over_flat_caches() {
-    use burn_stack::utils::capture::CapturedStep;
-
+fn the_zero_cache_of_mamba3_is_single_ssd() {
     let device = test_device();
-    let net: MambaLatentNet = latent_shape(2).init(MambaBlockConfig::Mamba3(m3()), &device);
-    let xs: Vec<Tensor<2>> = (0..4)
-        .map(|_| Tensor::random([2, 3], Distribution::Normal(0.0, 1.0), &device))
-        .collect();
-    let mut eager = Vec::new();
-    let mut caches = None;
-    for x in &xs {
-        let (y, c) = net.step(x.clone(), caches, None);
-        eager.push(y);
-        caches = Some(c);
-    }
-    let (y0, caches) = net.step(xs[0].clone(), None, None);
-    assert_eq!(max_abs_diff(y0, eager[0].clone()), 0.0);
-    // Safety: the step reads only its arguments and `net`, by reference.
-    let mut captured =
-        unsafe { CapturedStep::capture(&device, xs[1].clone(), caches, |x, c| net.step(x, Some(c), None)) };
-    for k in 1..4 {
-        let y = captured.step(xs[k].clone()).clone();
-        let d = max_abs_diff(y, eager[k].clone());
-        assert_eq!(d, 0.0, "step {k} differs by {d}");
-    }
+    let block = MambaBlock::Mamba3(BlockConfig::init_block(&m3(), 1, &device));
+    let zero = block.zero_cache(3, &device);
+    assert!(
+        matches!(zero, MambaCache::Mamba3(Mamba3Cache::SingleSsd(_))),
+        "the zero cache of Mamba-3 must be a single-SSD cache",
+    );
 }
 
 // ---------------------------------------------------------------------------
-// The knobs of the stack
+// The class markers
 // ---------------------------------------------------------------------------
-
-/// The enum runs with these knobs of the stack: virtual layers, a gradient
-/// horizon (the inner-backend hop through the caches and `Module::valid`),
-/// multi-gate residuals and class latents.
-#[test]
-#[cfg(feature = "autodiff")]
-fn stack_knobs() {
-    let device = test_device().autodiff();
-    for (tag, block, path) in families() {
-        let stack = NetworkShape::new(2)
-            .with_n_virtual_layers(Some((4, Schedule::Cyclic)))
-            .with_grad_horizon(Some(GradHorizon::last(2, 4)))
-            .with_class_latents(vec![ClassLatent::Start; 1])
-            .with_residuals(ResidualsConfig::MultiGate {
-                n_stream: 2,
-                init_bias: 0.0,
-                init_bias_offset: 0.0,
-                per_virtual_layer: false,
-            });
-        let net: MambaLatentNet = LatentShape::new(3, 5, stack).init(block, &device);
-        let (y, caches) = net.forward(input(2, 6, &device), None, path, None, None);
-        assert_eq!(caches.slot_count(), 4, "{tag}");
-        let grads = y.sum().backward();
-        let (some, all) = grad_count(&net.layers.real_layers[1].block, &grads);
-        assert!(some > 0 && all > 0, "{tag}: {some} of {all}");
-    }
-}
 
 /// The enum runs a class latent of the stack and a class token of the network.
 /// A `prime` emits both, and each `step` after it gives what `forward` gives,
@@ -459,39 +302,9 @@ fn prime_and_class_tokens_through_the_enum() {
     }
 }
 
-/// `Layer::application` narrows the untied copies through the enum, in
-/// `forward` and in `step`.
-#[test]
-#[cfg(feature = "mamba3")]
-fn untied_through_the_enum() {
-    let device = test_device().autodiff();
-    let stack = NetworkShape::new(2)
-        .with_n_virtual_layers(Some((5, Schedule::Cyclic)))
-        .with_untied(vec![LayerUntied::Norm]);
-    let untied = || m3().with_untied(vec![Mamba3Untied::DtBias, Mamba3Untied::D]);
-    let net: MambaLatentNet =
-        LatentShape::new(3, 5, stack.clone()).init(MambaBlockConfig::Mamba3(untied()), &device);
-    let MambaBlock::Mamba3(_) = &net.layers.real_layers[0].block else { unreachable!() };
-    assert!(!Block::untied_params(&net.layers.real_layers[0].block).is_empty());
-
-    let tagged_dims: Vec<_> = param_shapes(&net).into_iter().map(|(_, dims)| dims).collect();
-    let family_dims: Vec<_> = param_shapes(&LatentShape::new(3, 5, stack).init(untied(), &device))
-        .into_iter()
-        .map(|(_, dims)| dims)
-        .collect();
-    assert_eq!(tagged_dims, family_dims, "the same tiled shapes as the family type");
-
-    let net = net.map(&mut Jitter);
-    let x = input(2, 4, &device);
-    let (whole, _) = net.forward(x.clone(), None, MambaSsdPath::mamba3_default(), None, None);
-    let mut caches = None;
-    for t in 0..4 {
-        let (y, c) = net.step(x.clone().narrow(1, t, 1).squeeze_dim(1), caches, None);
-        caches = Some(c);
-        let d = max_rel_diff(y, whole.clone().narrow(1, t, 1).squeeze_dim(1));
-        assert!(d < dtype_tol(TOL), "position {t} differs by {d}");
-    }
-}
+// ---------------------------------------------------------------------------
+// The H-Net
+// ---------------------------------------------------------------------------
 
 /// One network type holds stages of one family and a main stack of another.
 #[test]
@@ -533,39 +346,6 @@ fn hnet_mixes_stage_and_main_family() {
     let mut optim = plan.build(&FallbackConfig::AdamW(AdamWConfig::new()), &muon_config(0.0));
     let loss = whole.sum() + routing[0].ratio_loss(3.0).sum();
     let grads = GradientsParams::from_grads(loss.backward(), &net);
-    let _net = optim.step(1e-3, net, grads);
-}
-
-// ---------------------------------------------------------------------------
-// The optimizer
-// ---------------------------------------------------------------------------
-
-/// The Muon plan selects the same weights through the variant segment.
-#[test]
-#[cfg(all(feature = "mamba3", feature = "optim"))]
-fn muon_plan_matches_the_family_type() {
-    use burn::optim::{AdamWConfig, GradientsParams};
-    use burn_stack::optim::FallbackConfig;
-
-    let device = test_device().autodiff();
-    let shape = latent_shape(2);
-    let config = MambaLatentNetConfig::new(shape.clone(), MambaBlockConfig::Mamba3(m3()));
-    let net = config.init(&device);
-    let plan = config.muon_plan();
-    let report = plan.describe(&net);
-    let line = report
-        .lines()
-        .find(|l| l.contains("block.Mamba3") && l.contains("in_proj.weight"))
-        .unwrap_or_else(|| panic!("no in_proj under the variant in\n{report}"));
-    assert!(line.contains("muon["), "{line}");
-
-    let f = shape.init(m3(), &device);
-    let f_report = shape.stack.muon_plan(&m3()).describe(&f);
-    assert_eq!(report.matches("muon[").count(), f_report.matches("muon[").count());
-
-    let mut optim = plan.build(&FallbackConfig::AdamW(AdamWConfig::new()), &muon_config(0.0));
-    let (y, _) = net.forward(input(2, 6, &device), None, MambaSsdPath::mamba3_default(), None, None);
-    let grads = GradientsParams::from_grads(y.sum().backward(), &net);
     let _net = optim.step(1e-3, net, grads);
 }
 

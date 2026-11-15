@@ -7,7 +7,7 @@
 | Form agreement (ADR-0007) | `ssd_path/tests.rs` of each SSD directory, `src/mamba3/single_ssd/single_ssd/tests.rs` | A fast form that differs from its simple form in outputs, final caches or gradients | A bug that all forms share |
 | Forward/step parity | The `tests.rs` of `src/mamba1/mamba1/`, `src/mamba2/mamba2/`, `src/mamba3/double_ssd/double_ssd/`, `src/mamba3/single_ssd/single_ssd/` and `src/mamba3/product/` | A forward and a step that disagree, and an error in the cache | A bug that both calls share |
 | Mechanism against its direct form | `src/mamba3/rotation/tests.rs`, `src/mamba3/single_ssd/token_band/tests.rs`, `src/mamba3/quat_scan/tests.rs`, `src/mamba3/helpers/tests.rs`, `src/mamba3/plant_frame/tests.rs`, `src/row_end/tests.rs` | A factored or fast mechanism that differs from its direct computation | A wrong definition |
-| Block contracts | `src/family/tests/block_contract.rs`: each block contract of burn-stack on each block setting. `src/family/tests/optim.rs` tests the Muon specs that only the Mamba math sets. The other files of `src/family/tests/` test the containers with real blocks. | A block setting that breaks a contract, with a failure that names the contract and the setting. A change of the count of the Muon specs of a family. | A container need that no contract states (the coverage report shows it), and a math error that the contracts do not show |
+| Block contracts | `src/family/tests/block_contract.rs`: each block contract of burn-stack on each block setting. `src/family/tests/optim.rs` tests the Muon specs that only the Mamba math sets. The other files of `src/family/tests/` test what only Mamba needs. Examples are the family enum, the configs, the reset alignment and the cache write-back of Mamba-3. | A block setting that breaks a contract, with a failure that names the contract and the setting. A change of the count of the Muon specs of a family. An enum that changes the outputs of its block, and a family mismatch that does not panic. | A container need that no contract states (the coverage report shows it), and a math error that the contracts do not show |
 | Example data and hand-set solutions | `tests.rs` of each example, run with `cargo test --examples` | An error in the data of an example, or a hand-set solution that fails | Whether training finds a solution |
 
 ## Expected values
@@ -27,8 +27,6 @@ An expected value comes from a source outside the code under test:
 `scripts/check.sh` runs `../burn-stack/scripts/coverage.py` on this crate. The script gives the line, branch and condition coverage of `src/` by the lib tests. A box without that script, `cargo-llvm-cov` or the nightly toolchain skips it with a note. When nightly has no `llvm-tools-preview`, the run installs it.
 
 The "Coverage gate" section of `../burn-stack/docs/agents/testing.md` gives the rules of a coverage gate. Run its compare from the root of this repo: `python3 ../burn-stack/scripts/coverage.py . --base BASE`. A commit has no `[patch]`, so a commit base builds against its pin.
-
-Tickets 03–06 of `.scratch/container-tests-home/` move the container tests to burn-stack. Their gate is the record `tmp/coverage-record/record.md`. After each batch, the lib tests of the two repos together cover each item of the record, in the `src/` of each repo. `coverage.py` counts only the `src/` of the crate that it runs. So for the `src/` of burn-stack, the gate uses the throwaway script `tmp/coverage-record/dep_report.py`. The record gives the commands, and each batch ticket gives the place of its result.
 
 ## Bench gates
 

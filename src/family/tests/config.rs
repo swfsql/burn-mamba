@@ -1,5 +1,8 @@
 //! The `{ shape, block }` configs. Each container and each family survives a
 //! JSON round trip, and the parsed config builds a network of the same size.
+//!
+//! The contract `json_round_trip_keeps_the_config` (`block_contract.rs`)
+//! checks the config of each block setting alone.
 
 use crate::prelude::*;
 use burn::config::config_to_json;
@@ -132,7 +135,8 @@ fn bidi_layers_config_survives_a_json_round_trip() {
 }
 
 /// Each pair of families: the stages take one, and the main stack takes the
-/// other. `hnet.rs` of these tests builds and runs this config.
+/// other. `hnet_mixes_stage_and_main_family` (`block.rs`) builds and runs a
+/// config of this type, with Mamba-2 stages and a Mamba-3 main stack.
 #[test]
 fn hnet_vocab_net_config_survives_a_json_round_trip() {
     for stage in block_configs() {
