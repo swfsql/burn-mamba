@@ -2,7 +2,7 @@
 
 Status: needs-triage
 
-Blocked by: None
+Blocked by: 18
 
 From the architecture review of 2026-11-16. Line numbers are those of commit
 `7807d31b`. The review compiled nothing.

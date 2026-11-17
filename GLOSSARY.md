@@ -103,12 +103,14 @@ _Avoid_: algorithm, variant, mode
 **Pathway**:
 How Mamba-3 maps its trapezoidal recurrence onto SSD calls. Double-SSD makes
 one SSD call for each term of the trapezoid. Single-SSD makes one SSD call for
-all terms. Each pathway works with each SSD path.
+all terms. Each pathway works with each SSD path. The scan options of the call
+select the pathway.
 _Avoid_: algorithm, variant, mode, path
 
 **Scan options**:
-The choices of how a block computes its chunkwise SSD scan: the SSD path and
-the chunk length. All scan options give the same values and gradients.
+The choices of how a block computes its chunkwise SSD scan: the SSD path, the
+chunk length and, in Mamba-3, the pathway. All scan options give the same
+values and gradients.
 _Avoid_: SSD path (for all of the choices), Mamba-3 options
 
 **Accumulator**:
