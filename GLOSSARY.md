@@ -106,6 +106,11 @@ one SSD call for each term of the trapezoid. Single-SSD makes one SSD call for
 all terms. Each pathway works with each SSD path.
 _Avoid_: algorithm, variant, mode, path
 
+**Scan options**:
+The choices of how a block computes its chunkwise SSD scan: the SSD path and
+the chunk length. All scan options give the same values and gradients.
+_Avoid_: SSD path (for all of the choices), Mamba-3 options
+
 **Accumulator**:
 The running sum that single-SSD keeps in place of the state. It is equal to the
 state only at call boundaries.
