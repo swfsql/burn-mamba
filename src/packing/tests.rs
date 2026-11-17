@@ -536,11 +536,10 @@ fn packed_mamba2_streams_are_the_batch_of_their_sequences() {
         .with_state_rank(8)
         .with_per_head_dim(8)
         .init(&device);
-    let paths: [fn(Option<usize>) -> Mamba2SsdPath; 2] =
-        [Mamba2SsdPath::Serial, Mamba2SsdPath::SerialRecalculated];
-    for path in paths {
+    for ssd_path in [SsdPath::Serial, SsdPath::SerialRecalculated] {
         check_streams(&block, &MAMBA2_SCHEDULES, 4, |x, cache, origin, chunk, pad, reset| {
-            block.forward_packed(x, cache, origin, path(Some(chunk)), pad, reset)
+            let scan_options = Mamba2ScanOptions::new(ssd_path).with_chunk_len(Some(chunk));
+            block.forward_packed(x, cache, origin, scan_options, pad, reset)
         });
     }
 }
@@ -582,19 +581,17 @@ fn packed_mamba3_streams_are_the_batch_of_their_sequences() {
         mamba3(R::Real1D, T::None, 2, 2, G::Projected, Tr::MaxPlus),
         mamba3(R::Complex2D, T::HorizontalInToken, 3, 1, G::Kalman, Tr::None),
     ];
-    let paths: [fn(Option<usize>) -> Mamba3SsdPath; 2] =
-        [Mamba3SsdPath::Serial, Mamba3SsdPath::SerialRecalculated];
     for config in &configs {
         let block = config.init(&device);
         let u = block.micro_steps;
-        for path in paths {
+        for ssd_path in [SsdPath::Serial, SsdPath::SerialRecalculated] {
             // A chunk of `chunk` tokens is `chunk · u` positions.
-            let path = |chunk: usize| path(Some(chunk * u));
+            let scan_options = |chunk: usize| Mamba3ScanOptions::new(ssd_path).with_chunk_len(Some(chunk * u));
             check_streams(&block, &MAMBA3_SCHEDULES, 2, |x, cache, origin, chunk, pad, reset| {
-                block.forward_double_ssd_packed(x, cache, origin, &path(chunk), pad, reset)
+                block.forward_double_ssd_packed(x, cache, origin, &scan_options(chunk), pad, reset)
             });
             check_streams(&block, &MAMBA3_SCHEDULES, 2, |x, cache, origin, chunk, pad, reset| {
-                block.forward_single_ssd_packed(x, cache, origin, &path(chunk), pad, reset)
+                block.forward_single_ssd_packed(x, cache, origin, &scan_options(chunk), pad, reset)
             });
         }
     }
@@ -639,7 +636,14 @@ fn packed_minimal_panics() {
         .init(&device);
     let x = Tensor::<3>::zeros([1, 8, D_MODEL], &device);
     let reset = Tensor::<2, Int>::zeros([1, 8], &device).bool();
-    let _ = block.forward_packed(x, None, None, Mamba2SsdPath::Minimal(Some(4)), None, Some(reset));
+    let _ = block.forward_packed(
+        x,
+        None,
+        None,
+        Mamba2ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)),
+        None,
+        Some(reset),
+    );
 }
 
 /// A reset inside a chunk would need the masks of the official kernels inside
@@ -658,7 +662,14 @@ fn reset_inside_a_chunk_panics() {
     let reset = Tensor::<1, Int>::arange(0..8, &device)
         .equal_elem(2)
         .reshape([1, 8]);
-    let _ = block.forward_packed(x, None, None, Mamba2SsdPath::Serial(Some(4)), None, Some(reset));
+    let _ = block.forward_packed(
+        x,
+        None,
+        None,
+        Mamba2ScanOptions::new(SsdPath::Serial).with_chunk_len(Some(4)),
+        None,
+        Some(reset),
+    );
 }
 
 /// A Mamba-2 conv tap reads `conv_kernel − 1` positions back, and only the
@@ -677,5 +688,12 @@ fn packed_mamba2_chunk_shorter_than_the_conv_panics() {
     let reset = Tensor::<1, Int>::arange(0..8, &device)
         .equal_elem(0)
         .reshape([1, 8]);
-    let _ = block.forward_packed(x, None, None, Mamba2SsdPath::Serial(Some(2)), None, Some(reset));
+    let _ = block.forward_packed(
+        x,
+        None,
+        None,
+        Mamba2ScanOptions::new(SsdPath::Serial).with_chunk_len(Some(2)),
+        None,
+        Some(reset),
+    );
 }

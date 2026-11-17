@@ -491,7 +491,7 @@ fn run(
     let (out, _c) = model.forward(
         inputs,
         None,
-        MambaSsdPath::Mamba3(Mamba3SsdPath::Minimal(None)),
+        MambaScanOptions::Mamba3(Mamba3ScanOptions::new(SsdPath::Minimal)),
         None,
         None,
     );

@@ -1541,10 +1541,10 @@ impl Mamba3 {
         &self,
         input_bsm: Tensor<3>,
         cache: Option<Mamba3Cache>,
-        ssd_path: Mamba3SsdPath,
+        scan_options: Mamba3ScanOptions,
         pad_bs: Option<Tensor<2, Bool>>,
     ) -> (Tensor<3>, Mamba3Cache) {
-        self.forward_packed(input_bsm, cache, None, ssd_path, pad_bs, None)
+        self.forward_packed(input_bsm, cache, None, scan_options, pad_bs, None)
     }
 
     /// [`Self::forward`] over a **packed** batch: each row holds several
@@ -1566,7 +1566,7 @@ impl Mamba3 {
     /// the `β` taps (they read the tap FIFO), the cumulative rotation, and the
     /// positive systems. The variant of `cache` selects the pathway, and
     /// `origin` of either variant converts to it. Only
-    /// [`Mamba3SsdPath::Serial`] and [`Mamba3SsdPath::SerialRecalculated`] take
+    /// [`SsdPath::Serial`] and [`SsdPath::SerialRecalculated`] take
     /// resets.
     #[allow(non_snake_case)]
     pub fn forward_packed(
@@ -1574,7 +1574,7 @@ impl Mamba3 {
         input_bsm: Tensor<3>,
         cache: Option<Mamba3Cache>,
         origin: Option<Mamba3Cache>,
-        ssd_path: Mamba3SsdPath,
+        scan_options: Mamba3ScanOptions,
         pad_bs: Option<Tensor<2, Bool>>,
         reset_bs: Option<Tensor<2, Bool>>,
     ) -> (Tensor<3>, Mamba3Cache) {
@@ -1605,7 +1605,7 @@ impl Mamba3 {
                     input_bsm,
                     Some(cache),
                     origin,
-                    &ssd_path,
+                    &scan_options,
                     pad_bs,
                     reset_bs,
                 );
@@ -1620,7 +1620,7 @@ impl Mamba3 {
                     input_bsm,
                     Some(cache),
                     origin,
-                    &ssd_path,
+                    &scan_options,
                     pad_bs,
                     reset_bs,
                 );

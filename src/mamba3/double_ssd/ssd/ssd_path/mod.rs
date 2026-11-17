@@ -2,9 +2,7 @@
 //!
 //! [`Mamba3DoubleSsdInput`] bundles the pre-processed tensors that one standard
 //! SSD pass uses. [`Mamba3DoubleSsdInput::run`] runs the SSD path that the
-//! shared [`Mamba3SsdPath`] selects.
-//!
-//! [`Mamba3SsdPath`]: crate::mamba3::ssd_path::Mamba3SsdPath
+//! shared [`SsdPath`](crate::ssd_path::SsdPath) selects.
 
 use crate::mamba3::prelude::*;
 use burn::prelude::*;
@@ -94,23 +92,24 @@ impl Mamba3DoubleSsdInput {
 impl Mamba3DoubleSsdInput {
     /// Run the selected double-ssd SSD path on this MIMO-first input:
     /// `double_ssd_minimal`, `double_ssd_serial`, or
-    /// `double_ssd_serial_recalculated`, by [`Mamba3SsdPath`] variant.
+    /// `double_ssd_serial_recalculated`, by [`SsdPath`] variant. The chunk
+    /// length is already in the tensor shapes.
     ///
     /// # Returns
     /// - `y_bntmhp`: `[batch, nchunks, chunk_tokens, mimo_rank, nheads, per_head_dim]`,
     ///   at token resolution, the resolution of the readout (see [`Self::c_bntmhr`])
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]`
-    pub fn run(self, path: &Mamba3SsdPath) -> (Tensor<6>, Tensor<4>) {
-        match path {
-            Mamba3SsdPath::Minimal(_) => {
+    pub fn run(self, ssd_path: SsdPath) -> (Tensor<6>, Tensor<4>) {
+        match ssd_path {
+            SsdPath::Minimal => {
                 assert!(
                     self.resets.is_none(),
                     "Minimal does not take resets: use Serial or SerialRecalculated"
                 );
                 self.double_ssd_minimal()
             }
-            Mamba3SsdPath::Serial(_) => self.double_ssd_serial(),
-            Mamba3SsdPath::SerialRecalculated(_) => self.double_ssd_serial_recalculated(),
+            SsdPath::Serial => self.double_ssd_serial(),
+            SsdPath::SerialRecalculated => self.double_ssd_serial_recalculated(),
         }
     }
 }

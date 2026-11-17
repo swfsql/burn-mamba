@@ -13,7 +13,7 @@
 //!
 //! The interface is MIMO-first (as the other burn-mamba SSD inputs), and
 //! `mimo_rank = 1` is the SISO case.
-//! [`Mamba3SsdPath`](crate::mamba3::ssd_path::Mamba3SsdPath), shared with the
+//! [`SsdPath`](crate::ssd_path::SsdPath), shared with the
 //! double-ssd pathway, selects the SSD path.
 
 use crate::mamba3::prelude::*;
@@ -163,8 +163,9 @@ impl Mamba3SingleSsdInput {
 impl Mamba3SingleSsdInput {
     /// Run the selected single-ssd SSD path on this MIMO-first input.
     ///
-    /// Dispatches by [`Mamba3SsdPath`] variant to `single_ssd_minimal`,
-    /// `single_ssd_serial`, or `single_ssd_serial_recalculated`.
+    /// Dispatches by [`SsdPath`] variant to `single_ssd_minimal`,
+    /// `single_ssd_serial`, or `single_ssd_serial_recalculated`. The chunk
+    /// length is already in the tensor shapes.
     ///
     /// # Returns
     /// - `y_bntmhp`: `[batch, nchunks, chunk_tokens, mimo_rank, nheads, per_head_dim]`
@@ -172,17 +173,17 @@ impl Mamba3SingleSsdInput {
     /// - `final_state_bhpr`: `[batch, nheads, per_head_dim, state_rank]` —
     ///   the accumulator at the last token (to be stored in the
     ///   cache for streaming).
-    pub fn run(self, path: &Mamba3SsdPath) -> (Tensor<6>, Tensor<4>) {
-        match path {
-            Mamba3SsdPath::Minimal(_) => {
+    pub fn run(self, ssd_path: SsdPath) -> (Tensor<6>, Tensor<4>) {
+        match ssd_path {
+            SsdPath::Minimal => {
                 assert!(
                     self.resets.is_none(),
                     "Minimal does not take resets: use Serial or SerialRecalculated"
                 );
                 self.single_ssd_minimal()
             }
-            Mamba3SsdPath::Serial(_) => self.single_ssd_serial(),
-            Mamba3SsdPath::SerialRecalculated(_) => self.single_ssd_serial_recalculated(),
+            SsdPath::Serial => self.single_ssd_serial(),
+            SsdPath::SerialRecalculated => self.single_ssd_serial_recalculated(),
         }
     }
 }

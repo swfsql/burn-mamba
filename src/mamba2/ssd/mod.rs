@@ -11,8 +11,8 @@
 //!   a **custom backward** that recomputes intermediates. It uses ~⅓ less
 //!   training memory.
 //!
-//! [`ssd_path`] holds the [`Mamba2SsdPath`] selector and the [`Mamba2SsdInput`]
-//! bundle whose `run()` dispatches to one of the three.
+//! [`ssd_path`] holds the [`Mamba2SsdInput`] bundle. Its `run()` dispatches to
+//! one of the three, by [`SsdPath`](crate::ssd_path::SsdPath).
 
 /// Matmul/`segsum` SSD with plain autodiff backward.
 pub mod minimal;
@@ -20,8 +20,8 @@ pub mod minimal;
 pub mod serial;
 /// Serial-over-chunks SSD with a custom recompute backward.
 pub mod serial_recalculated;
-/// The [`Mamba2SsdPath`] selector and [`Mamba2SsdInput`] dispatch bundle.
+/// The [`Mamba2SsdInput`] dispatch bundle.
 pub mod ssd_path;
 
 pub use serial_recalculated::Mamba2BackendExt;
-pub use ssd_path::{Mamba2SsdInput, Mamba2SsdPath};
+pub use ssd_path::Mamba2SsdInput;

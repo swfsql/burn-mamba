@@ -9,6 +9,8 @@
 //! - [`mamba2`](crate::mamba2::mamba2) — the SSD block.
 //! - [`cache`](crate::mamba2::cache) — the conv window and the state that
 //!   the block carries between calls.
+//! - [`scan_options`](crate::mamba2::scan_options) — the scan options: the
+//!   SSD path and the chunk length.
 //! - [`ssd`](crate::mamba2::ssd) — the pluggable chunkwise SSD paths
 //!   (Minimal / Serial / SerialRecalculated) and the backend extension trait.
 //!
@@ -18,13 +20,16 @@
 
 pub mod cache;
 pub mod mamba2;
+pub mod scan_options;
 pub mod ssd;
 
 /// Public re-exports for Mamba-2.
 pub mod prelude {
     use super::*;
+    pub use crate::ssd_path::SsdPath;
     pub use cache::{Mamba2Cache, Mamba2Caches};
     pub use mamba2::{Mamba2, Mamba2Config, Mamba2Untied};
+    pub use scan_options::Mamba2ScanOptions;
     pub use ssd::Mamba2BackendExt;
-    pub use ssd::{Mamba2SsdInput, Mamba2SsdPath};
+    pub use ssd::Mamba2SsdInput;
 }

@@ -8,8 +8,8 @@
 //! containers need no enum of their own. [`MambaLatentNet`], [`MambaVocabNet`],
 //! [`MambaBidiLayers`] and [`MambaHNetVocabNet`] are type aliases, and each has
 //! a `{ shape, block }` config in [`config`]. [`MambaCaches`] is a flat list of
-//! slots, and [`MambaSsdPath`] is the `Options` of the enum. A cache or an SSD
-//! path of the wrong family panics.
+//! slots, and [`MambaScanOptions`] is the `Options` of the enum. A cache or
+//! scan options of the wrong family panic.
 //!
 //! This is also where the three families meet the generic stack: the
 //! `impl Block for Mamba{1,2,3}`, `impl BlockConfig for Mamba{1,2,3}Config` and
@@ -53,6 +53,8 @@
 //! diagonal or embedding-like.
 //!
 
+use burn::config::Config;
+
 /// The `Block` / `BlockConfig` / `CacheStack` impls of each family.
 pub mod adapters;
 /// [`MambaBlock`], its caches, and the type aliases of the containers.
@@ -79,32 +81,34 @@ pub use config::{
 #[cfg(all(test, feature = "_dev-test"))]
 mod tests;
 
-/// An explicit, family-tagged SSD-path selector.
+/// The scan options of a block, tagged with its family.
 ///
-/// Each variant carries the concrete per-family path, so callers can choose
+/// Each variant holds the scan options of its family, so a caller can choose
 /// the SSD path and the chunk length explicitly. The `*_default`
-/// constructors give the default path of the family, without making it the
-/// *only* option.
-#[derive(Debug, Clone)]
-pub enum MambaSsdPath {
-    /// Mamba-1 has no SSD chunking (path is the unit type).
+/// constructors give the default scan options of the family, without making
+/// them the *only* choice.
+#[derive(Config, Debug)]
+pub enum MambaScanOptions {
+    /// Mamba-1 has no SSD chunking, so it has no scan options.
     #[cfg(feature = "mamba1")]
     Mamba1,
-    /// Mamba-2 SSD path.
+    /// The scan options of Mamba-2.
     #[cfg(feature = "mamba2")]
-    Mamba2(crate::mamba2::prelude::Mamba2SsdPath),
-    /// Mamba-3 SSD path.
+    Mamba2(crate::mamba2::prelude::Mamba2ScanOptions),
+    /// The scan options of Mamba-3.
     #[cfg(feature = "mamba3")]
-    Mamba3(crate::mamba3::prelude::Mamba3SsdPath),
+    Mamba3(crate::mamba3::prelude::Mamba3ScanOptions),
 }
 
-impl MambaSsdPath {
-    /// The Mamba-2 default path (`SerialRecalculated`, optimal chunk).
+impl MambaScanOptions {
+    /// The default scan options of Mamba-2 (`SerialRecalculated`, optimal
+    /// chunk).
     #[cfg(feature = "mamba2")]
     pub fn mamba2_default() -> Self {
         Self::Mamba2(Default::default())
     }
-    /// The Mamba-3 default path (`SerialRecalculated`, optimal chunk).
+    /// The default scan options of Mamba-3 (`SerialRecalculated`, optimal
+    /// chunk).
     #[cfg(feature = "mamba3")]
     pub fn mamba3_default() -> Self {
         Self::Mamba3(Default::default())

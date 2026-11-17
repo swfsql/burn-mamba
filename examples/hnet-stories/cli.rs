@@ -1,21 +1,23 @@
 //! The example's own flags, forwarded after the trailing `--`: the corpus knobs
 //! (`Overrides`, shared with `tiny-stories`), the flags of a training step
 //! (`TrainingStepFlags`: the profiler, the VRAM cap, the gradient
-//! checkpointing), the SSD paths, the shape of a new model, the sampling, and
-//! the context-use measure.
+//! checkpointing), the scan options, the shape of a new model, the sampling,
+//! and the context-use measure.
 
 use crate::common::cli::{AppArgs, TrainingStepFlags, finish_extra};
 use crate::common::context::BATCH;
-use crate::common::parse_ssd_path;
+use crate::common::{parse_ssd_chunk_len, parse_ssd_path};
 use crate::common::tiny_stories::lm::Overrides;
 use crate::inference::{PROMPT_TEMPERATURE, Prompting};
-use burn_mamba::prelude::{Mamba3SsdPath, MambaSsdPath};
+use burn_mamba::prelude::{Mamba3ScanOptions, MambaScanOptions};
 use burn_stack::modules::hnet::StepMode;
 
 /// `-- --help`, below the corpus knobs.
 const HELP: &str = concat!(
-    "    --ssd-path <PATH[:L]>  The SSD path of every chunkwise forward of the stages: recalc (default), serial or minimal. L sets the chunk length (default: from the block shape)\n",
-    "    --main-ssd-path <PATH[:L]>  The SSD path of the main stack (default: that of --ssd-path)\n",
+    "    --ssd-path <P>         The SSD path of every chunkwise forward of the stages: recalc (default), serial or minimal\n",
+    "    --ssd-chunk-len <L>    The chunk length of every chunkwise forward of the stages, in write positions (default: from the block shape)\n",
+    "    --main-ssd-path <P>    The SSD path of the main stack (default: that of --ssd-path)\n",
+    "    --main-ssd-chunk-len <L>  The chunk length of the main stack, in write positions (default: that of --ssd-chunk-len)\n",
     "    --stages <N>           A new model: the number of stages, 1 or 2 (default 1)\n",
     "    --step-mode <M>        How a decode step runs the inner H-Net of a stage: masked (default, capturable) or gathered (only the rows that start a chunk, read on the host)\n",
     "    --show-chunks          Mark the chunk starts in each sample: | where stage 0 starts a chunk, ‖ where stage 1 also does\n",
@@ -42,9 +44,10 @@ pub struct Cli {
     pub overrides: Overrides,
     /// `--profile`, `--max-vram`, `--grad-checkpointing`.
     pub training_step_flags: TrainingStepFlags,
-    /// `--ssd-path` and `--main-ssd-path`: the SSD paths of the stages and of
-    /// the main stack.
-    pub paths: (MambaSsdPath, MambaSsdPath),
+    /// `--ssd-path`, `--ssd-chunk-len`, `--main-ssd-path` and
+    /// `--main-ssd-chunk-len`: the scan options of the stages and of the main
+    /// stack.
+    pub scan_options: (MambaScanOptions, MambaScanOptions),
     /// The shape of a new model.
     pub model: ModelFlags,
     /// `--step-mode`.
@@ -80,13 +83,16 @@ impl Cli {
         let mut pargs = app_args.extra(&help);
         let overrides = Overrides::parse(&mut pargs);
         let training_step_flags = TrainingStepFlags::parse(&mut pargs);
-        let stage_path = pargs
-            .opt_value_from_fn("--ssd-path", parse_ssd_path)
-            .unwrap()
-            .unwrap_or(Mamba3SsdPath::SerialRecalculated(None));
-        let main_path =
-            pargs.opt_value_from_fn("--main-ssd-path", parse_ssd_path).unwrap().unwrap_or_else(|| stage_path.clone());
-        let paths = (MambaSsdPath::Mamba3(stage_path), MambaSsdPath::Mamba3(main_path));
+        let stage_ssd_path = pargs.opt_value_from_fn("--ssd-path", parse_ssd_path).unwrap().unwrap_or_default();
+        let stage_chunk_len = pargs.opt_value_from_fn("--ssd-chunk-len", parse_ssd_chunk_len).unwrap();
+        let main_ssd_path =
+            pargs.opt_value_from_fn("--main-ssd-path", parse_ssd_path).unwrap().unwrap_or(stage_ssd_path);
+        let main_chunk_len =
+            pargs.opt_value_from_fn("--main-ssd-chunk-len", parse_ssd_chunk_len).unwrap().or(stage_chunk_len);
+        let stage_scan_options = Mamba3ScanOptions::new(stage_ssd_path).with_chunk_len(stage_chunk_len);
+        let main_scan_options = Mamba3ScanOptions::new(main_ssd_path).with_chunk_len(main_chunk_len);
+        let scan_options =
+            (MambaScanOptions::Mamba3(stage_scan_options), MambaScanOptions::Mamba3(main_scan_options));
         let model = ModelFlags { stages: pargs.opt_value_from_str("--stages").unwrap().unwrap_or(1) };
         assert!(matches!(model.stages, 1 | 2), "--stages must be 1 or 2");
         let step_mode = pargs
@@ -118,7 +124,7 @@ impl Cli {
         Self {
             overrides,
             training_step_flags,
-            paths,
+            scan_options,
             model,
             step_mode,
             show_chunks,

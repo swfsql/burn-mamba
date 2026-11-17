@@ -36,10 +36,10 @@ pub const EVAL_FAMILIES: [(&str, Family); 3] = [
     ("runs", Family::Runs),
 ];
 
-/// The SSD path of every call in this example. The model is tiny and the
+/// The scan options of every call in this example. The model is tiny and the
 /// sequences are short, so the simplest SSD path (autodiff backward) is right.
-pub fn ssd_path() -> MambaSsdPath {
-    MambaSsdPath::Mamba3(Mamba3SsdPath::Minimal(None))
+pub fn scan_options() -> MambaScanOptions {
+    MambaScanOptions::Mamba3(Mamba3ScanOptions::new(SsdPath::Minimal))
 }
 
 /// Run the full training routine. Load or initialize the model and the
@@ -300,7 +300,7 @@ pub fn forward_classification(
     let [batch_size, sequence_size, _input_size] = inputs.dims();
     assert_eq!([batch_size, sequence_size], targets.dims());
 
-    let (output, _caches) = model.forward(inputs, None, ssd_path(), None, None);
+    let (output, _caches) = model.forward(inputs, None, scan_options(), None, None);
     assert_eq!([batch_size, sequence_size, NUM_CLASSES], output.dims());
 
     let n = batch_size * sequence_size;

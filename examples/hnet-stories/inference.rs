@@ -49,7 +49,7 @@ pub fn context_use(
     let model: MambaHNetVocabNet = app_args
         .load_model(&model_config, &device)
         .expect("no trained model in the artifacts directory: train first (--training)");
-    let logits_of = |x: Tensor<3, Int>| model.forward_opened(x, run.paths.clone(), None).0;
+    let logits_of = |x: Tensor<3, Int>| model.forward_opened(x, run.scan_options.clone(), None).0;
     crate::common::context::context_use(&logits_of, &device, &app_args.artifacts_path, n_stories, batch);
 }
 
@@ -68,7 +68,7 @@ pub fn long_stories(
     let model: MambaHNetVocabNet = app_args
         .load_model(&model_config, &device)
         .expect("no trained model in the artifacts directory: train first (--training)");
-    let logits_of = |x: Tensor<3, Int>| model.forward_opened(x, run.paths.clone(), None).0;
+    let logits_of = |x: Tensor<3, Int>| model.forward_opened(x, run.scan_options.clone(), None).0;
     let artifacts = &app_args.artifacts_path;
     crate::common::long_stories::long_stories(&logits_of, &device, artifacts, valid_stories, batch);
 }
@@ -141,7 +141,7 @@ pub fn generate(
         None => model.prime(1, run.step_mode).expect("the network has no start embeddings. Pass a prompt."),
         Some(prompt) => {
             assert!(!prompt_tokens.is_empty(), "the prompt has no character inside the alphabet: {prompt:?}");
-            let (logits, caches, _) = model.forward_opened(tokens(&prompt_tokens, device), run.paths.clone(), None);
+            let (logits, caches, _) = model.forward_opened(tokens(&prompt_tokens, device), run.scan_options.clone(), None);
             let last = logits.dims()[1] - 1;
             (logits.narrow(1, last, 1).squeeze_dim::<2>(1), caches)
         }
@@ -190,7 +190,7 @@ pub fn show_chunks(model: &MambaHNetVocabNet, run: &Run, device: &Device, prompt
     if all.is_empty() {
         return String::new();
     }
-    let (_, _, routing) = model.forward_opened(tokens(&all, device), run.paths.clone(), None);
+    let (_, _, routing) = model.forward_opened(tokens(&all, device), run.scan_options.clone(), None);
     let n_start = model.n_start();
     // The positions (of the whole opened sequence) that each stage routes.
     let mut positions: Vec<usize> = (0..n_start + all.len()).collect();

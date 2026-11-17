@@ -24,7 +24,7 @@ pub fn context_use(
     let model: MambaVocabNet = app_args
         .load_model(&model_config, &device)
         .expect("no trained model in the artifacts directory; run with --training first");
-    let logits_of = |x: Tensor<3, Int>| model.forward(x, None, run.ssd_path.clone(), None, None).0;
+    let logits_of = |x: Tensor<3, Int>| model.forward(x, None, run.scan_options.clone(), None, None).0;
     crate::common::context::context_use(&logits_of, &device, &app_args.artifacts_path, n_stories, batch);
 }
 
@@ -42,7 +42,7 @@ pub fn long_stories(
     let model: MambaVocabNet = app_args
         .load_model(&model_config, &device)
         .expect("no trained model in the artifacts directory; run with --training first");
-    let logits_of = |x: Tensor<3, Int>| model.forward(x, None, run.ssd_path.clone(), None, None).0;
+    let logits_of = |x: Tensor<3, Int>| model.forward(x, None, run.scan_options.clone(), None, None).0;
     let artifacts = &app_args.artifacts_path;
     crate::common::long_stories::long_stories(&logits_of, &device, artifacts, valid_stories, batch);
 }

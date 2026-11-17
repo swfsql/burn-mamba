@@ -15,9 +15,10 @@ fn a_mamba2_block_aligns_to_its_chunk() {
         .with_per_head_dim(4)
         .with_state_rank(8)
         .init(&test_device());
-    assert_eq!(block.reset_align(&Mamba2SsdPath::SerialRecalculated(Some(4))), Some(4));
-    assert_eq!(block.reset_align(&Mamba2SsdPath::Serial(Some(16))), Some(16));
-    assert_eq!(block.reset_align(&Mamba2SsdPath::SerialRecalculated(None)), Some(32));
+    let scan_options = |ssd_path, chunk_len| Mamba2ScanOptions::new(ssd_path).with_chunk_len(chunk_len);
+    assert_eq!(block.reset_align(&scan_options(SsdPath::SerialRecalculated, Some(4))), Some(4));
+    assert_eq!(block.reset_align(&scan_options(SsdPath::Serial, Some(16))), Some(16));
+    assert_eq!(block.reset_align(&scan_options(SsdPath::SerialRecalculated, None)), Some(32));
 }
 
 /// A packed forward on the `Minimal` path panics, so the block takes no packed
@@ -30,8 +31,8 @@ fn a_mamba2_block_on_the_minimal_path_takes_no_packed_rows() {
         .with_per_head_dim(4)
         .with_state_rank(8)
         .init(&test_device());
-    assert_eq!(block.reset_align(&Mamba2SsdPath::Minimal(Some(4))), None);
-    assert_eq!(block.reset_align(&Mamba2SsdPath::Minimal(None)), None);
+    assert_eq!(block.reset_align(&Mamba2ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4))), None);
+    assert_eq!(block.reset_align(&Mamba2ScanOptions::new(SsdPath::Minimal)), None);
 }
 
 /// A chunk length counts write positions, and a token has `micro_steps` write
@@ -49,7 +50,7 @@ fn a_mamba3_block_aligns_to_its_chunk_in_tokens() {
             .with_tap_pattern(TapPattern::Vertical)
             .init(&test_device())
     };
-    let with_chunk = Mamba3SsdPath::SerialRecalculated;
+    let with_chunk = |chunk_len| Mamba3ScanOptions::new(SsdPath::SerialRecalculated).with_chunk_len(chunk_len);
     assert_eq!(block(1).reset_align(&with_chunk(Some(4))), Some(4));
     assert_eq!(block(2).reset_align(&with_chunk(Some(8))), Some(4));
     // The next multiple of 2 after 7 is 8.
@@ -69,8 +70,8 @@ fn a_mamba3_block_on_the_minimal_path_takes_no_packed_rows() {
         .with_per_head_dim(4)
         .with_state_rank(8)
         .init(&test_device());
-    assert_eq!(block.reset_align(&Mamba3SsdPath::Minimal(Some(4))), None);
-    assert_eq!(block.reset_align(&Mamba3SsdPath::Minimal(None)), None);
+    assert_eq!(block.reset_align(&Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4))), None);
+    assert_eq!(block.reset_align(&Mamba3ScanOptions::new(SsdPath::Minimal)), None);
 }
 
 /// Mamba-1 has no chunks, so it takes no packed rows.

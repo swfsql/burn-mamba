@@ -7,7 +7,7 @@ use crate::dataset::{
     EVAL_LENGTHS, EVAL_SEED, Family, Group, NUM_EVAL, QuinticBatcher, QuinticDataset, QuinticItem,
     SEQ_LENGTH,
 };
-use crate::training::{EVAL_FAMILIES, ssd_path};
+use crate::training::{EVAL_FAMILIES, scan_options};
 use burn::{
     data::{dataloader::batcher::Batcher, dataset::Dataset},
     prelude::*,
@@ -41,7 +41,7 @@ pub fn infer(
             let batch = batcher.batch(items, &infer_device);
             let [batch_size, seq, _] = batch.inputs.dims();
 
-            let (output, _caches) = model.forward(batch.inputs, None, ssd_path(), None, None);
+            let (output, _caches) = model.forward(batch.inputs, None, scan_options(), None, None);
             assert_eq!([batch_size, seq, num_classes], output.dims());
 
             let pred = argmax_classes(output);

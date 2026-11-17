@@ -35,8 +35,9 @@
 //!
 //! [`cache`](crate::mamba3::cache) holds the enum that selects the pathway,
 //! and the frame cache that both cache types keep.
-//! [`ssd_path`](crate::mamba3::ssd_path) selects the pathway-agnostic
-//! *SSD path* (Minimal / Serial / SerialRecalculated).
+//! [`scan_options`](crate::mamba3::scan_options) holds the scan options of
+//! both pathways: the [SSD path](crate::ssd_path::SsdPath) (Minimal / Serial /
+//! SerialRecalculated) and the chunk length.
 //!
 //! ## The tap pattern of the trapezoid
 //!
@@ -81,18 +82,19 @@ pub mod positive;
 pub mod product;
 pub mod quat_scan;
 pub mod rotation;
-pub mod ssd_path;
+pub mod scan_options;
 pub mod tap_pattern;
 
 /// Public re-exports for Mamba-3.
 pub mod prelude {
     use super::*;
 
+    pub use crate::ssd_path::SsdPath;
     pub use cache::{Mamba3Cache, Mamba3Caches, Mamba3FrameCache, TapFifo};
     pub use mamba3::{Mamba3, Mamba3Config, Mamba3Untied};
     pub use positive::{Gain, Tropical};
     pub use quat_scan::Mamba3QuatScanBackendExt;
     pub use rotation::{RotationKind, RotationState};
-    pub use ssd_path::Mamba3SsdPath;
+    pub use scan_options::Mamba3ScanOptions;
     pub use tap_pattern::TapPattern;
 }

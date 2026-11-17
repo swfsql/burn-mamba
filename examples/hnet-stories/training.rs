@@ -109,9 +109,10 @@ pub fn train(
 /// How the network runs and trains, in training and inference alike.
 #[derive(Clone, Debug)]
 pub struct Run {
-    /// The SSD paths of every chunkwise `forward`: (the stages, the main
-    /// stack), from `--ssd-path` and `--main-ssd-path`.
-    pub paths: (MambaSsdPath, MambaSsdPath),
+    /// The scan options of every chunkwise `forward`: (the stages, the main
+    /// stack), from `--ssd-path`, `--ssd-chunk-len`, `--main-ssd-path` and
+    /// `--main-ssd-chunk-len`.
+    pub scan_options: (MambaScanOptions, MambaScanOptions),
     /// `--max-vram`, in MiB: the cap of [`vram`], with its cleanups.
     pub max_vram_mib: Option<u64>,
     /// `--vram-cleanup-every`: the period of those cleanups (`None`: the
@@ -147,7 +148,7 @@ impl Run {
             "this example runs Mamba-3 in every stack"
         );
         Self {
-            paths: cli.paths.clone(),
+            scan_options: cli.scan_options.clone(),
             max_vram_mib: cli.training_step_flags.max_vram_mib,
             vram_cleanup_every: cli.training_step_flags.vram_cleanup_every,
             step_mode: cli.step_mode,
@@ -194,8 +195,8 @@ impl Wrap {
         });
         // A window with no carried cache is the first of its story.
         let (logits, caches, routing) = match caches {
-            None => self.0.forward_opened(inputs.clone(), self.1.paths.clone(), pad),
-            Some(caches) => self.0.forward(inputs.clone(), Some(caches), self.1.paths.clone(), pad),
+            None => self.0.forward_opened(inputs.clone(), self.1.scan_options.clone(), pad),
+            Some(caches) => self.0.forward(inputs.clone(), Some(caches), self.1.scan_options.clone(), pad),
         };
         (lm::lm_output(logits, inputs, targets, &scored), caches, routing)
     }

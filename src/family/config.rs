@@ -29,15 +29,15 @@ pub enum MambaBlockConfig {
 }
 
 impl MambaBlockConfig {
-    /// The default SSD path of the family of this block config.
-    pub fn default_ssd_path(&self) -> MambaSsdPath {
+    /// The default scan options of the family of this block config.
+    pub fn default_scan_options(&self) -> MambaScanOptions {
         match self {
             #[cfg(feature = "mamba1")]
-            Self::Mamba1(_) => MambaSsdPath::Mamba1,
+            Self::Mamba1(_) => MambaScanOptions::Mamba1,
             #[cfg(feature = "mamba2")]
-            Self::Mamba2(_) => MambaSsdPath::mamba2_default(),
+            Self::Mamba2(_) => MambaScanOptions::mamba2_default(),
             #[cfg(feature = "mamba3")]
-            Self::Mamba3(_) => MambaSsdPath::mamba3_default(),
+            Self::Mamba3(_) => MambaScanOptions::mamba3_default(),
         }
     }
 }

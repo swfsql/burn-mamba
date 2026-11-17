@@ -345,7 +345,7 @@ fn run_forward<M, B, C>(
     device: &Device,
     build: B,
     cache: C,
-    path: M::Options,
+    options: M::Options,
 ) where
     M: Block,
     M::Cache: Clone,
@@ -358,7 +358,7 @@ fn run_forward<M, B, C>(
         let x = input_3d(shape, device);
         let seed = cache(device);
         let work = || {
-            let (y, _cache) = block.block_forward(x.clone(), seed.clone(), path.clone(), None);
+            let (y, _cache) = block.block_forward(x.clone(), seed.clone(), options.clone(), None);
             y
         };
 
@@ -377,7 +377,7 @@ fn run_train<M, B, C>(
     device: &Device,
     build: B,
     cache: C,
-    path: M::Options,
+    options: M::Options,
 ) where
     M: Block,
     M::Cache: Clone,
@@ -390,7 +390,7 @@ fn run_train<M, B, C>(
         let x = input_3d(shape, device);
         let seed = cache(device);
         let work = || {
-            let (y, _cache) = block.block_forward(x.clone(), seed.clone(), path.clone(), None);
+            let (y, _cache) = block.block_forward(x.clone(), seed.clone(), options.clone(), None);
             y.powf_scalar(2.0).mean().backward()
         };
 
@@ -476,10 +476,10 @@ fn bench_forward(c: &mut Criterion) {
         &device,
         |d| mamba2_config(shape).init(d),
         |_| None,
-        Mamba2SsdPath::default(),
+        Mamba2ScanOptions::default(),
     );
 
-    let path3 = Mamba3SsdPath::default();
+    let m3_scan_options = Mamba3ScanOptions::default();
     for (name, config) in mamba3_cases(shape) {
         run_forward(
             &mut group,
@@ -488,7 +488,7 @@ fn bench_forward(c: &mut Criterion) {
             &device,
             |d| config.init(d),
             |_| None,
-            path3.clone(),
+            m3_scan_options.clone(),
         );
     }
 
@@ -502,7 +502,7 @@ fn bench_forward(c: &mut Criterion) {
         &device,
         |d| config.init(d),
         |d| Some(double_ssd_cache(&config, shape.batch, d)),
-        path3,
+        m3_scan_options,
     );
 
     group.finish();
@@ -533,10 +533,10 @@ fn bench_train(c: &mut Criterion) {
         &device,
         |d| mamba2_config(shape).init(d),
         |_| None,
-        Mamba2SsdPath::default(),
+        Mamba2ScanOptions::default(),
     );
 
-    let path3 = Mamba3SsdPath::default();
+    let m3_scan_options = Mamba3ScanOptions::default();
     for (name, config) in mamba3_cases(shape) {
         run_train(
             &mut group,
@@ -545,7 +545,7 @@ fn bench_train(c: &mut Criterion) {
             &device,
             |d| config.init(d),
             |_| None,
-            path3.clone(),
+            m3_scan_options.clone(),
         );
     }
 
@@ -557,7 +557,7 @@ fn bench_train(c: &mut Criterion) {
         &device,
         |d| config.init(d),
         |d| Some(double_ssd_cache(&config, shape.batch, d)),
-        path3,
+        m3_scan_options,
     );
 
     group.finish();

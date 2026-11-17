@@ -54,10 +54,10 @@ impl Mamba3 {
         &self,
         input_bsm: Tensor<3>,
         cache: Option<Mamba3DoubleSsdCache>,
-        ssd_path: &Mamba3SsdPath,
+        scan_options: &Mamba3ScanOptions,
         pad_bt: Option<Tensor<2, Bool>>,
     ) -> (Tensor<3>, Mamba3DoubleSsdCache) {
-        self.forward_double_ssd_packed(input_bsm, cache, None, ssd_path, pad_bt, None)
+        self.forward_double_ssd_packed(input_bsm, cache, None, scan_options, pad_bt, None)
     }
 
     /// [`Self::forward_double_ssd`] over a packed batch: `reset_bt` marks the
@@ -69,7 +69,7 @@ impl Mamba3 {
         input_bsm: Tensor<3>,
         cache: Option<Mamba3DoubleSsdCache>,
         origin: Option<Mamba3DoubleSsdCache>,
-        ssd_path: &Mamba3SsdPath,
+        scan_options: &Mamba3ScanOptions,
         pad_bt: Option<Tensor<2, Bool>>,
         reset_bt: Option<Tensor<2, Bool>>,
     ) -> (Tensor<3>, Mamba3DoubleSsdCache) {
@@ -83,7 +83,7 @@ impl Mamba3 {
         let sequence = tokens * u;
 
         // ── The entry of the plant frame ──────────────────────────────────────
-        let chunk_len = ssd_path.chunk_len_or_optimal(self);
+        let chunk_len = scan_options.chunk_len_or_optimal(self);
         let PlantEntry {
             mut cache,
             packed,
@@ -267,7 +267,7 @@ impl Mamba3 {
                 origin_bhpr: p.origin.ssm_bhpr.clone(),
             }),
         };
-        let (y_bntmhp, final_state_bhpr) = input_gamma.run(ssd_path);
+        let (y_bntmhp, final_state_bhpr) = input_gamma.run(scan_options.ssd_path);
 
         let (y_bntmhp, final_state_bhpr) = beta_sides.into_iter().fold(
             (y_bntmhp, final_state_bhpr),
@@ -292,7 +292,7 @@ impl Mamba3 {
                         origin_bhpr: zero_bhpr,
                     }),
                 };
-                let (y_beta_bntmhp, final_state_beta_bhpr) = input_beta.run(ssd_path);
+                let (y_beta_bntmhp, final_state_beta_bhpr) = input_beta.run(scan_options.ssd_path);
                 (
                     y_bntmhp + y_beta_bntmhp,
                     final_state_bhpr + final_state_beta_bhpr,

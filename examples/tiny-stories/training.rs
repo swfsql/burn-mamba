@@ -66,9 +66,9 @@ pub fn train(
     let layout = match config.pack {
         None => PackLayout::default(),
         Some(_) => {
-            let ssd_path = &model.1.ssd_path;
-            let chunk = model.0.layers.real_layers[0].block.reset_align(ssd_path).unwrap_or_else(|| {
-                panic!("Mamba-1 and a Minimal SSD path take no packed rows: the SSD path is {ssd_path:?}")
+            let scan_options = &model.1.scan_options;
+            let chunk = model.0.layers.real_layers[0].block.reset_align(scan_options).unwrap_or_else(|| {
+                panic!("Mamba-1 and a Minimal SSD path take no packed rows: the scan options are {scan_options:?}")
             });
             let align = model.1.pack_align.unwrap_or(chunk);
             assert!(
@@ -158,8 +158,9 @@ pub fn train(
 /// How the network runs, in training and inference alike.
 #[derive(Clone, Debug)]
 pub struct Run {
-    /// The SSD path of every chunkwise `forward` (`--ssd-path`).
-    pub ssd_path: MambaSsdPath,
+    /// The scan options of every chunkwise `forward` (`--ssd-path`,
+    /// `--ssd-chunk-len`).
+    pub scan_options: MambaScanOptions,
     /// `--pack-align`, in tokens: each story of a packed row starts at a
     /// multiple of it. It must be a multiple of the chunk length, because a
     /// reset must be at a chunk start. `None` aligns to the chunk. A value
@@ -223,7 +224,7 @@ impl LmModel for Wrap {
                 let batch = feed.batch(&device);
                 let weight = feed.weight();
                 let (loss, read) =
-                    contrast::loss(&self.0, &self.1.ssd_path, batch, feed.config(), weight, lm_positions);
+                    contrast::loss(&self.0, &self.1.scan_options, batch, feed.config(), weight, lm_positions);
                 let t3 = prof::mark(&device);
                 let contrast_grads = GradientsParams::from_grads(loss.backward(), &self.0);
                 let t4 = prof::mark(&device);
@@ -336,12 +337,12 @@ impl Wrap {
         if let Some(packed) = packed {
             let (logits, caches) =
                 self.0
-                    .forward_packed(inputs, caches, self.1.ssd_path.clone(), &packed.layout);
+                    .forward_packed(inputs, caches, self.1.scan_options.clone(), &packed.layout);
             return (lm::lm_output_packed(logits, targets, packed.score_bs), caches);
         }
         let (logits, caches) = self
             .0
-            .forward(inputs.clone(), caches, self.1.ssd_path.clone(), Some(class), None);
+            .forward(inputs.clone(), caches, self.1.scan_options.clone(), Some(class), None);
         (lm::lm_output(logits, inputs, targets, &scored), caches)
     }
 }

@@ -21,7 +21,7 @@
 //!   distribution of the first character). It prefills an optional prompt with
 //!   chunkwise `forward`s, then samples one character per `step`.
 //!
-//! The corpus knobs, the SSD path, the training-step profiler and the VRAM cap
+//! The corpus knobs, the scan options, the training-step profiler and the VRAM cap
 //! ([`cli`]) go after the trailing `--`. The corpus knobs are written into the `training_config.json`
 //! of the artifacts, so a resumed run keeps them:
 //!
@@ -43,7 +43,7 @@ pub use common::{
     training::{CosineAnnealingLr, Lr, OptimizerConfig, OptimizerKind, TrainingConfig},
 };
 
-/// The example's own flags (corpus knobs, SSD path, profiler, VRAM cap).
+/// The example's own flags (corpus knobs, scan options, profiler, VRAM cap).
 pub mod cli;
 /// How much the trained LM uses the earlier part of a story (`--context-use`).
 pub mod context;
@@ -130,7 +130,7 @@ pub fn launch(app_args: &AppArgs) {
     app_args.save_model_config(&model_config);
 
     let run = training::Run {
-        ssd_path: cli.ssd_path,
+        scan_options: cli.scan_options,
         pack_align: cli.pack_align,
         capture: app_args.capture(),
         max_vram_mib: cli.training_step_flags.max_vram_mib,
@@ -160,7 +160,7 @@ pub fn launch(app_args: &AppArgs) {
             model_config.clone(),
             device.clone(),
             app_args,
-            &run.ssd_path,
+            &run.scan_options,
             &cli.contrast,
             config.train_stories,
             batches,

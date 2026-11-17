@@ -21,7 +21,7 @@ fn score_reads_the_rows_of_the_continuation() {
     device.seed(0);
     let net = tiny_net(&device);
     let run = Run {
-        ssd_path: MambaSsdPath::Mamba3(Mamba3SsdPath::SerialRecalculated(None)),
+        scan_options: MambaScanOptions::Mamba3(Mamba3ScanOptions::new(SsdPath::SerialRecalculated)),
         pack_align: None,
         capture: false,
         max_vram_mib: None,
@@ -48,7 +48,7 @@ fn score_reads_the_rows_of_the_continuation() {
     let marks: Vec<Vec<Vec<bool>>> = (0..2)
         .map(|s| (0..n).map(|i| (0..c).map(|k| (i + k + s) % 3 == 0).collect()).collect())
         .collect();
-    let logits_of = |x: Tensor<3, Int>| net.forward(x, None, run.ssd_path.clone(), None, None).0;
+    let logits_of = |x: Tensor<3, Int>| net.forward(x, None, run.scan_options.clone(), None, None).0;
     let got = score(&logits_of, &device, &prompts, &continuations, join, BATCH, &pairings, &alphas, &marks);
 
     // The reference: the log-probabilities of the next character after
@@ -61,7 +61,7 @@ fn score_reads_the_rows_of_the_continuation() {
         } else {
             let pairs: Vec<i32> = tokens.iter().flat_map(|&t| pair(t)).collect();
             let x = Tensor::<1, Int>::from_ints(pairs.as_slice(), &device).reshape([1, tokens.len(), 2]);
-            let (logits, _) = net.forward(x, None, run.ssd_path.clone(), None, None);
+            let (logits, _) = net.forward(x, None, run.scan_options.clone(), None, None);
             let rows = logits.dims()[1];
             logits.narrow(1, rows - 1, 1).flatten::<2>(0, 1)
         };

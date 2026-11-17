@@ -173,8 +173,8 @@ fn loss_from_outputs(
 }
 
 /// Run a single SSD path and extract the gradients of all 5 inputs.
-fn run_path(path: Mamba3SsdPath, inputs: &Inputs, y_head: Tensor<6>, s_head: Tensor<4>) -> PathRun {
-    let (y, state) = inputs.ssd_input().run(&path);
+fn run_path(ssd_path: SsdPath, inputs: &Inputs, y_head: Tensor<6>, s_head: Tensor<4>) -> PathRun {
+    let (y, state) = inputs.ssd_input().run(ssd_path);
     let y_inner = y.clone().inner();
     let state_inner = state.clone().inner();
 
@@ -258,19 +258,19 @@ fn run_minimal_matches_serial(
     let inputs_rec = mk(v, da, b, c, init);
 
     let r_min = run_path(
-        Mamba3SsdPath::Minimal(Some(chunk_len)),
+        SsdPath::Minimal,
         &inputs_min,
         y_head.clone(),
         s_head.clone(),
     );
     let r_ser = run_path(
-        Mamba3SsdPath::Serial(Some(chunk_len)),
+        SsdPath::Serial,
         &inputs_ser,
         y_head.clone(),
         s_head.clone(),
     );
     let r_rec = run_path(
-        Mamba3SsdPath::SerialRecalculated(Some(chunk_len)),
+        SsdPath::SerialRecalculated,
         &inputs_rec,
         y_head,
         s_head,
@@ -427,14 +427,14 @@ fn read_axis_matches_the_undecimated_kernel() {
             &device,
         );
 
-        for path in [
-            Mamba3SsdPath::Minimal(Some(chunk_len)),
-            Mamba3SsdPath::Serial(Some(chunk_len)),
-            Mamba3SsdPath::SerialRecalculated(Some(chunk_len)),
+        for ssd_path in [
+            SsdPath::Minimal,
+            SsdPath::Serial,
+            SsdPath::SerialRecalculated,
         ] {
-            let label = format!("{path:?} l={chunk_len} u={stride} m={mimo_rank}");
+            let label = format!("{ssd_path:?} l={chunk_len} u={stride} m={mimo_rank}");
             let read = run_path(
-                path.clone(),
+                ssd_path,
                 &Inputs::from_inner(
                     v.clone(),
                     da.clone(),
@@ -447,7 +447,7 @@ fn read_axis_matches_the_undecimated_kernel() {
                 s_head.clone(),
             );
             let full = run_path(
-                path.clone(),
+                ssd_path,
                 &Inputs::from_inner(
                     v.clone(),
                     da.clone(),

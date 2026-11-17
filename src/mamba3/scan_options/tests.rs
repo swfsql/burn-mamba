@@ -1,10 +1,15 @@
-//! The chunk-length schedule. Pure arithmetic — no tensors, no backend.
+//! The chunk-length schedule. Pure arithmetic: no tensors, no backend.
 //!
-//! What is being pinned is that the two dials which widen a chunk without
-//! appearing in it are treated as the *different* widenings they are:
-//! `mimo_rank` fuses onto both of a chunk's axes and so divides it out, while
-//! `micro_steps` widens only the write axis and so subdivides a chunk of
-//! unchanged write length. See [`Mamba3SsdPath::optimal_chunk_len`] and
+//! Two dials widen a chunk, and the schedule has no place for them. These
+//! tests pin that the schedule treats them as the *different* widenings they
+//! are:
+//!
+//! - `mimo_rank` fuses onto both of the axes of a chunk, so the schedule
+//!   divides the chunk by it.
+//! - `micro_steps` widens only the write axis, so it subdivides a chunk of
+//!   unchanged write length.
+//!
+//! See [`Mamba3ScanOptions::optimal_chunk_len`] and
 //! `info/mamba-3/architecture-deltas.md` §8.
 
 use super::*;
@@ -13,7 +18,7 @@ use crate::standard_ssd;
 /// The SISO block's schedule is unchanged: `√(N·P)` on the 32 grid, capped.
 #[test]
 fn siso_schedule_is_the_square_root_rule() {
-    let opt = |r, p| Mamba3SsdPath::optimal_chunk_len(r, p, 1, 1);
+    let opt = |r, p| Mamba3ScanOptions::optimal_chunk_len(r, p, 1, 1);
     assert_eq!(opt(128, 64), 96); // isqrt(8192) = 90
     assert_eq!(opt(64, 64), 64);
     assert_eq!(opt(128, 128), 128);
@@ -25,7 +30,7 @@ fn siso_schedule_is_the_square_root_rule() {
 /// The fused axis is `chunk_len · mimo_rank`, so the rank divides the chunk.
 #[test]
 fn mimo_rank_divides_the_chunk() {
-    let opt = |m| Mamba3SsdPath::optimal_chunk_len(128, 64, m, 1);
+    let opt = |m| Mamba3ScanOptions::optimal_chunk_len(128, 64, m, 1);
     assert_eq!(opt(1), 96);
     assert_eq!(opt(2), 64); // 90/2 = 45 -> 64
     assert_eq!(opt(4), 32); // 90/4 = 23 -> 32, and the floor takes over
@@ -36,10 +41,10 @@ fn mimo_rank_divides_the_chunk() {
 /// length stays put (to within one token) and the token count carries the `u`.
 #[test]
 fn micro_steps_subdivides_the_chunk() {
-    let base = Mamba3SsdPath::optimal_chunk_len(128, 64, 1, 1);
+    let base = Mamba3ScanOptions::optimal_chunk_len(128, 64, 1, 1);
     assert_eq!(base, 96);
     for u in [1, 2, 3, 4, 5, 8, 16] {
-        let write_len = Mamba3SsdPath::optimal_chunk_len(128, 64, 1, u);
+        let write_len = Mamba3ScanOptions::optimal_chunk_len(128, 64, 1, u);
         assert!(
             (base..base + u).contains(&write_len),
             "u = {u} moved the chunk on the write axis off {base} to {write_len}",
@@ -58,7 +63,7 @@ fn micro_steps_subdivides_the_chunk() {
 fn the_two_dials_are_not_the_same_widening() {
     // Score elements per token, up to the shared `batch · sequence · heads`:
     // `chunk_tokens · micro_steps · mimo_rank²` = `chunk_len · m²`.
-    let score = |m: usize, u: usize| Mamba3SsdPath::optimal_chunk_len(128, 64, m, u) * m * m;
+    let score = |m: usize, u: usize| Mamba3ScanOptions::optimal_chunk_len(128, 64, m, u) * m * m;
     let siso = score(1, 1);
     for u in [1, 2, 4, 8] {
         assert!(
@@ -69,15 +74,16 @@ fn the_two_dials_are_not_the_same_widening() {
     assert!(score(2, 1) > siso / 2, "mimo_rank costs `m`, not nothing");
 }
 
-/// Every value the schedule can produce is a usable chunk: a whole number of
-/// tokens, never zero, never far above the ceiling — for any dial combination.
+/// Every value of the schedule is a usable chunk, for any combination of the
+/// dials. It is a whole number of tokens, never zero, and never far above the
+/// ceiling.
 #[test]
 fn the_schedule_stays_on_the_grid() {
     for state_rank in [1, 4, 16, 64, 128, 256, 4096] {
         for per_head_dim in [1, 32, 64, 128] {
             for mimo_rank in [1, 2, 3, 4, 8] {
                 for micro_steps in [1, 2, 3, 5, 8] {
-                    let n = Mamba3SsdPath::optimal_chunk_len(
+                    let n = Mamba3ScanOptions::optimal_chunk_len(
                         state_rank,
                         per_head_dim,
                         mimo_rank,
@@ -102,7 +108,7 @@ fn the_schedule_stays_on_the_grid() {
 fn the_schedule_is_monotone_in_the_fold() {
     let mut previous = usize::MAX;
     for fold in 1..=16 {
-        let n = Mamba3SsdPath::optimal_chunk_len(256, 128, fold, 1);
+        let n = Mamba3ScanOptions::optimal_chunk_len(256, 128, fold, 1);
         assert!(n <= previous, "fold {fold} widened the chunk to {n}");
         previous = n;
     }
@@ -111,7 +117,7 @@ fn the_schedule_is_monotone_in_the_fold() {
 /// An explicit chunk length wins over the schedule, at every dial setting.
 #[test]
 fn an_explicit_chunk_len_is_not_overridden() {
-    let path = Mamba3SsdPath::SerialRecalculated(Some(256));
-    assert_eq!(path.chunk_len(), Some(256));
-    assert_eq!(Mamba3SsdPath::default().chunk_len(), None);
+    let scan_options = Mamba3ScanOptions::new(SsdPath::SerialRecalculated).with_chunk_len(Some(256));
+    assert_eq!(scan_options.chunk_len, Some(256));
+    assert_eq!(Mamba3ScanOptions::default().chunk_len, None);
 }

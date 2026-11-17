@@ -12,8 +12,8 @@
 //! ## The block settings
 //!
 //! - Mamba-1.
-//! - Mamba-2 on each SSD path, and on the default SSD path.
-//! - Mamba-3 on each SSD path, and on the default SSD path.
+//! - Mamba-2 on each SSD path, and on the default scan options.
+//! - Mamba-3 on each SSD path, and on the default scan options.
 //! - Mamba-3 on the base setting, and on settings that change the rotation,
 //!   the tap pattern, `mimo_rank` or `micro_steps` of the base. The base has
 //!   the `SerialRecalculated` path, the `Complex2D` rotation, the default tap
@@ -32,10 +32,11 @@
 //!     tensors and the output norm exist.
 //!   - [`MambaBlock`] unties `DtBias` and `D` of Mamba-3.
 //!
-//! A window of a contract has 7 tokens. So each SSD path has a chunk length
-//! of [`CHUNK_TOKENS`] tokens, and a window holds a chunk boundary. A scan
-//! error between two chunks then shows. The default SSD path is
-//! `SerialRecalculated` with the optimal chunk length. Its settings keep that
+//! A window of a contract has 7 tokens. So each Mamba-2 and Mamba-3 setting
+//! off the default scan options has a chunk length of [`CHUNK_TOKENS`] tokens,
+//! and a window holds a chunk boundary. A scan error between two chunks then
+//! shows. The default scan options are
+//! `SerialRecalculated` with the optimal chunk length. Their settings keep that
 //! length, so they cover the choice of the length.
 //!
 //! At `micro_steps` 1, the tap patterns `Vertical` and
@@ -63,7 +64,8 @@ use burn_stack::modules::CacheTensors;
 use std::any::Any;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-/// The chunk length of each SSD path except the default SSD path, in tokens.
+/// The chunk length of each Mamba-2 and Mamba-3 setting off the default scan
+/// options, in tokens.
 /// It is shorter than a window of a contract.
 #[cfg(any(feature = "mamba2", feature = "mamba3"))]
 const CHUNK_TOKENS: usize = 4;
@@ -190,43 +192,55 @@ fn mamba1_settings() -> Vec<Setting<Mamba1Config>> {
     ]
 }
 
+/// The scan options of a Mamba-2 block on the SSD path `ssd_path`, with a chunk
+/// length of [`CHUNK_TOKENS`] tokens.
+#[cfg(feature = "mamba2")]
+fn m2_scan_options(ssd_path: SsdPath) -> Mamba2ScanOptions {
+    Mamba2ScanOptions::new(ssd_path).with_chunk_len(Some(CHUNK_TOKENS))
+}
+
 #[cfg(feature = "mamba2")]
 fn mamba2_settings() -> Vec<Setting<Mamba2Config>> {
     use Mamba2Untied::*;
-    let paths = [
-        Mamba2SsdPath::default(),
-        Mamba2SsdPath::Minimal(Some(CHUNK_TOKENS)),
-        Mamba2SsdPath::Serial(Some(CHUNK_TOKENS)),
-        Mamba2SsdPath::SerialRecalculated(Some(CHUNK_TOKENS)),
+    let all_scan_options = [
+        Mamba2ScanOptions::default(),
+        m2_scan_options(SsdPath::Minimal),
+        m2_scan_options(SsdPath::Serial),
+        m2_scan_options(SsdPath::SerialRecalculated),
     ];
-    let mut settings: Vec<_> = paths
+    let mut settings: Vec<_> = all_scan_options
         .into_iter()
-        .map(|path| Setting { name: format!("Mamba-2, {path:?}"), config: m2(), options: path, f32_tol: MAMBA2_TOL })
+        .map(|scan_options| Setting {
+            name: format!("Mamba-2, {scan_options:?}"),
+            config: m2(),
+            options: scan_options,
+            f32_tol: MAMBA2_TOL,
+        })
         .collect();
-    let path = Mamba2SsdPath::Minimal(Some(CHUNK_TOKENS));
+    let scan_options = m2_scan_options(SsdPath::Minimal);
     settings.push(Setting {
-        name: format!("Mamba-2, untied, {path:?}"),
+        name: format!("Mamba-2, untied, {scan_options:?}"),
         config: m2().with_untied(vec![InProjTail, Conv1d, DtBias, ALog, D, Norm]),
-        options: path,
+        options: scan_options,
         f32_tol: MAMBA2_TOL,
     });
     settings
 }
 
-/// The SSD path `path` of a Mamba-3 block, with a chunk length of
-/// [`CHUNK_TOKENS`] tokens. A chunk length of Mamba-3 counts write positions,
-/// and a token has `micro_steps` write positions.
+/// The scan options of a Mamba-3 block on the SSD path `ssd_path`, with a chunk
+/// length of [`CHUNK_TOKENS`] tokens. A chunk length of Mamba-3 counts write
+/// positions, and a token has `micro_steps` write positions.
 #[cfg(feature = "mamba3")]
-fn m3_path(path: fn(Option<usize>) -> Mamba3SsdPath, config: &Mamba3Config) -> Mamba3SsdPath {
-    path(Some(CHUNK_TOKENS * config.micro_steps))
+fn m3_scan_options(ssd_path: SsdPath, config: &Mamba3Config) -> Mamba3ScanOptions {
+    Mamba3ScanOptions::new(ssd_path).with_chunk_len(Some(CHUNK_TOKENS * config.micro_steps))
 }
 
 #[cfg(feature = "mamba3")]
 fn mamba3_settings() -> Vec<Setting<Mamba3Config>> {
-    use Mamba3SsdPath::{Minimal, Serial, SerialRecalculated};
     use Mamba3Untied::*;
+    use SsdPath::{Minimal, Serial, SerialRecalculated};
     let u2 = || m3().with_micro_steps(2);
-    let short_chunks: Vec<(Mamba3Config, fn(Option<usize>) -> Mamba3SsdPath)> = vec![
+    let short_chunks: Vec<(Mamba3Config, SsdPath)> = vec![
         (m3(), Minimal),
         (m3(), Serial),
         (m3(), SerialRecalculated),
@@ -238,31 +252,31 @@ fn mamba3_settings() -> Vec<Setting<Mamba3Config>> {
         (m3().with_mimo_rank(2), SerialRecalculated),
         (u2(), SerialRecalculated),
     ];
-    let mut settings = vec![(m3(), Mamba3SsdPath::default())];
-    settings.extend(short_chunks.into_iter().map(|(config, path)| {
-        let path = m3_path(path, &config);
-        (config, path)
+    let mut settings = vec![(m3(), Mamba3ScanOptions::default())];
+    settings.extend(short_chunks.into_iter().map(|(config, ssd_path)| {
+        let scan_options = m3_scan_options(ssd_path, &config);
+        (config, scan_options)
     }));
     let mut settings: Vec<_> = settings
         .into_iter()
-        .map(|(config, path)| Setting {
+        .map(|(config, scan_options)| Setting {
             name: format!(
-                "Mamba-3, {path:?}, {:?}, {:?}, mimo_rank {}, micro_steps {}",
+                "Mamba-3, {scan_options:?}, {:?}, {:?}, mimo_rank {}, micro_steps {}",
                 config.rotation, config.tap_pattern, config.mimo_rank, config.micro_steps,
             ),
             config,
-            options: path,
+            options: scan_options,
             f32_tol: MAMBA3_TOL,
         })
         .collect();
     let untied = m3().with_mimo_rank(2).with_has_outproj_norm(true).with_untied(vec![
         InProjTail, DtBias, D, BNorm, CNorm, BBias, CBias, MimoX, MimoZ, MimoO, OutNorm,
     ]);
-    let path = m3_path(Minimal, &untied);
+    let scan_options = m3_scan_options(Minimal, &untied);
     settings.push(Setting {
-        name: format!("Mamba-3, untied, {path:?}, mimo_rank 2, output norm"),
+        name: format!("Mamba-3, untied, {scan_options:?}, mimo_rank 2, output norm"),
         config: untied,
-        options: path,
+        options: scan_options,
         f32_tol: MAMBA3_TOL,
     });
     settings
@@ -273,35 +287,40 @@ fn mamba3_settings() -> Vec<Setting<Mamba3Config>> {
 /// a setting. The untied setting checks that the enum gives the untied
 /// parameters of its block.
 fn mamba_block_settings() -> Vec<Setting<MambaBlockConfig>> {
-    // The label, the config, the SSD path and the fp32 tolerance of each
-    // setting. The name of a setting is its label and its SSD path.
+    // The label, the config, the scan options and the fp32 tolerance of each
+    // setting. The name of a setting is its label and its scan options.
     let settings = vec![
         #[cfg(feature = "mamba3")]
         (
             "MambaBlock",
             MambaBlockConfig::Mamba3(m3()),
-            MambaSsdPath::Mamba3(m3_path(Mamba3SsdPath::SerialRecalculated, &m3())),
+            MambaScanOptions::Mamba3(m3_scan_options(SsdPath::SerialRecalculated, &m3())),
             MAMBA3_TOL,
         ),
         #[cfg(feature = "mamba2")]
         (
             "MambaBlock",
             MambaBlockConfig::Mamba2(m2()),
-            MambaSsdPath::Mamba2(Mamba2SsdPath::SerialRecalculated(Some(CHUNK_TOKENS))),
+            MambaScanOptions::Mamba2(m2_scan_options(SsdPath::SerialRecalculated)),
             MAMBA2_TOL,
         ),
         #[cfg(feature = "mamba1")]
-        ("MambaBlock", MambaBlockConfig::Mamba1(m1()), MambaSsdPath::Mamba1, MAMBA1_TOL),
+        ("MambaBlock", MambaBlockConfig::Mamba1(m1()), MambaScanOptions::Mamba1, MAMBA1_TOL),
         #[cfg(feature = "mamba3")]
         (
             "MambaBlock, untied",
             MambaBlockConfig::Mamba3(m3().with_untied(vec![Mamba3Untied::DtBias, Mamba3Untied::D])),
-            MambaSsdPath::mamba3_default(),
+            MambaScanOptions::mamba3_default(),
             MAMBA3_TOL,
         ),
     ];
     settings
         .into_iter()
-        .map(|(label, config, path, f32_tol)| Setting { name: format!("{label}, {path:?}"), config, options: path, f32_tol })
+        .map(|(label, config, scan_options, f32_tol)| Setting {
+            name: format!("{label}, {scan_options:?}"),
+            config,
+            options: scan_options,
+            f32_tol,
+        })
         .collect()
 }

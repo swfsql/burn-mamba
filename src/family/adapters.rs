@@ -39,7 +39,7 @@ mod impl_mamba1 {
     impl Block for Mamba1 {
         type Cache = Mamba1Cache;
         type Caches = Mamba1Caches;
-        /// Mamba-1 has no SSD chunking, so there is no path selector.
+        /// Mamba-1 has no SSD chunking, so it has no scan options.
         type Options = ();
 
         fn block_forward(
@@ -80,7 +80,8 @@ mod impl_mamba1 {
 #[cfg(feature = "mamba2")]
 mod impl_mamba2 {
     use super::*;
-    use crate::mamba2::prelude::{Mamba2, Mamba2Cache, Mamba2Caches, Mamba2Config, Mamba2SsdPath};
+    use crate::mamba2::prelude::{Mamba2, Mamba2Cache, Mamba2Caches, Mamba2Config, Mamba2ScanOptions};
+    use crate::ssd_path::SsdPath;
 
     impl CacheStack for Mamba2Caches {
         type Cache = Mamba2Cache;
@@ -100,13 +101,13 @@ mod impl_mamba2 {
     impl Block for Mamba2 {
         type Cache = Mamba2Cache;
         type Caches = Mamba2Caches;
-        type Options = Mamba2SsdPath;
+        type Options = Mamba2ScanOptions;
 
         fn block_forward(
             &self,
             x: Tensor<3>,
             cache: Option<Mamba2Cache>,
-            options: Mamba2SsdPath,
+            options: Mamba2ScanOptions,
             pad: Option<Tensor<2, Bool>>,
         ) -> (Tensor<3>, Mamba2Cache) {
             self.forward(x, cache, options, pad)
@@ -116,17 +117,18 @@ mod impl_mamba2 {
             &self,
             x: Tensor<3>,
             cache: Option<Mamba2Cache>,
-            options: Mamba2SsdPath,
+            options: Mamba2ScanOptions,
             reset: Tensor<2, Bool>,
         ) -> (Tensor<3>, Mamba2Cache) {
             self.forward_packed(x, cache, None, options, None, Some(reset))
         }
         /// The chunk length of `options`, in tokens. `None` for
-        /// [`Mamba2SsdPath::Minimal`], which takes no resets.
-        fn reset_align(&self, options: &Mamba2SsdPath) -> Option<usize> {
-            match options {
-                Mamba2SsdPath::Minimal(_) => None,
-                _ => Some(options.chunk_len_or_optimal(self.state_rank, self.per_head_dim())),
+        /// [`SsdPath::Minimal`], which takes no resets.
+        fn reset_align(&self, options: &Mamba2ScanOptions) -> Option<usize> {
+            if options.ssd_path == SsdPath::Minimal {
+                None
+            } else {
+                Some(options.chunk_len_or_optimal(self.state_rank, self.per_head_dim()))
             }
         }
         fn block_step(&self, x: Tensor<2>, cache: Option<Mamba2Cache>) -> (Tensor<2>, Mamba2Cache) {
@@ -159,8 +161,9 @@ mod impl_mamba2 {
 mod impl_mamba3 {
     use super::*;
     use crate::mamba3::double_ssd::prelude::Mamba3DoubleSsdCaches;
-    use crate::mamba3::prelude::{Mamba3, Mamba3Cache, Mamba3Caches, Mamba3Config, Mamba3SsdPath};
+    use crate::mamba3::prelude::{Mamba3, Mamba3Cache, Mamba3Caches, Mamba3Config, Mamba3ScanOptions};
     use crate::mamba3::single_ssd::prelude::Mamba3SingleSsdCaches;
+    use crate::ssd_path::SsdPath;
 
     impl CacheStack for Mamba3Caches {
         type Cache = Mamba3Cache;
@@ -220,13 +223,13 @@ mod impl_mamba3 {
     impl Block for Mamba3 {
         type Cache = Mamba3Cache;
         type Caches = Mamba3Caches;
-        type Options = Mamba3SsdPath;
+        type Options = Mamba3ScanOptions;
 
         fn block_forward(
             &self,
             x: Tensor<3>,
             cache: Option<Mamba3Cache>,
-            options: Mamba3SsdPath,
+            options: Mamba3ScanOptions,
             pad: Option<Tensor<2, Bool>>,
         ) -> (Tensor<3>, Mamba3Cache) {
             self.forward(x, cache, options, pad)
@@ -237,17 +240,18 @@ mod impl_mamba3 {
             &self,
             x: Tensor<3>,
             cache: Option<Mamba3Cache>,
-            options: Mamba3SsdPath,
+            options: Mamba3ScanOptions,
             reset: Tensor<2, Bool>,
         ) -> (Tensor<3>, Mamba3Cache) {
             self.forward_packed(x, cache, None, options, None, Some(reset))
         }
         /// The chunk length of `options`, in tokens: `chunk_len / micro_steps`.
-        /// `None` for [`Mamba3SsdPath::Minimal`], which takes no resets.
-        fn reset_align(&self, options: &Mamba3SsdPath) -> Option<usize> {
-            match options {
-                Mamba3SsdPath::Minimal(_) => None,
-                _ => Some(crate::standard_ssd::chunk_tokens(options.chunk_len_or_optimal(self), self.micro_steps)),
+        /// `None` for [`SsdPath::Minimal`], which takes no resets.
+        fn reset_align(&self, options: &Mamba3ScanOptions) -> Option<usize> {
+            if options.ssd_path == SsdPath::Minimal {
+                None
+            } else {
+                Some(crate::standard_ssd::chunk_tokens(options.chunk_len_or_optimal(self), self.micro_steps))
             }
         }
         fn block_step(&self, x: Tensor<2>, cache: Option<Mamba3Cache>) -> (Tensor<2>, Mamba3Cache) {

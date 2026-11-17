@@ -176,10 +176,11 @@ fn padded_mamba2_is_each_row_alone() {
         .with_state_rank(8)
         .with_per_head_dim(8)
         .init(&device);
-    for path in [Mamba2SsdPath::Minimal(Some(4)), Mamba2SsdPath::SerialRecalculated(Some(4))] {
+    for ssd_path in [SsdPath::Minimal, SsdPath::SerialRecalculated] {
+        let scan_options = Mamba2ScanOptions::new(ssd_path).with_chunk_len(Some(4));
         check_each_row_alone(
             &block,
-            |x, cache, pad| block.forward(x, cache, path.clone(), pad),
+            |x, cache, pad| block.forward(x, cache, scan_options.clone(), pad),
             |c: &Mamba2Cache| vec![rows(&c.conv_bvk), rows(&c.ssm_bhpr)],
         );
     }
@@ -247,22 +248,22 @@ fn padded_mamba3_is_each_row_alone() {
         mamba3(R::Real1D, T::None, 2, 2, G::Projected, Tr::MaxPlus),
         mamba3(R::Complex2D, T::HorizontalInToken, 3, 1, G::Kalman, Tr::None),
     ];
-    let paths = [
-        Mamba3SsdPath::Minimal(Some(6)),
-        Mamba3SsdPath::Serial(Some(6)),
-        Mamba3SsdPath::SerialRecalculated(Some(6)),
+    let all_scan_options = [
+        Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(6)),
+        Mamba3ScanOptions::new(SsdPath::Serial).with_chunk_len(Some(6)),
+        Mamba3ScanOptions::new(SsdPath::SerialRecalculated).with_chunk_len(Some(6)),
     ];
     for (i, config) in configs.iter().enumerate() {
         let block = config.init(&device);
-        let path = paths[i % paths.len()].clone();
+        let scan_options = all_scan_options[i % all_scan_options.len()].clone();
         check_each_row_alone(
             &block,
-            |x, cache, pad| block.forward_double_ssd(x, cache, &path, pad),
+            |x, cache, pad| block.forward_double_ssd(x, cache, &scan_options, pad),
             |c: &Mamba3DoubleSsdCache| mamba3_fields!(c),
         );
         check_each_row_alone(
             &block,
-            |x, cache, pad| block.forward_single_ssd(x, cache, &path, pad),
+            |x, cache, pad| block.forward_single_ssd(x, cache, &scan_options, pad),
             |c: &Mamba3SingleSsdCache| mamba3_fields!(c),
         );
     }
@@ -295,7 +296,7 @@ fn padded_mamba3_network_closes_each_row_at_its_own_end() {
         class_tokens: Vec::new(),
     }
     .init(&device);
-    let path = Mamba3SsdPath::SerialRecalculated(Some(4));
+    let scan_options = Mamba3ScanOptions::new(SsdPath::SerialRecalculated).with_chunk_len(Some(4));
 
     let lens = [6, 2, 4];
     let batch = lens.len();
@@ -304,7 +305,7 @@ fn padded_mamba3_network_closes_each_row_at_its_own_end() {
     let (y, caches) = net.forward(
         x.clone(),
         None,
-        path.clone(),
+        scan_options.clone(),
         None,
         Some(pad_mask(&lens, padded, &device)),
     );
@@ -316,7 +317,7 @@ fn padded_mamba3_network_closes_each_row_at_its_own_end() {
     };
     for (b, &len) in lens.iter().enumerate() {
         let (y_b, caches_b) =
-            net.forward(x.clone().narrow(0, b, 1).narrow(1, 0, len), None, path.clone(), None, None);
+            net.forward(x.clone().narrow(0, b, 1).narrow(1, 0, len), None, scan_options.clone(), None, None);
         let Mamba3Caches::SingleSsd(caches_b) = caches_b else {
             panic!("a fresh call runs the single-SSD pathway");
         };

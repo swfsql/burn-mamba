@@ -68,7 +68,7 @@ fn cased(j: usize, id: usize) -> u8 {
 /// over `[0, z]`).
 fn reference_log_softmax(
     net: &MambaVocabNet,
-    path: &MambaSsdPath,
+    scan_options: &MambaScanOptions,
     prompt: &[u8],
     continuation: &[u8],
 ) -> (Tensor<3>, Tensor<3>) {
@@ -77,7 +77,7 @@ fn reference_log_softmax(
     let tokens: Vec<u8> = prompt.iter().chain(&continuation[..n - 1]).copied().collect();
     let pairs: Vec<i32> = tokens.iter().flat_map(|&t| pair(t)).collect();
     let x = Tensor::<1, Int>::from_ints(pairs.as_slice(), &device).reshape([1, tokens.len(), 2]);
-    let (logits, _) = net.forward(x, None, path.clone(), None, None);
+    let (logits, _) = net.forward(x, None, scan_options.clone(), None, None);
     let lead = logits.dims()[1] - tokens.len();
     let logits = logits.narrow(1, lead + prompt.len() - 1, n);
     let z = logits.clone().narrow(2, VOCAB_SIZE, 1);
@@ -88,7 +88,7 @@ fn reference_log_softmax(
 /// The log-probabilities `[n]` of `continuation` after `prompt`, from one
 /// `forward` over both (the class latents in front): that of each id, plus
 /// that of its case on a letter.
-fn reference_log_p(net: &MambaVocabNet, path: &MambaSsdPath, prompt: &[u8], continuation: &[u8]) -> Tensor<1> {
+fn reference_log_p(net: &MambaVocabNet, scan_options: &MambaScanOptions, prompt: &[u8], continuation: &[u8]) -> Tensor<1> {
     let n = continuation.len();
     let device = net.devices()[0].clone();
     let column = |f: &dyn Fn([i32; 2]) -> i32| {
@@ -97,7 +97,7 @@ fn reference_log_p(net: &MambaVocabNet, path: &MambaSsdPath, prompt: &[u8], cont
     };
     let letter: Vec<f32> = continuation.iter().map(|&t| f32::from(u8::from(pair(t)[0] as usize >= FIRST_LETTER))).collect();
     let letter = Tensor::<1>::from_floats(letter.as_slice(), &device);
-    let (ids, case) = reference_log_softmax(net, path, prompt, continuation);
+    let (ids, case) = reference_log_softmax(net, scan_options, prompt, continuation);
     let id = ids.gather(2, column(&|[id, _]| id)).reshape([n]);
     let case = case.gather(2, column(&|[_, flag]| flag)).reshape([n]);
     id + case * letter
@@ -112,7 +112,7 @@ fn descent_on_the_contrast_raises_delta() {
     let device = test_device().autodiff();
     device.seed(0);
     let mut net = tiny_net(&device).map(&mut Leaf);
-    let path = MambaSsdPath::Mamba3(Mamba3SsdPath::SerialRecalculated(None));
+    let scan_options = MambaScanOptions::Mamba3(Mamba3ScanOptions::new(SsdPath::SerialRecalculated));
     let ids = |len: usize, salt: usize| -> Vec<u8> {
         (0..len).map(|j| cased(j, j * (salt + 2) + salt * 5)).collect()
     };
@@ -132,21 +132,21 @@ fn descent_on_the_contrast_raises_delta() {
     let delta = |net: &MambaVocabNet| -> f32 {
         let sum: f32 = (0..k)
             .map(|i| {
-                let own = reference_log_p(net, &path, &prompts[i], &continuations[i]);
-                let other = reference_log_p(net, &path, &prompts[(i + k - 1) % k], &continuations[i]);
+                let own = reference_log_p(net, &scan_options, &prompts[i], &continuations[i]);
+                let other = reference_log_p(net, &scan_options, &prompts[(i + k - 1) % k], &continuations[i]);
                 (own - other).sum().into_scalar::<f32>()
             })
             .sum();
         sum / (k * n) as f32
     };
     let contrast = |net: &MambaVocabNet| -> f32 {
-        let (_, read) = loss(net, &path, batch.clone(), &config, 1.0, 1);
+        let (_, read) = loss(net, &scan_options, batch.clone(), &config, 1.0, 1);
         read.into_data().try_into_vec_as::<f32>().unwrap()[0]
     };
     let (delta_before, contrast_before) = (delta(&net), contrast(&net));
     let mut optim = SgdConfig::new().init();
     for _ in 0..10 {
-        let (total, _) = loss(&net, &path, batch.clone(), &config, 1.0, 1);
+        let (total, _) = loss(&net, &scan_options, batch.clone(), &config, 1.0, 1);
         let grads = GradientsParams::from_grads(total.backward(), &net);
         net = optim.step(0.05, net, grads);
     }
@@ -232,7 +232,7 @@ fn explicit_negatives_match_a_forward_over_each_pair() {
     let device = test_device();
     device.seed(0);
     let net = tiny_net(&device);
-    let path = MambaSsdPath::Mamba3(Mamba3SsdPath::SerialRecalculated(None));
+    let scan_options = MambaScanOptions::Mamba3(Mamba3ScanOptions::new(SsdPath::SerialRecalculated));
     let ids = |len: usize, salt: usize| -> Vec<u8> {
         (0..len).map(|j| cased(j, j * 5 + salt * 11 + 1)).collect()
     };
@@ -243,11 +243,11 @@ fn explicit_negatives_match_a_forward_over_each_pair() {
     let neg: Vec<&[u8]> = negatives.iter().map(Vec::as_slice).collect();
     let c: Vec<&[u8]> = continuations.iter().map(Vec::as_slice).collect();
     let batch = ContrastBatch::with_negatives(&p, &neg, &c, 8, &device);
-    let (own_kn, other_kn) = pair_log_probs(&net, &path, batch);
+    let (own_kn, other_kn) = pair_log_probs(&net, &scan_options, batch);
     let tol = dtype_tol(1e-4);
     for i in 0..3 {
-        let own = reference_log_p(&net, &path, &prompts[i], &continuations[i]);
-        let other = reference_log_p(&net, &path, &negatives[i], &continuations[i]);
+        let own = reference_log_p(&net, &scan_options, &prompts[i], &continuations[i]);
+        let other = reference_log_p(&net, &scan_options, &negatives[i], &continuations[i]);
         let row = |t: &Tensor<2>| t.clone().narrow(0, i, 1).reshape([5]);
         assert!(max_rel_diff(row(&own_kn), own) < tol, "own row {i}");
         assert!(max_rel_diff(row(&other_kn), other) < tol, "other row {i}");
@@ -270,7 +270,7 @@ fn profile_lines_hold_the_scores_of_each_character() {
     let device = test_device();
     device.seed(0);
     let net = tiny_net(&device);
-    let path = MambaSsdPath::Mamba3(Mamba3SsdPath::SerialRecalculated(None));
+    let scan_options = MambaScanOptions::Mamba3(Mamba3ScanOptions::new(SsdPath::SerialRecalculated));
     let ids = |len: usize, salt: usize| -> Vec<u8> {
         (0..len).map(|j| cased(j, j * 5 + salt * 11 + 1)).collect()
     };
@@ -286,9 +286,9 @@ fn profile_lines_hold_the_scores_of_each_character() {
             true => ContrastBatch::with_negatives(&p, &neg, &c, 8, &device),
             false => ContrastBatch::new(&p, &c, 8, &device),
         };
-        let (own_ref, other_ref) = pair_log_probs(&net, &path, batch.clone());
+        let (own_ref, other_ref) = pair_log_probs(&net, &scan_options, batch.clone());
         let mut log = Vec::new();
-        let (own_kn, other_kn) = profiled_pair_log_probs(&net, &path, batch, &mut log);
+        let (own_kn, other_kn) = profiled_pair_log_probs(&net, &scan_options, batch, &mut log);
         assert!(max_rel_diff(own_kn.clone(), own_ref) < tol, "own, explicit {explicit}");
         assert!(max_rel_diff(other_kn.clone(), other_ref) < tol, "other, explicit {explicit}");
         let log = String::from_utf8(log).unwrap();
@@ -303,7 +303,7 @@ fn profile_lines_hold_the_scores_of_each_character() {
             let row = |t: &Tensor<2>| -> Vec<f32> { t.clone().narrow(0, i, 1).into_data().try_into_vec_as().unwrap() };
             // The entropy of the cased character: `H(id) + P(letter)·H(case)`.
             let entropy = |prompt: &[u8]| -> Vec<f32> {
-                let (ids, case) = reference_log_softmax(&net, &path, prompt, &continuations[i]);
+                let (ids, case) = reference_log_softmax(&net, &scan_options, prompt, &continuations[i]);
                 let h = |log_p: Tensor<3>| (log_p.clone().exp() * log_p).sum_dim(2).neg();
                 let p_letter = ids.clone().narrow(2, FIRST_LETTER, VOCAB_SIZE - FIRST_LETTER).exp().sum_dim(2);
                 (h(ids) + p_letter * h(case)).into_data().try_into_vec_as().unwrap()
@@ -361,7 +361,7 @@ fn loss_matches_reference(one_sided: bool) {
     let device = test_device().autodiff();
     device.seed(0);
     let net = tiny_net(&device).map(&mut Leaf);
-    let path = MambaSsdPath::Mamba3(Mamba3SsdPath::SerialRecalculated(None));
+    let scan_options = MambaScanOptions::Mamba3(Mamba3ScanOptions::new(SsdPath::SerialRecalculated));
     // Three rows. The prompts have three lengths, so the pass over them is
     // padded.
     let ids = |len: usize, salt: usize| -> Vec<u8> {
@@ -381,9 +381,9 @@ fn loss_matches_reference(one_sided: bool) {
     let p: Vec<&[u8]> = prompts.iter().map(Vec::as_slice).collect();
     let c: Vec<&[u8]> = continuations.iter().map(Vec::as_slice).collect();
     let batch = ContrastBatch::new(&p, &c, prompt_max, &device);
-    let (got, readouts) = loss(&net, &path, batch, &config, 0.5, lm_positions);
+    let (got, readouts) = loss(&net, &scan_options, batch, &config, 0.5, lm_positions);
 
-    let log_p = |prompt: &[u8], continuation: &[u8]| reference_log_p(&net, &path, prompt, continuation);
+    let log_p = |prompt: &[u8], continuation: &[u8]| reference_log_p(&net, &scan_options, prompt, continuation);
     let own: Vec<Tensor<1>> = (0..k).map(|i| log_p(&prompts[i], &continuations[i])).collect();
     let other: Vec<Tensor<1>> = (0..k).map(|i| log_p(&prompts[(i + k - 1) % k], &continuations[i])).collect();
     let own_kn = Tensor::stack::<2>(own, 0);

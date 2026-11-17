@@ -4,11 +4,11 @@
 //! container of `burn-stack` takes it with no extra code, and
 //! [`MambaLatentNet`], [`MambaVocabNet`], [`MambaBidiLayers`] and
 //! [`MambaHNetVocabNet`] are only type aliases. A call panics when its cache or
-//! its SSD path is of another family than the block.
+//! its scan options are of another family than the block.
 //! `docs/adr/0009-family-choice-at-the-block.md` gives the consequences for the
 //! parameter paths, the caches and a mixed stack.
 
-use crate::family::MambaSsdPath;
+use crate::family::MambaScanOptions;
 use burn::prelude::*;
 use burn_stack::modules::bidi::BidiLayers;
 use burn_stack::modules::hnet::HNetVocabNetwork;
@@ -20,9 +20,9 @@ use burn_stack::utils::UntiedParam;
 #[cfg(feature = "mamba1")]
 use crate::mamba1::prelude::{Mamba1, Mamba1Cache};
 #[cfg(feature = "mamba2")]
-use crate::mamba2::prelude::{Mamba2, Mamba2Cache, Mamba2SsdPath};
+use crate::mamba2::prelude::{Mamba2, Mamba2Cache, Mamba2ScanOptions};
 #[cfg(feature = "mamba3")]
-use crate::mamba3::prelude::{Mamba3, Mamba3Cache, Mamba3SsdPath};
+use crate::mamba3::prelude::{Mamba3, Mamba3Cache, Mamba3ScanOptions};
 
 /// A Mamba block, tagged with its family.
 #[derive(Module, Debug)]
@@ -74,7 +74,7 @@ pub type MambaBidiLayers = BidiLayers<MambaBlock>;
 pub type MambaHNetVocabNet = HNetVocabNetwork<MambaBlock, MambaBlock>;
 
 const WRONG_CACHE: &str = "the cache family does not match the block";
-const WRONG_PATH: &str = "the SSD path family does not match the block";
+const WRONG_SCAN_OPTIONS: &str = "the family of the scan options does not match the block";
 
 #[cfg(feature = "mamba1")]
 fn mamba1_cache(cache: MambaCache) -> Mamba1Cache {
@@ -103,61 +103,61 @@ fn mamba3_cache(cache: MambaCache) -> Mamba3Cache {
     }
 }
 
-/// Mamba-1 has no SSD path, so this only checks the family.
+/// Mamba-1 has no scan options, so this only checks the family.
 #[cfg(feature = "mamba1")]
-fn check_mamba1_path(path: MambaSsdPath) {
-    match path {
-        MambaSsdPath::Mamba1 => (),
+fn check_mamba1_scan_options(scan_options: MambaScanOptions) {
+    match scan_options {
+        MambaScanOptions::Mamba1 => (),
         #[allow(unreachable_patterns)]
-        _ => panic!("{WRONG_PATH}"),
+        _ => panic!("{WRONG_SCAN_OPTIONS}"),
     }
 }
 
 #[cfg(feature = "mamba2")]
-fn mamba2_path(path: MambaSsdPath) -> Mamba2SsdPath {
-    match path {
-        MambaSsdPath::Mamba2(p) => p,
+fn mamba2_scan_options(scan_options: MambaScanOptions) -> Mamba2ScanOptions {
+    match scan_options {
+        MambaScanOptions::Mamba2(scan_options) => scan_options,
         #[allow(unreachable_patterns)]
-        _ => panic!("{WRONG_PATH}"),
+        _ => panic!("{WRONG_SCAN_OPTIONS}"),
     }
 }
 
 #[cfg(feature = "mamba3")]
-fn mamba3_path(path: MambaSsdPath) -> Mamba3SsdPath {
-    match path {
-        MambaSsdPath::Mamba3(p) => p,
+fn mamba3_scan_options(scan_options: MambaScanOptions) -> Mamba3ScanOptions {
+    match scan_options {
+        MambaScanOptions::Mamba3(scan_options) => scan_options,
         #[allow(unreachable_patterns)]
-        _ => panic!("{WRONG_PATH}"),
+        _ => panic!("{WRONG_SCAN_OPTIONS}"),
     }
 }
 
 impl Block for MambaBlock {
     type Cache = MambaCache;
     type Caches = MambaCaches;
-    type Options = MambaSsdPath;
+    type Options = MambaScanOptions;
 
     fn block_forward(
         &self,
         x: Tensor<3>,
         cache: Option<MambaCache>,
-        options: MambaSsdPath,
+        options: MambaScanOptions,
         pad: Option<Tensor<2, Bool>>,
     ) -> (Tensor<3>, MambaCache) {
         match self {
             #[cfg(feature = "mamba1")]
             Self::Mamba1(b) => {
-                check_mamba1_path(options);
+                check_mamba1_scan_options(options);
                 let (y, c) = b.block_forward(x, cache.map(mamba1_cache), (), pad);
                 (y, MambaCache::Mamba1(c))
             }
             #[cfg(feature = "mamba2")]
             Self::Mamba2(b) => {
-                let (y, c) = b.block_forward(x, cache.map(mamba2_cache), mamba2_path(options), pad);
+                let (y, c) = b.block_forward(x, cache.map(mamba2_cache), mamba2_scan_options(options), pad);
                 (y, MambaCache::Mamba2(c))
             }
             #[cfg(feature = "mamba3")]
             Self::Mamba3(b) => {
-                let (y, c) = b.block_forward(x, cache.map(mamba3_cache), mamba3_path(options), pad);
+                let (y, c) = b.block_forward(x, cache.map(mamba3_cache), mamba3_scan_options(options), pad);
                 (y, MambaCache::Mamba3(c))
             }
         }
@@ -167,42 +167,42 @@ impl Block for MambaBlock {
         &self,
         x: Tensor<3>,
         cache: Option<MambaCache>,
-        options: MambaSsdPath,
+        options: MambaScanOptions,
         reset: Tensor<2, Bool>,
     ) -> (Tensor<3>, MambaCache) {
         match self {
             #[cfg(feature = "mamba1")]
             Self::Mamba1(b) => {
-                check_mamba1_path(options);
+                check_mamba1_scan_options(options);
                 let (y, c) = b.block_forward_packed(x, cache.map(mamba1_cache), (), reset);
                 (y, MambaCache::Mamba1(c))
             }
             #[cfg(feature = "mamba2")]
             Self::Mamba2(b) => {
                 let (y, c) =
-                    b.block_forward_packed(x, cache.map(mamba2_cache), mamba2_path(options), reset);
+                    b.block_forward_packed(x, cache.map(mamba2_cache), mamba2_scan_options(options), reset);
                 (y, MambaCache::Mamba2(c))
             }
             #[cfg(feature = "mamba3")]
             Self::Mamba3(b) => {
                 let (y, c) =
-                    b.block_forward_packed(x, cache.map(mamba3_cache), mamba3_path(options), reset);
+                    b.block_forward_packed(x, cache.map(mamba3_cache), mamba3_scan_options(options), reset);
                 (y, MambaCache::Mamba3(c))
             }
         }
     }
 
-    fn reset_align(&self, options: &MambaSsdPath) -> Option<usize> {
+    fn reset_align(&self, options: &MambaScanOptions) -> Option<usize> {
         match self {
             #[cfg(feature = "mamba1")]
             Self::Mamba1(b) => {
-                check_mamba1_path(options.clone());
+                check_mamba1_scan_options(options.clone());
                 b.reset_align(&())
             }
             #[cfg(feature = "mamba2")]
-            Self::Mamba2(b) => b.reset_align(&mamba2_path(options.clone())),
+            Self::Mamba2(b) => b.reset_align(&mamba2_scan_options(options.clone())),
             #[cfg(feature = "mamba3")]
-            Self::Mamba3(b) => b.reset_align(&mamba3_path(options.clone())),
+            Self::Mamba3(b) => b.reset_align(&mamba3_scan_options(options.clone())),
         }
     }
 

@@ -148,7 +148,7 @@ fn main() {
     // forward: parallel over the full sequence — [batch, sequence, d_model].
     // The last argument is an optional right-padding mask.
     let x = Tensor::<3>::zeros([2, 64, 256], &device);
-    let (y, cache) = block.forward(x, None, Mamba2SsdPath::default(), None);
+    let (y, cache) = block.forward(x, None, Mamba2ScanOptions::default(), None);
     assert_eq!([2, 64, 256], y.dims());
 
     // step: one token at a time, constant memory — [batch, d_model].
@@ -158,9 +158,10 @@ fn main() {
 }
 ```
 
-`Mamba1` and `Mamba3` have the same API (`Mamba1::forward` has no SSD-path
-argument). The generic containers of `burn-stack` (`Layer<M>`, `Layers<M>`,
-`LatentNetwork<M>`, `VocabNetwork<M>`, `BidiLayers<M>`) compose any of them.
+`Mamba1` and `Mamba3` have the same API (`Mamba1::forward` has no scan
+options argument). The generic containers of `burn-stack` (`Layer<M>`,
+`Layers<M>`, `LatentNetwork<M>`, `VocabNetwork<M>`, `BidiLayers<M>`) compose
+any of them.
 `MambaBlock` is one enum over the three blocks, and `MambaLatentNet`,
 `MambaVocabNet` and `MambaBidiLayers` are those containers over it. So they
 select the family at run time. See the [examples](#examples) for complete
@@ -207,9 +208,10 @@ simplest family.
 
 ## Choosing an SSD path (Mamba-2 / Mamba-3)
 
-An `…SsdPath` selector makes the chunkwise scan pluggable. All three SSD paths
-are exact reformulations of the same math, and they agree on values **and**
-gradients. They differ only in their memory/compute trade-off:
+[`SsdPath`](https://swfsql.github.io/burn-mamba/doc/burn_mamba/ssd_path/enum.SsdPath.html)
+makes the chunkwise scan pluggable. All three SSD paths are exact
+reformulations of the same math, and they agree on values **and** gradients.
+They differ only in their memory/compute trade-off:
 
 | SSD path | Approach | Backward |
 |---------|----------|----------|
@@ -217,10 +219,10 @@ gradients. They differ only in their memory/compute trade-off:
 | `Serial` | a serial loop over chunks (mirrors the reference Triton kernels) | autodiff |
 | `SerialRecalculated` *(default)* | a serial loop with a recompute backward | custom: ~⅓ less training memory |
 
-See
-[`Mamba2SsdPath`](https://swfsql.github.io/burn-mamba/doc/burn_mamba/mamba2/ssd/ssd_path/enum.Mamba2SsdPath.html)
+The scan options of a block hold its SSD path and its chunk length. See
+[`Mamba2ScanOptions`](https://swfsql.github.io/burn-mamba/doc/burn_mamba/mamba2/scan_options/struct.Mamba2ScanOptions.html)
 and
-[`Mamba3SsdPath`](https://swfsql.github.io/burn-mamba/doc/burn_mamba/mamba3/ssd_path/enum.Mamba3SsdPath.html).
+[`Mamba3ScanOptions`](https://swfsql.github.io/burn-mamba/doc/burn_mamba/mamba3/scan_options/struct.Mamba3ScanOptions.html).
 In Mamba-3 the SSD path is independent of the *pathway* (double- or
 single-SSD). The cache variant selects the pathway.
 

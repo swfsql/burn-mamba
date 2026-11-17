@@ -14,6 +14,7 @@
 
 use super::*;
 use crate::mamba3::rotation::rope::apply_rope;
+use crate::ssd_path::SsdPath;
 use burn_stack::utils::test_helpers::{dtype_tol, max_abs_diff, max_rel_diff};
 use burn::module::Param;
 use burn::tensor::{DType, Distribution};
@@ -1025,7 +1026,7 @@ fn rotor_generator_channels_are_left_then_right() {
 #[test]
 fn quaternion_rotation_field_survives_record_roundtrip() {
     use crate::mamba3::mamba3::Mamba3Config;
-    use crate::mamba3::ssd_path::Mamba3SsdPath;
+    use crate::mamba3::scan_options::Mamba3ScanOptions;
     use burn::module::Module;
     let device = test_device();
     let cfg = Mamba3Config::new(32)
@@ -1044,7 +1045,7 @@ fn quaternion_rotation_field_survives_record_roundtrip() {
 
     // The loaded block still runs the quaternion forward.
     let x = Tensor::<3>::random([2, 4, 32], Distribution::Normal(0.0, 1.0), &device);
-    let (out, _) = block2.forward(x, None, Mamba3SsdPath::Minimal(None), None);
+    let (out, _) = block2.forward(x, None, Mamba3ScanOptions::new(SsdPath::Minimal), None);
     assert_eq!([2, 4, 32], out.dims());
 }
 
@@ -1055,7 +1056,7 @@ fn quaternion_rotation_field_survives_record_roundtrip() {
 /// left-isoclinic and the full-`SO(4)` kind run it.
 fn quaternion_forward_step_parity_kind(kind: RotationKind, rotation_fraction: f64, mimo_rank: usize) {
     use crate::mamba3::mamba3::Mamba3Config;
-    use crate::mamba3::ssd_path::Mamba3SsdPath;
+    use crate::mamba3::scan_options::Mamba3ScanOptions;
     let device = test_device();
     let model = Mamba3Config::new(32)
         .with_state_rank(16)
@@ -1070,7 +1071,7 @@ fn quaternion_forward_step_parity_kind(kind: RotationKind, rotation_fraction: f6
     let input = Tensor::<3>::random([batch, seq, 32], Distribution::Normal(0.0, 1.0), &device);
 
     // Chunked forward (fresh cache ⇒ double-ssd quaternion pathway).
-    let (out_fwd, _cache) = model.forward(input.clone(), None, Mamba3SsdPath::Minimal(None), None);
+    let (out_fwd, _cache) = model.forward(input.clone(), None, Mamba3ScanOptions::new(SsdPath::Minimal), None);
 
     // Recurrent step unrolling from a fresh cache.
     let mut cache = None;
@@ -1130,7 +1131,7 @@ fn rotor_block_forward_step_parity_mimo() {
 /// block level).
 fn quaternion_split_prefill_matches_full_kind(kind: RotationKind) {
     use crate::mamba3::mamba3::Mamba3Config;
-    use crate::mamba3::ssd_path::Mamba3SsdPath;
+    use crate::mamba3::scan_options::Mamba3ScanOptions;
     let device = test_device();
     let model = Mamba3Config::new(32)
         .with_state_rank(16)
@@ -1143,12 +1144,12 @@ fn quaternion_split_prefill_matches_full_kind(kind: RotationKind) {
     let (batch, seq, split) = (2, 6, 4);
     let input = Tensor::<3>::random([batch, seq, 32], Distribution::Normal(0.0, 1.0), &device);
 
-    let (out_full, cache_full) = model.forward(input.clone(), None, Mamba3SsdPath::Minimal(None), None);
+    let (out_full, cache_full) = model.forward(input.clone(), None, Mamba3ScanOptions::new(SsdPath::Minimal), None);
 
     let prefix = input.clone().narrow(1, 0, split);
     let suffix = input.narrow(1, split, seq - split);
-    let (out_pre, mid) = model.forward(prefix, None, Mamba3SsdPath::Minimal(None), None);
-    let (out_suf, cache_split) = model.forward(suffix, Some(mid), Mamba3SsdPath::Minimal(None), None);
+    let (out_pre, mid) = model.forward(prefix, None, Mamba3ScanOptions::new(SsdPath::Minimal), None);
+    let (out_suf, cache_split) = model.forward(suffix, Some(mid), Mamba3ScanOptions::new(SsdPath::Minimal), None);
     let out_cat = Tensor::cat(vec![out_pre, out_suf], 1);
 
     let d_out = max_abs_diff(out_full, out_cat);
@@ -1186,7 +1187,7 @@ fn rotor_split_prefill_matches_full() {
 /// the recurrent form.
 fn quaternion_forward_step_grad_parity_kind(kind: RotationKind) {
     use crate::mamba3::mamba3::Mamba3Config;
-    use crate::mamba3::ssd_path::Mamba3SsdPath;
+    use crate::mamba3::scan_options::Mamba3ScanOptions;
     let device = test_device();
     let model = Mamba3Config::new(32)
         .with_state_rank(16)
@@ -1205,7 +1206,7 @@ fn quaternion_forward_step_grad_parity_kind(kind: RotationKind) {
     let p_step = Param::from_tensor(Tensor::from_inner(input));
 
     // Chunked forward.
-    let (out_fwd, _) = model.forward(p_fwd.val(), None, Mamba3SsdPath::Minimal(None), None);
+    let (out_fwd, _) = model.forward(p_fwd.val(), None, Mamba3ScanOptions::new(SsdPath::Minimal), None);
     let loss_fwd = (out_fwd * Tensor::from_inner(head.clone())).sum();
     let g_fwd = loss_fwd.backward();
     let d_in_fwd = p_fwd.val().grad(&g_fwd).expect("grad input (forward)");
@@ -1312,7 +1313,7 @@ fn assert_cache_parity(
 fn complex_angle_scan_forward_step_parity() {
     use crate::mamba3::helpers::scan_block;
     use crate::mamba3::mamba3::Mamba3Config;
-    use crate::mamba3::ssd_path::Mamba3SsdPath;
+    use crate::mamba3::scan_options::Mamba3ScanOptions;
 
     let device = test_device();
     // (tokens, micro_steps, expected to take the blocked branch)
@@ -1341,7 +1342,7 @@ fn complex_angle_scan_forward_step_parity() {
         let p_step = Param::from_tensor(Tensor::from_inner(x));
 
         // Chunked: one scan over the whole write axis.
-        let (out_fwd, cache_fwd) = model.forward(p_fwd.val(), None, Mamba3SsdPath::default(), None);
+        let (out_fwd, cache_fwd) = model.forward(p_fwd.val(), None, Mamba3ScanOptions::default(), None);
 
         // Recurrent: `micro_steps` plain adds per token, no scan anywhere.
         let mut cache = None;
@@ -1397,7 +1398,7 @@ fn complex_angle_scan_forward_step_parity() {
 fn complex_angle_scan_split_prefill_parity() {
     use crate::mamba3::helpers::scan_block;
     use crate::mamba3::mamba3::Mamba3Config;
-    use crate::mamba3::ssd_path::Mamba3SsdPath;
+    use crate::mamba3::scan_options::Mamba3ScanOptions;
 
     let device = test_device();
     let (head_tokens, tail_tokens) = (6, 24);
@@ -1420,16 +1421,16 @@ fn complex_angle_scan_split_prefill_parity() {
     // Fresh autodiff leaves per path, so the two backwards are independent.
     let p_whole = Param::from_tensor(Tensor::from_inner(x.clone()));
     let p_split = Param::from_tensor(Tensor::from_inner(x));
-    let path = Mamba3SsdPath::default();
+    let scan_options = Mamba3ScanOptions::default();
 
-    let (out_whole, cache_whole) = model.forward(p_whole.val(), None, path.clone(), None);
+    let (out_whole, cache_whole) = model.forward(p_whole.val(), None, scan_options.clone(), None);
 
     let xs = p_split.val();
-    let (out_a, mid) = model.forward(xs.clone().narrow(1, 0, head_tokens), None, path.clone(), None);
+    let (out_a, mid) = model.forward(xs.clone().narrow(1, 0, head_tokens), None, scan_options.clone(), None);
     let (out_b, cache_split) = model.forward(
         xs.narrow(1, head_tokens, tail_tokens),
         Some(mid),
-        path.clone(),
+        scan_options.clone(),
         None,
     );
     let out_split = Tensor::cat(vec![out_a, out_b], 1);
@@ -1464,7 +1465,7 @@ fn complex_angle_scan_split_prefill_parity() {
 #[test]
 fn rotor_right_factor_channels_receive_gradient() {
     use crate::mamba3::mamba3::Mamba3Config;
-    use crate::mamba3::ssd_path::Mamba3SsdPath;
+    use crate::mamba3::scan_options::Mamba3ScanOptions;
     let device = test_device();
     let cfg = Mamba3Config::new(32)
         .with_state_rank(16)
@@ -1474,7 +1475,7 @@ fn rotor_right_factor_channels_receive_gradient() {
     let model = cfg.init(&device.clone().autodiff());
 
     let x = Tensor::<3>::random([2, 5, 32], Distribution::Normal(0.0, 1.0), &device);
-    let (y, _) = model.forward(Tensor::from_inner(x), None, Mamba3SsdPath::Minimal(None), None);
+    let (y, _) = model.forward(Tensor::from_inner(x), None, Mamba3ScanOptions::new(SsdPath::Minimal), None);
     let grads = y.sum().backward();
     let g = model
         .in_proj
@@ -1564,10 +1565,10 @@ fn rotation_state_wrong_unwrap_panics() {
 #[test]
 fn quaternion_bidi_forward_runs() {
     use crate::mamba3::mamba3::Mamba3Config;
-    use crate::mamba3::ssd_path::Mamba3SsdPath;
+    use crate::mamba3::scan_options::Mamba3ScanOptions;
     use burn_stack::modules::BidiShape;
     use burn_stack::modules::bidi::OutputMergeConfig;
-    use crate::family::{MambaBidiLayersConfig, MambaBlockConfig, MambaSsdPath};
+    use crate::family::{MambaBidiLayersConfig, MambaBlockConfig, MambaScanOptions};
     let device = test_device();
     let block = Mamba3Config::new(32)
         .with_state_rank(16)
@@ -1587,7 +1588,7 @@ fn quaternion_bidi_forward_runs() {
     let (out, _caches) = layers.forward(
         x,
         None,
-        MambaSsdPath::Mamba3(Mamba3SsdPath::Minimal(None)),
+        MambaScanOptions::Mamba3(Mamba3ScanOptions::new(SsdPath::Minimal)),
         None,
         None,
     );
@@ -1768,7 +1769,7 @@ fn as_real1d(block: crate::mamba3::mamba3::Mamba3) -> crate::mamba3::mamba3::Mam
 /// it removes the rotation and changes nothing else.
 fn real1d_matches_zeroed_rotation(kind: RotationKind) {
     use crate::mamba3::mamba3::Mamba3Config;
-    use crate::mamba3::ssd_path::Mamba3SsdPath;
+    use crate::mamba3::scan_options::Mamba3ScanOptions;
     let device = test_device();
     let block = Mamba3Config::new(32)
         .with_state_rank(16)
@@ -1779,8 +1780,8 @@ fn real1d_matches_zeroed_rotation(kind: RotationKind) {
 
     let x = Tensor::<3>::random([2, 6, 32], Distribution::Normal(0.0, 1.0), &device);
     let (zeroed, _) = without_rotation_channels(block.clone())
-        .forward(x.clone(), None, Mamba3SsdPath::Minimal(None), None);
-    let (real, _) = as_real1d(block).forward(x, None, Mamba3SsdPath::Minimal(None), None);
+        .forward(x.clone(), None, Mamba3ScanOptions::new(SsdPath::Minimal), None);
+    let (real, _) = as_real1d(block).forward(x, None, Mamba3ScanOptions::new(SsdPath::Minimal), None);
     let diff = max_abs_diff(zeroed, real);
     assert!(
         diff < dtype_tol(1e-5),
@@ -1975,7 +1976,7 @@ fn complex_range_one_matches_the_reference_angle() {
 /// same [`RotationSpec`], not two copies of the formula).
 fn rotation_range_is_wired_through(kind: RotationKind) {
     use crate::mamba3::mamba3::Mamba3Config;
-    use crate::mamba3::ssd_path::Mamba3SsdPath;
+    use crate::mamba3::scan_options::Mamba3ScanOptions;
     let device = test_device();
     let base = Mamba3Config::new(32)
         .with_state_rank(16)
@@ -1991,11 +1992,11 @@ fn rotation_range_is_wired_through(kind: RotationKind) {
         .load_record(default.clone().into_record());
 
     let x = Tensor::<3>::random([2, 6, 32], Distribution::Normal(0.0, 1.0), &device);
-    let (y_default, _) = default.forward(x.clone(), None, Mamba3SsdPath::Minimal(None), None);
+    let (y_default, _) = default.forward(x.clone(), None, Mamba3ScanOptions::new(SsdPath::Minimal), None);
     let (y_widened, cache_widened) =
         widened
             .clone()
-            .forward(x.clone(), None, Mamba3SsdPath::Minimal(None), None);
+            .forward(x.clone(), None, Mamba3ScanOptions::new(SsdPath::Minimal), None);
     // A lower bound, so it does not grow with `dtype_tol`: with the range
     // ignored, the two runs are the same computation and `d` is exactly 0 in
     // every dtype. The effect itself is ~1e-2, below the f16 `dtype_tol(1e-4)`.

@@ -405,7 +405,7 @@ fn guard_random_init_consumed(
     cfg: &Mamba3Config,
     batch: usize,
     input: &Tensor<3>,
-    ssd_path: &Mamba3SsdPath,
+    scan_options: &Mamba3ScanOptions,
     random_out: &Tensor<3>,
 ) {
     if !random_init {
@@ -415,7 +415,7 @@ fn guard_random_init_consumed(
     let (out_zero, _) = model.forward_single_ssd(
         Tensor::from_inner(input.clone()),
         Some(build_single_ssd_cache(cfg, batch, false)),
-        ssd_path,
+        scan_options,
         None,
     );
     let d = max_abs_diff(random_out.clone(), out_zero.inner());
@@ -433,8 +433,8 @@ fn guard_random_init_consumed(
 /// parameter gradients must agree. The accumulator of the single-ssd cache is
 /// not compared here (different semantics from the state); the
 /// single-ssd cache is compared in `run_forward_single_ssd_split_matches_full`.
-fn forward_match(cfg: Mamba3Config, ssd_path: Mamba3SsdPath, random_init: bool) {
-    forward_match_tol(cfg, ssd_path, random_init, 1e-3);
+fn forward_match(cfg: Mamba3Config, scan_options: Mamba3ScanOptions, random_init: bool) {
+    forward_match_tol(cfg, scan_options, random_init, 1e-3);
 }
 
 /// [`forward_match`] with an explicit gradient tolerance.
@@ -445,7 +445,7 @@ fn forward_match(cfg: Mamba3Config, ssd_path: Mamba3SsdPath, random_init: bool) 
 /// untouched (`|B| = 1` either way), so only this bound moves.
 fn forward_match_tol(
     cfg: Mamba3Config,
-    ssd_path: Mamba3SsdPath,
+    scan_options: Mamba3ScanOptions,
     random_init: bool,
     grad_tol: f32,
 ) {
@@ -464,15 +464,15 @@ fn forward_match_tol(
 
     let input_a = param_input(&input);
     let c3c = c3;
-    let path_a = ssd_path.clone();
+    let a_scan_options = scan_options.clone();
     let r_fwd_double_ssd = run_with_grads(&model, &input_a, &head, |m, x| {
-        let (out, _) = m.forward_double_ssd(x, Some(c3c), &path_a, None);
+        let (out, _) = m.forward_double_ssd(x, Some(c3c), &a_scan_options, None);
         out
     });
 
     let input_b = param_input(&input);
     let cmc = cm;
-    let single_ssd_b = ssd_path.clone();
+    let single_ssd_b = scan_options.clone();
     let r_fwd_single_ssd = run_with_grads(&model, &input_b, &head, |m, x| {
         let (out, _) = m.forward_single_ssd(x, Some(cmc), &single_ssd_b, None);
         out
@@ -500,76 +500,86 @@ fn forward_match_tol(
         &cfg,
         batch,
         &input,
-        &ssd_path,
+        &scan_options,
         &r_fwd_single_ssd.out,
     );
 }
 
 #[test]
 fn forward_match_simple() {
-    forward_match(small_config(), Mamba3SsdPath::Minimal(Some(4)), false);
+    forward_match(small_config(), Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)), false);
 }
 
 #[test]
 fn forward_match_random_init() {
-    forward_match(small_config(), Mamba3SsdPath::Minimal(Some(4)), true);
+    forward_match(small_config(), Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)), true);
 }
 
 #[test]
 fn forward_match_ngroups2() {
-    forward_match(cfg_ngroups2(), Mamba3SsdPath::Minimal(Some(4)), false);
+    forward_match(cfg_ngroups2(), Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)), false);
 }
 
 #[test]
 fn forward_match_ngroups2_random_init() {
-    forward_match(cfg_ngroups2(), Mamba3SsdPath::Minimal(Some(4)), true);
+    forward_match(cfg_ngroups2(), Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)), true);
 }
 
 #[test]
 fn forward_match_mimo() {
-    forward_match(small_config_mimo(), Mamba3SsdPath::Minimal(Some(4)), false);
+    forward_match(small_config_mimo(), Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)), false);
 }
 
 #[test]
 fn forward_match_mimo_random_init() {
-    forward_match(small_config_mimo(), Mamba3SsdPath::Minimal(Some(4)), true);
+    forward_match(small_config_mimo(), Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)), true);
 }
 
 #[test]
 fn forward_match_mimo_ngroups2() {
-    forward_match(cfg_mimo_ngroups2(), Mamba3SsdPath::Minimal(Some(4)), false);
+    forward_match(cfg_mimo_ngroups2(), Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)), false);
 }
 
 #[test]
 fn forward_match_mimo_ngroups2_random_init() {
-    forward_match(cfg_mimo_ngroups2(), Mamba3SsdPath::Minimal(Some(4)), true);
+    forward_match(cfg_mimo_ngroups2(), Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)), true);
 }
 
 // ── RotationKind::Real1D (no rotation: a real transition) ───────────────
 
 #[test]
 fn forward_match_real1d() {
-    forward_match(cfg_real1d(), Mamba3SsdPath::Minimal(Some(4)), false);
+    forward_match(cfg_real1d(), Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)), false);
 }
 
 #[test]
 fn forward_match_real1d_random_init() {
-    forward_match(cfg_real1d(), Mamba3SsdPath::Minimal(Some(4)), true);
+    forward_match(cfg_real1d(), Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)), true);
 }
 
 #[test]
 fn forward_match_real1d_mimo() {
-    forward_match(cfg_real1d_mimo(), Mamba3SsdPath::Minimal(Some(4)), false);
+    forward_match(cfg_real1d_mimo(), Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)), false);
 }
 
 #[test]
 fn forward_match_real1d_scalar() {
-    forward_match_tol(cfg_real1d_scalar(), Mamba3SsdPath::Minimal(Some(4)), false, 2e-2);
+    forward_match_tol(
+        cfg_real1d_scalar(),
+        Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)),
+        false,
+        2e-2,
+    );
 }
 
 #[test]
 fn forward_match_real1d_scalar_random_init() {
-    forward_match_tol(cfg_real1d_scalar(), Mamba3SsdPath::Minimal(Some(4)), true, 2e-2);
+    forward_match_tol(
+        cfg_real1d_scalar(),
+        Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)),
+        true,
+        2e-2,
+    );
 }
 
 /// forward_single_ssd ≡ token-by-token step on values and gradients, from the same
@@ -577,7 +587,7 @@ fn forward_match_real1d_scalar_random_init() {
 /// history so the single-ssd and recurrent forms coincide).
 fn run_forward_single_ssd_matches_step(
     cfg: Mamba3Config,
-    single_ssd_path: Mamba3SsdPath,
+    single_ssd_scan_options: Mamba3ScanOptions,
     random_init: bool,
 ) {
     let device = test_device();
@@ -595,7 +605,7 @@ fn run_forward_single_ssd_matches_step(
 
     let input_a = param_input(&input);
     let cmc = cm.clone();
-    let single_ssd_a = single_ssd_path.clone();
+    let single_ssd_a = single_ssd_scan_options.clone();
     let r_fwd_single_ssd = run_with_grads(&model, &input_a, &head, |m, x| {
         let (out, _) = m.forward_single_ssd(x, Some(cmc), &single_ssd_a, None);
         out
@@ -637,38 +647,54 @@ fn run_forward_single_ssd_matches_step(
         &cfg,
         batch,
         &input,
-        &single_ssd_path,
+        &single_ssd_scan_options,
         &r_fwd_single_ssd.out,
     );
 }
 
 #[test]
 fn forward_single_ssd_matches_step() {
-    run_forward_single_ssd_matches_step(small_config(), Mamba3SsdPath::Minimal(Some(4)), false);
+    run_forward_single_ssd_matches_step(
+        small_config(),
+        Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)),
+        false,
+    );
 }
 
 #[test]
 fn forward_single_ssd_matches_step_random_init() {
-    run_forward_single_ssd_matches_step(small_config(), Mamba3SsdPath::Minimal(Some(4)), true);
+    run_forward_single_ssd_matches_step(
+        small_config(),
+        Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)),
+        true,
+    );
 }
 
 #[test]
 fn forward_single_ssd_matches_step_real1d() {
-    run_forward_single_ssd_matches_step(cfg_real1d(), Mamba3SsdPath::Minimal(Some(4)), false);
+    run_forward_single_ssd_matches_step(
+        cfg_real1d(),
+        Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)),
+        false,
+    );
 }
 
 #[test]
 fn forward_single_ssd_matches_step_mimo() {
     run_forward_single_ssd_matches_step(
         small_config_mimo(),
-        Mamba3SsdPath::Minimal(Some(4)),
+        Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)),
         false,
     );
 }
 
 #[test]
 fn forward_single_ssd_matches_step_mimo_random_init() {
-    run_forward_single_ssd_matches_step(small_config_mimo(), Mamba3SsdPath::Minimal(Some(4)), true);
+    run_forward_single_ssd_matches_step(
+        small_config_mimo(),
+        Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)),
+        true,
+    );
 }
 
 /// forward_single_ssd continuation from a **random** initial single-ssd cache:
@@ -678,7 +704,7 @@ fn forward_single_ssd_matches_step_mimo_random_init() {
 /// continuity guarantee from any starting state (a zero-init split-vs-full test
 /// is a special case). The guard at the end confirms that the block uses the
 /// initial cache (and does not silently ignore it).
-fn run_forward_single_ssd_split_matches_full(cfg: Mamba3Config, single_ssd_path: Mamba3SsdPath) {
+fn run_forward_single_ssd_split_matches_full(cfg: Mamba3Config, single_ssd_scan_options: Mamba3ScanOptions) {
     let device = test_device();
     let model = cfg.init(&device.clone().autodiff());
 
@@ -726,14 +752,14 @@ fn run_forward_single_ssd_split_matches_full(cfg: Mamba3Config, single_ssd_path:
 
     let input_full = param_input(&input);
     let cache_full = init_cache.clone();
-    let single_ssd_f = single_ssd_path.clone();
+    let single_ssd_f = single_ssd_scan_options.clone();
     let r_full = run_with_grads_single_ssd(&model, &input_full, &heads, |m, x| {
         m.forward_single_ssd(x, Some(cache_full), &single_ssd_f, None)
     });
 
     let input_split = param_input(&input);
     let cache_split = init_cache;
-    let single_ssd_s = single_ssd_path.clone();
+    let single_ssd_s = single_ssd_scan_options.clone();
     let r_split = run_with_grads_single_ssd(&model, &input_split, &heads, |m, x| {
         let prefix = x.clone().narrow(1, 0, split);
         let suffix = x.narrow(1, split, seq_len - split);
@@ -756,7 +782,7 @@ fn run_forward_single_ssd_split_matches_full(cfg: Mamba3Config, single_ssd_path:
         let (out_zero, _) = model.forward_single_ssd(
             Tensor::from_inner(input.clone()),
             Some(build_single_ssd_cache(&cfg, batch, false)),
-            &single_ssd_path,
+            &single_ssd_scan_options,
             None,
         );
         let d = max_abs_diff(r_full.rg.out.clone(), out_zero.inner());
@@ -770,12 +796,18 @@ fn run_forward_single_ssd_split_matches_full(cfg: Mamba3Config, single_ssd_path:
 
 #[test]
 fn forward_single_ssd_split_matches_full() {
-    run_forward_single_ssd_split_matches_full(small_config(), Mamba3SsdPath::Minimal(Some(4)));
+    run_forward_single_ssd_split_matches_full(
+        small_config(),
+        Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)),
+    );
 }
 
 #[test]
 fn forward_single_ssd_split_matches_full_mimo() {
-    run_forward_single_ssd_split_matches_full(small_config_mimo(), Mamba3SsdPath::Minimal(Some(4)));
+    run_forward_single_ssd_split_matches_full(
+        small_config_mimo(),
+        Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)),
+    );
 }
 
 // ── Cross-pathway cache conversion parity ───────────────────────────────
@@ -865,7 +897,7 @@ fn run_cache_fields_with_grads(
 /// [`crate::mamba3::cache`] inside the autodiff graph (so the conversion must
 /// also be gradient-transparent), and the mid-point cache always carries a
 /// non-trivial previous-token K/V history.
-fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
+fn run_cache_conversion_parity(cfg: Mamba3Config, scan_options: Mamba3ScanOptions) {
     let device = test_device();
     let model = cfg.init(&device.clone().autodiff());
 
@@ -918,12 +950,12 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
     let init_v = Tensor::<4>::random([batch, slots, nheads, per_head_dim], normal, &device);
     let init_angle = Tensor::<3>::random([batch, nheads, num_rotation_angles], normal, &device);
 
-    let path_double = ssd_path.clone();
-    let path_single = ssd_path;
+    let double_scan_options = scan_options.clone();
+    let single_scan_options = scan_options;
 
     // ── Run A: double → (convert) → single ───────────────────────────────
     let input_a = param_input(&input);
-    let (pd_a, ps_a) = (path_double.clone(), path_single.clone());
+    let (pd_a, ps_a) = (double_scan_options.clone(), single_scan_options.clone());
     let (ssm_a, k_a, v_a, ang_a) = (
         init_ssm.clone(),
         init_k.clone(),
@@ -955,7 +987,7 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
 
     // ── Run B: single → (convert) → double ───────────────────────────────
     let input_b = param_input(&input);
-    let (pd_b, ps_b) = (path_double, path_single);
+    let (pd_b, ps_b) = (double_scan_options, single_scan_options);
     let (ssm_b, k_b, v_b, ang_b) = (init_ssm, init_k, init_v, init_angle);
     let run_b = run_cache_fields_with_grads(&model, &input_b, &heads, move |m, x| {
         let init_single = Mamba3SingleSsdCache {
@@ -991,22 +1023,22 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
 
 #[test]
 fn cache_conversion_parity() {
-    run_cache_conversion_parity(small_config(), Mamba3SsdPath::Minimal(Some(4)));
+    run_cache_conversion_parity(small_config(), Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)));
 }
 
 #[test]
 fn cache_conversion_parity_mimo() {
-    run_cache_conversion_parity(small_config_mimo(), Mamba3SsdPath::Minimal(Some(4)));
+    run_cache_conversion_parity(small_config_mimo(), Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)));
 }
 
 #[test]
 fn cache_conversion_parity_ngroups2() {
-    run_cache_conversion_parity(cfg_ngroups2(), Mamba3SsdPath::Minimal(Some(4)));
+    run_cache_conversion_parity(cfg_ngroups2(), Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)));
 }
 
 #[test]
 fn cache_conversion_parity_mimo_ngroups2() {
-    run_cache_conversion_parity(cfg_mimo_ngroups2(), Mamba3SsdPath::Minimal(Some(4)));
+    run_cache_conversion_parity(cfg_mimo_ngroups2(), Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)));
 }
 
 // ── Quaternion4D on the single-ssd pathway ──────────────────────────────
@@ -1042,7 +1074,7 @@ fn cfg_quat_partial() -> Mamba3Config {
 
 /// Quaternion4D: `forward_single_ssd ≡ forward_double_ssd` on values and
 /// gradients, both from a fresh cache.
-fn quaternion_single_matches_double(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
+fn quaternion_single_matches_double(cfg: Mamba3Config, scan_options: Mamba3ScanOptions) {
     let device = test_device();
     let model = cfg.init(&device.clone().autodiff());
 
@@ -1053,13 +1085,13 @@ fn quaternion_single_matches_double(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) 
     let input = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
     let head = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
 
-    let path_d = ssd_path.clone();
+    let double_scan_options = scan_options.clone();
     let r_double = run_with_grads(&model, &param_input(&input), &head, move |m, x| {
-        m.forward_double_ssd(x, None, &path_d, None).0
+        m.forward_double_ssd(x, None, &double_scan_options, None).0
     });
-    let path_s = ssd_path;
+    let single_scan_options = scan_options;
     let r_single = run_with_grads(&model, &param_input(&input), &head, move |m, x| {
-        m.forward_single_ssd(x, None, &path_s, None).0
+        m.forward_single_ssd(x, None, &single_scan_options, None).0
     });
 
     let diff = (r_double.out.clone() - r_single.out.clone())
@@ -1074,7 +1106,7 @@ fn quaternion_single_matches_double(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) 
 }
 
 /// Quaternion4D: `forward_single_ssd ≡ step_single_ssd` unrolling, both fresh.
-fn quaternion_single_matches_step(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
+fn quaternion_single_matches_step(cfg: Mamba3Config, scan_options: Mamba3ScanOptions) {
     let device = test_device();
     let model = cfg.init(&device.clone().autodiff());
 
@@ -1085,9 +1117,9 @@ fn quaternion_single_matches_step(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
     let input = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
     let head = Tensor::<3>::random([batch, seq_len, d_model], normal, &device);
 
-    let path_s = ssd_path;
+    let single_scan_options = scan_options;
     let r_single = run_with_grads(&model, &param_input(&input), &head, move |m, x| {
-        m.forward_single_ssd(x, None, &path_s, None).0
+        m.forward_single_ssd(x, None, &single_scan_options, None).0
     });
     let r_step = run_with_grads(&model, &param_input(&input), &head, |m, x| {
         let mut cache: Option<Mamba3SingleSsdCache> = None;
@@ -1114,27 +1146,30 @@ fn quaternion_single_matches_step(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
 
 #[test]
 fn quaternion_single_matches_double_full_rotation() {
-    quaternion_single_matches_double(cfg_quat(), Mamba3SsdPath::Minimal(Some(4)));
+    quaternion_single_matches_double(cfg_quat(), Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)));
 }
 
 #[test]
 fn quaternion_single_matches_double_partial_rotation() {
-    quaternion_single_matches_double(cfg_quat_partial(), Mamba3SsdPath::Minimal(Some(4)));
+    quaternion_single_matches_double(
+        cfg_quat_partial(),
+        Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)),
+    );
 }
 
 #[test]
 fn quaternion_single_matches_double_mimo() {
-    quaternion_single_matches_double(cfg_quat_mimo(), Mamba3SsdPath::Minimal(Some(4)));
+    quaternion_single_matches_double(cfg_quat_mimo(), Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)));
 }
 
 #[test]
 fn quaternion_single_matches_step_full_rotation() {
-    quaternion_single_matches_step(cfg_quat(), Mamba3SsdPath::Minimal(Some(4)));
+    quaternion_single_matches_step(cfg_quat(), Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)));
 }
 
 #[test]
 fn quaternion_single_matches_step_mimo() {
-    quaternion_single_matches_step(cfg_quat_mimo(), Mamba3SsdPath::Minimal(Some(4)));
+    quaternion_single_matches_step(cfg_quat_mimo(), Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)));
 }
 
 // ── siso_specialization: performance switch, identical math ─────────────
@@ -1149,7 +1184,7 @@ fn quaternion_single_matches_step_mimo() {
 /// (`helpers::mimo_outer_sum`, the per-token flag). Both are flipped together so
 /// the two sites are covered. The two models share their weights by
 /// construction; only the flags differ.
-fn run_siso_specialization_forward_parity(cfg: Mamba3Config, ssd_path: Mamba3SsdPath) {
+fn run_siso_specialization_forward_parity(cfg: Mamba3Config, scan_options: Mamba3ScanOptions) {
     assert_eq!(1, cfg.mimo_rank, "the flags are inert above mimo_rank = 1");
     let device = test_device();
     let specialized = cfg
@@ -1208,16 +1243,16 @@ fn run_siso_specialization_forward_parity(cfg: Mamba3Config, ssd_path: Mamba3Ssd
 
     let input_spec = param_input(&input);
     let cache_spec = init_cache.clone();
-    let path_spec = ssd_path.clone();
+    let spec_scan_options = scan_options.clone();
     let r_spec = run_with_grads_single_ssd(&specialized, &input_spec, &heads, |m, x| {
-        m.forward_single_ssd(x, Some(cache_spec), &path_spec, None)
+        m.forward_single_ssd(x, Some(cache_spec), &spec_scan_options, None)
     });
 
     let input_gen = param_input(&input);
     let cache_gen = init_cache;
-    let path_gen = ssd_path;
+    let gen_scan_options = scan_options;
     let r_gen = run_with_grads_single_ssd(&general, &input_gen, &heads, |m, x| {
-        m.forward_single_ssd(x, Some(cache_gen), &path_gen, None)
+        m.forward_single_ssd(x, Some(cache_gen), &gen_scan_options, None)
     });
 
     // Same tolerances as the other parity tests here — the branches differ only
@@ -1227,12 +1262,18 @@ fn run_siso_specialization_forward_parity(cfg: Mamba3Config, ssd_path: Mamba3Ssd
 
 #[test]
 fn siso_specialization_forward_parity_minimal() {
-    run_siso_specialization_forward_parity(small_config(), Mamba3SsdPath::Minimal(Some(4)));
+    run_siso_specialization_forward_parity(
+        small_config(),
+        Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)),
+    );
 }
 
 #[test]
 fn siso_specialization_forward_parity_serial() {
-    run_siso_specialization_forward_parity(small_config(), Mamba3SsdPath::Serial(Some(4)));
+    run_siso_specialization_forward_parity(
+        small_config(),
+        Mamba3ScanOptions::new(SsdPath::Serial).with_chunk_len(Some(4)),
+    );
 }
 
 /// The recompute backward is the one that could disagree with its own forward:
@@ -1241,7 +1282,7 @@ fn siso_specialization_forward_parity_serial() {
 fn siso_specialization_forward_parity_serial_recalculated() {
     run_siso_specialization_forward_parity(
         small_config(),
-        Mamba3SsdPath::SerialRecalculated(Some(4)),
+        Mamba3ScanOptions::new(SsdPath::SerialRecalculated).with_chunk_len(Some(4)),
     );
 }
 
@@ -1249,6 +1290,6 @@ fn siso_specialization_forward_parity_serial_recalculated() {
 fn siso_specialization_forward_parity_real1d() {
     run_siso_specialization_forward_parity(
         cfg_real1d(),
-        Mamba3SsdPath::SerialRecalculated(Some(4)),
+        Mamba3ScanOptions::new(SsdPath::SerialRecalculated).with_chunk_len(Some(4)),
     );
 }

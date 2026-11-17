@@ -348,14 +348,14 @@ fn run_step_matches_forward_tol(cfg: Mamba3Config, random_init: bool, grad_tol: 
             .then(|| Tensor::<3>::random([batch, nheads, num_rotation_angles], normal, &device)),
     };
 
-    let ssd_path = Mamba3SsdPath::Minimal(Some(4));
+    let scan_options = Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4));
     let init_cache = build_init_cache(&cfg, batch, random_init);
 
     let input_fwd = param_input(&input);
     let cache_fwd = init_cache.clone();
-    let path_fwd = ssd_path.clone();
+    let fwd_scan_options = scan_options.clone();
     let r_fwd = run_with_grads(&model, &input_fwd, &heads, |m, x| {
-        m.forward_double_ssd(x, Some(cache_fwd), &path_fwd, None)
+        m.forward_double_ssd(x, Some(cache_fwd), &fwd_scan_options, None)
     });
 
     let input_step = param_input(&input);
@@ -384,7 +384,7 @@ fn run_step_matches_forward_tol(cfg: Mamba3Config, random_init: bool, grad_tol: 
         let (out_zero, _) = model.forward_double_ssd(
             Tensor::from_inner(input.clone()),
             Some(build_init_cache(&cfg, batch, false)),
-            &ssd_path,
+            &scan_options,
             None,
         );
         let d = max_abs_diff(r_fwd.out.clone(), out_zero.inner());
@@ -626,24 +626,24 @@ fn run_split_matches_full(cfg: Mamba3Config) {
             .then(|| Tensor::<3>::random([batch, nheads, num_rotation_angles], normal, &device)),
     };
 
-    let ssd_path = Mamba3SsdPath::Minimal(Some(4));
+    let scan_options = Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4));
     let init_cache = build_init_cache(&cfg, batch, true);
 
     let input_full = param_input(&input);
     let cache_full = init_cache.clone();
-    let path_full = ssd_path.clone();
+    let full_scan_options = scan_options.clone();
     let r_full = run_with_grads(&model, &input_full, &heads, |m, x| {
-        m.forward_double_ssd(x, Some(cache_full), &path_full, None)
+        m.forward_double_ssd(x, Some(cache_full), &full_scan_options, None)
     });
 
     let input_split = param_input(&input);
     let cache_split = init_cache;
-    let path_split = ssd_path;
+    let split_scan_options = scan_options;
     let r_split = run_with_grads(&model, &input_split, &heads, |m, x| {
         let prefix = x.clone().narrow(1, 0, split);
         let suffix = x.narrow(1, split, seq_len - split);
-        let (out_prefix, mid) = m.forward_double_ssd(prefix, Some(cache_split), &path_split, None);
-        let (out_suffix, last) = m.forward_double_ssd(suffix, Some(mid), &path_split, None);
+        let (out_prefix, mid) = m.forward_double_ssd(prefix, Some(cache_split), &split_scan_options, None);
+        let (out_suffix, last) = m.forward_double_ssd(suffix, Some(mid), &split_scan_options, None);
         (Tensor::cat(vec![out_prefix, out_suffix], 1), last)
     });
 

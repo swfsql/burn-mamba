@@ -267,7 +267,7 @@ pub fn prefix_sum<const D: usize, const DP1: usize>(
 //
 // The alignment keeps this a reshape, not a gather. `chunk_len` is a multiple
 // of `read_stride`
-// ([`Mamba3SsdPath::chunk_len_or_optimal`](crate::mamba3::ssd_path::Mamba3SsdPath::chunk_len_or_optimal)),
+// ([`Mamba3ScanOptions::chunk_len_or_optimal`](crate::mamba3::scan_options::Mamba3ScanOptions::chunk_len_or_optimal)),
 // so chunk `c` covers write positions `[c·L, (c+1)·L)` = tokens
 // `[c·T, (c+1)·T)`, and its read positions are a **contiguous run** of them.
 

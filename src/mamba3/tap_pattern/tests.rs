@@ -3,7 +3,8 @@ use crate::mamba3::cache::Mamba3Cache;
 use crate::mamba3::in_proj_layout::GroupKey;
 use crate::mamba3::mamba3::{Mamba3, Mamba3Config};
 use crate::mamba3::rotation::RotationKind;
-use crate::mamba3::ssd_path::Mamba3SsdPath;
+use crate::mamba3::scan_options::Mamba3ScanOptions;
+use crate::ssd_path::SsdPath;
 use burn::prelude::*;
 use burn::tensor::Distribution;
 use burn_stack::utils::test_helpers::{dtype_tol, max_abs_diff, max_rel_diff};
@@ -170,9 +171,9 @@ fn none_forward_matches_step() {
             // Single-ssd (the default cache) delegates to the double-ssd
             // form here, so the two must agree *exactly*, not merely closely.
             let (out_single, cache_single) =
-                model.forward_single_ssd(x.clone(), None, &Mamba3SsdPath::default(), None);
+                model.forward_single_ssd(x.clone(), None, &Mamba3ScanOptions::default(), None);
             let (out_double, cache_double) =
-                model.forward_double_ssd(x.clone(), None, &Mamba3SsdPath::default(), None);
+                model.forward_double_ssd(x.clone(), None, &Mamba3ScanOptions::default(), None);
             assert_eq!(
                 max_abs_diff(out_single.clone(), out_double),
                 0.0,
@@ -227,7 +228,7 @@ fn none_grads_match_step() {
         };
         let x = Tensor::from_inner(x);
         let (fwd_w, fwd_dt) =
-            grads(model.forward(x.clone(), None, Mamba3SsdPath::default(), None).0);
+            grads(model.forward(x.clone(), None, Mamba3ScanOptions::default(), None).0);
         let (step_w, step_dt) = grads(unrolled(&model, &x).0);
         assert!(
             max_rel_diff(step_w, fwd_w) < dtype_tol(1e-4),
@@ -282,11 +283,11 @@ fn none_equals_lambda_saturated_at_one() {
     )));
 
     let x = input(&config, 6);
-    let path = Mamba3SsdPath::default();
-    let (out_none, _) = none.forward(x.clone(), None, path.clone(), None);
+    let scan_options = Mamba3ScanOptions::default();
+    let (out_none, _) = none.forward(x.clone(), None, scan_options.clone(), None);
     for (label, out) in [
-        ("single", carry.forward_single_ssd(x.clone(), None, &path, None).0),
-        ("double", carry.forward_double_ssd(x.clone(), None, &path, None).0),
+        ("single", carry.forward_single_ssd(x.clone(), None, &scan_options, None).0),
+        ("double", carry.forward_double_ssd(x.clone(), None, &scan_options, None).0),
     ] {
         let d = max_abs_diff(out_none.clone(), out);
         assert!(d < dtype_tol(1e-6), "λ≡1 carry-over ({label}) vs None: {d:.3e}");
@@ -350,9 +351,9 @@ fn vertical_forward_matches_step() {
                 .expect("a missing cache defaults to the single-ssd pathway");
 
             let (out_single, cache_single) =
-                model.forward_single_ssd(x.clone(), None, &Mamba3SsdPath::default(), None);
+                model.forward_single_ssd(x.clone(), None, &Mamba3ScanOptions::default(), None);
             let (out_double, cache_double) =
-                model.forward_double_ssd(x.clone(), None, &Mamba3SsdPath::default(), None);
+                model.forward_double_ssd(x.clone(), None, &Mamba3ScanOptions::default(), None);
 
             for (pathway, out, ssm) in [
                 ("single", out_single, cache_single.ssm_bhpr),
@@ -382,13 +383,13 @@ fn vertical_split_prefill_matches() {
         let config = cfg_vertical(kind, 3);
         let model: Mamba3 = config.init(&device);
         let x = input(&config, 6);
-        let path = Mamba3SsdPath::default();
+        let scan_options = Mamba3ScanOptions::default();
         let label = format!("{kind:?}");
 
-        let (whole, whole_cache) = model.forward_single_ssd(x.clone(), None, &path, None);
-        let (head, mid) = model.forward_single_ssd(x.clone().narrow(1, 0, 2), None, &path, None);
+        let (whole, whole_cache) = model.forward_single_ssd(x.clone(), None, &scan_options, None);
+        let (head, mid) = model.forward_single_ssd(x.clone().narrow(1, 0, 2), None, &scan_options, None);
         let (tail, split_cache) =
-            model.forward_single_ssd(x.narrow(1, 2, 4), Some(mid), &path, None);
+            model.forward_single_ssd(x.narrow(1, 2, 4), Some(mid), &scan_options, None);
         let split = Tensor::cat(vec![head, tail], 1);
 
         let d = max_abs_diff(whole, split);
@@ -411,15 +412,15 @@ fn vertical_matches_step_with_mimo() {
         let label = format!("m={mimo_rank}");
         let (out_step, cache_step) = unrolled(&model, &x);
         let cache_step = cache_step.single_ssd().expect("single-ssd");
-        let path = Mamba3SsdPath::default();
+        let scan_options = Mamba3ScanOptions::default();
 
         for (pathway, (out, cache_ssm)) in [
             ("single", {
-                let (o, c) = model.forward_single_ssd(x.clone(), None, &path, None);
+                let (o, c) = model.forward_single_ssd(x.clone(), None, &scan_options, None);
                 (o, c.ssm_bhpr)
             }),
             ("double", {
-                let (o, c) = model.forward_double_ssd(x.clone(), None, &path, None);
+                let (o, c) = model.forward_double_ssd(x.clone(), None, &scan_options, None);
                 (o, c.ssm_bhpr)
             }),
         ] {
@@ -455,7 +456,7 @@ fn vertical_forward_continues_a_stepped_cache() {
             let (out_tail, cache_fwd) = model.forward_single_ssd(
                 x.clone().narrow(1, 2, 3),
                 Some(stepped),
-                &Mamba3SsdPath::default(),
+                &Mamba3ScanOptions::default(),
                 None,
             );
 
@@ -501,7 +502,7 @@ fn vertical_grads_match_step() {
         };
         let x = Tensor::from_inner(x);
         let (fwd_w, fwd_dt) =
-            grads(model.forward(x.clone(), None, Mamba3SsdPath::default(), None).0);
+            grads(model.forward(x.clone(), None, Mamba3ScanOptions::default(), None).0);
         let (step_w, step_dt) = grads(unrolled(&model, &x).0);
         assert!(
             max_rel_diff(step_w, fwd_w) < dtype_tol(1e-4),
@@ -526,7 +527,7 @@ fn the_lag_u_patterns_are_the_carry_over_at_one_micro_step() {
     let base = cfg().with_rotation(RotationKind::Complex2D);
     let carry = base.clone().init(&device);
     let x = input(&base, 6);
-    let path = Mamba3SsdPath::default();
+    let scan_options = Mamba3ScanOptions::default();
     for pattern in [
         TapPattern::Vertical,
         TapPattern::VerticalPlusHorizontalInToken,
@@ -541,13 +542,13 @@ fn the_lag_u_patterns_are_the_carry_over_at_one_micro_step() {
         for (label, a, b) in [
             (
                 "single",
-                carry.forward_single_ssd(x.clone(), None, &path, None).0,
-                folded.forward_single_ssd(x.clone(), None, &path, None).0,
+                carry.forward_single_ssd(x.clone(), None, &scan_options, None).0,
+                folded.forward_single_ssd(x.clone(), None, &scan_options, None).0,
             ),
             (
                 "double",
-                carry.forward_double_ssd(x.clone(), None, &path, None).0,
-                folded.forward_double_ssd(x.clone(), None, &path, None).0,
+                carry.forward_double_ssd(x.clone(), None, &scan_options, None).0,
+                folded.forward_double_ssd(x.clone(), None, &scan_options, None).0,
             ),
             ("step", unrolled(&carry, &x).0, unrolled(&folded, &x).0),
         ] {
@@ -596,9 +597,9 @@ fn lattice_forward_matches_step() {
                 let cache_step = cache_step.single_ssd().expect("single-ssd by default");
 
                 let (out_single, cache_single) =
-                    model.forward_single_ssd(x.clone(), None, &Mamba3SsdPath::default(), None);
+                    model.forward_single_ssd(x.clone(), None, &Mamba3ScanOptions::default(), None);
                 let (out_double, cache_double) =
-                    model.forward_double_ssd(x.clone(), None, &Mamba3SsdPath::default(), None);
+                    model.forward_double_ssd(x.clone(), None, &Mamba3ScanOptions::default(), None);
 
                 for (pathway, out, ssm) in [
                     ("single", out_single, cache_single.ssm_bhpr),
@@ -632,15 +633,15 @@ fn lattice_matches_step_with_mimo() {
             let label = format!("{pattern:?} m={mimo_rank}");
             let (out_step, cache_step) = unrolled(&model, &x);
             let cache_step = cache_step.single_ssd().expect("single-ssd");
-            let path = Mamba3SsdPath::default();
+            let scan_options = Mamba3ScanOptions::default();
 
             for (pathway, (out, ssm)) in [
                 ("single", {
-                    let (o, c) = model.forward_single_ssd(x.clone(), None, &path, None);
+                    let (o, c) = model.forward_single_ssd(x.clone(), None, &scan_options, None);
                     (o, c.ssm_bhpr)
                 }),
                 ("double", {
-                    let (o, c) = model.forward_double_ssd(x.clone(), None, &path, None);
+                    let (o, c) = model.forward_double_ssd(x.clone(), None, &scan_options, None);
                     (o, c.ssm_bhpr)
                 }),
             ] {
@@ -664,13 +665,13 @@ fn lattice_split_prefill_matches() {
             let config = cfg_for(pattern, kind, 3);
             let model: Mamba3 = config.init(&device);
             let x = input(&config, 6);
-            let path = Mamba3SsdPath::default();
+            let scan_options = Mamba3ScanOptions::default();
             let label = format!("{pattern:?} {kind:?}");
 
-            let (whole, whole_cache) = model.forward_single_ssd(x.clone(), None, &path, None);
-            let (head, mid) = model.forward_single_ssd(x.clone().narrow(1, 0, 2), None, &path, None);
+            let (whole, whole_cache) = model.forward_single_ssd(x.clone(), None, &scan_options, None);
+            let (head, mid) = model.forward_single_ssd(x.clone().narrow(1, 0, 2), None, &scan_options, None);
             let (tail, split_cache) =
-                model.forward_single_ssd(x.narrow(1, 2, 4), Some(mid), &path, None);
+                model.forward_single_ssd(x.narrow(1, 2, 4), Some(mid), &scan_options, None);
             let split = Tensor::cat(vec![head, tail], 1);
 
             let d = max_abs_diff(whole, split);
@@ -703,7 +704,7 @@ fn lattice_forward_continues_a_stepped_cache() {
             let (out_tail, cache_fwd) = model.forward_single_ssd(
                 x.clone().narrow(1, 2, 3),
                 Some(stepped),
-                &Mamba3SsdPath::default(),
+                &Mamba3ScanOptions::default(),
                 None,
             );
 
@@ -747,7 +748,7 @@ fn lattice_grads_match_step() {
             )
         };
         let x = Tensor::from_inner(x);
-        let (fwd_w, fwd_dt) = grads(model.forward(x.clone(), None, Mamba3SsdPath::default(), None).0);
+        let (fwd_w, fwd_dt) = grads(model.forward(x.clone(), None, Mamba3ScanOptions::default(), None).0);
         let (step_w, step_dt) = grads(unrolled(&model, &x).0);
         assert!(
             max_rel_diff(step_w, fwd_w) < dtype_tol(1e-4),
@@ -816,13 +817,13 @@ fn horizontal_in_token_is_none_at_one_micro_step() {
     append_dead_sub_projections(&none, &mut in_token, config.nheads(), 0.0, &device);
 
     let x = input(&config, 6);
-    let path = Mamba3SsdPath::default();
+    let scan_options = Mamba3ScanOptions::default();
     // The double pathway runs the *same* γ pass in both, plus a β pass whose
     // coefficient is exactly zero. So this one is bit for bit.
     assert_eq!(
         max_abs_diff(
-            none.forward_double_ssd(x.clone(), None, &path, None).0,
-            in_token.forward_double_ssd(x.clone(), None, &path, None).0,
+            none.forward_double_ssd(x.clone(), None, &scan_options, None).0,
+            in_token.forward_double_ssd(x.clone(), None, &scan_options, None).0,
         ),
         0.0,
         "double: HorizontalInToken is None at u = 1"
@@ -835,8 +836,8 @@ fn horizontal_in_token_is_none_at_one_micro_step() {
     // The single pathway does not delegate here (the pattern *has* a tap),
     // so it reassembles the same numbers by a different route.
     let d = max_abs_diff(
-        none.forward_single_ssd(x.clone(), None, &path, None).0,
-        in_token.forward_single_ssd(x, None, &path, None).0,
+        none.forward_single_ssd(x.clone(), None, &scan_options, None).0,
+        in_token.forward_single_ssd(x, None, &scan_options, None).0,
     );
     assert!(d < dtype_tol(1e-6), "single: HorizontalInToken is None at u = 1: {d:.3e}");
 }
@@ -861,11 +862,11 @@ fn horizontal_in_token_is_the_carry_over_with_lambda_saturated() {
     carry.in_proj = in_token.in_proj.clone();
 
     let x = input(&config, 4);
-    let path = Mamba3SsdPath::default();
+    let scan_options = Mamba3ScanOptions::default();
     // Not vacuous: with the same weights the two patterns disagree.
     let d = max_abs_diff(
-        in_token.forward_single_ssd(x.clone(), None, &path, None).0,
-        carry.forward_single_ssd(x.clone(), None, &path, None).0,
+        in_token.forward_single_ssd(x.clone(), None, &scan_options, None).0,
+        carry.forward_single_ssd(x.clone(), None, &scan_options, None).0,
     );
     assert!(d > dtype_tol(1e-4), "the closed tap has to do something: {d:.3e}");
 
@@ -900,13 +901,13 @@ fn horizontal_in_token_is_the_carry_over_with_lambda_saturated() {
     for (label, a, b) in [
         (
             "single",
-            in_token.forward_single_ssd(x.clone(), None, &path, None).0,
-            carry.forward_single_ssd(x.clone(), None, &path, None).0,
+            in_token.forward_single_ssd(x.clone(), None, &scan_options, None).0,
+            carry.forward_single_ssd(x.clone(), None, &scan_options, None).0,
         ),
         (
             "double",
-            in_token.forward_double_ssd(x.clone(), None, &path, None).0,
-            carry.forward_double_ssd(x.clone(), None, &path, None).0,
+            in_token.forward_double_ssd(x.clone(), None, &scan_options, None).0,
+            carry.forward_double_ssd(x.clone(), None, &scan_options, None).0,
         ),
         ("step", unrolled(&in_token, &x).0, unrolled(&carry, &x).0),
     ] {
@@ -942,15 +943,15 @@ fn lattice_multi_chunk_matches_step() {
         let (out_step, cache_step) = unrolled(&model, &x);
         let cache_step = cache_step.single_ssd().expect("single-ssd");
 
-        for path in [
-            Mamba3SsdPath::Minimal(Some(4)),
-            Mamba3SsdPath::SerialRecalculated(Some(4)),
+        for scan_options in [
+            Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)),
+            Mamba3ScanOptions::new(SsdPath::SerialRecalculated).with_chunk_len(Some(4)),
         ] {
-            let label = format!("{pattern:?} {path:?}");
+            let label = format!("{pattern:?} {scan_options:?}");
             let (out_single, cache_single) =
-                model.forward_single_ssd(x.clone(), None, &path, None);
+                model.forward_single_ssd(x.clone(), None, &scan_options, None);
             let (out_double, cache_double) =
-                model.forward_double_ssd(x.clone(), None, &path, None);
+                model.forward_double_ssd(x.clone(), None, &scan_options, None);
             for (pathway, out, ssm) in [
                 ("single", out_single, cache_single.ssm_bhpr),
                 ("double", out_double, cache_double.ssm_bhpr),
@@ -979,8 +980,8 @@ fn two_tap_patterns_actually_spend_their_second_tap() {
     let config = cfg_for(TapPattern::Vertical, RotationKind::Real1D, u).with_has_proj_bias(true);
     let vertical = config.clone().init(&device);
     let x = input(&config, 5);
-    let path = Mamba3SsdPath::default();
-    let out_vertical = vertical.forward_single_ssd(x.clone(), None, &path, None).0;
+    let scan_options = Mamba3ScanOptions::default();
+    let out_vertical = vertical.forward_single_ssd(x.clone(), None, &scan_options, None).0;
 
     let two_tap: Vec<Tensor<3>> = [
         TapPattern::VerticalPlusHorizontalInToken,
@@ -991,7 +992,7 @@ fn two_tap_patterns_actually_spend_their_second_tap() {
         let mut block = config.clone().with_tap_pattern(pattern).init(&device);
         share_weights_except_in_proj(&vertical, &mut block);
         append_dead_sub_projections(&vertical, &mut block, u * config.nheads(), 0.0, &device);
-        let out = block.forward_single_ssd(x.clone(), None, &path, None).0;
+        let out = block.forward_single_ssd(x.clone(), None, &scan_options, None).0;
         let d = max_abs_diff(out.clone(), out_vertical.clone());
         assert!(d > dtype_tol(1e-4), "{pattern:?} vs Vertical: {d:.3e}");
         out
@@ -1024,7 +1025,7 @@ fn vertical_plus_carry_over_contains_both_single_tap_patterns() {
     vertical.in_proj = carry.in_proj.clone();
 
     let x = input(&config, 5);
-    let path = Mamba3SsdPath::default();
+    let scan_options = Mamba3ScanOptions::default();
     for (bias, target, label, tol) in [
         (30.0, &carry, "μ = 1 is the carry-over", 0.0),
         (-30.0, &vertical, "μ = 0 is the vertical", 1e-6),
@@ -1042,13 +1043,13 @@ fn vertical_plus_carry_over_contains_both_single_tap_patterns() {
         for (pathway, a, b) in [
             (
                 "single",
-                target.forward_single_ssd(x.clone(), None, &path, None).0,
-                join.forward_single_ssd(x.clone(), None, &path, None).0,
+                target.forward_single_ssd(x.clone(), None, &scan_options, None).0,
+                join.forward_single_ssd(x.clone(), None, &scan_options, None).0,
             ),
             (
                 "double",
-                target.forward_double_ssd(x.clone(), None, &path, None).0,
-                join.forward_double_ssd(x.clone(), None, &path, None).0,
+                target.forward_double_ssd(x.clone(), None, &scan_options, None).0,
+                join.forward_double_ssd(x.clone(), None, &scan_options, None).0,
             ),
             ("step", unrolled(target, &x).0, unrolled(&join, &x).0),
         ] {

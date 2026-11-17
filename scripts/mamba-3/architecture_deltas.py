@@ -412,7 +412,7 @@ ok("8.4  so leaving C at its SISO value costs ~2.5x the C = N/R schedule here",
    abs(ratio_scaled - R) < 0.25 and ratio_unscaled / ratio_scaled > 2.0)
 print(f"        R={R}: C=N/R -> {ratio_scaled:.2f}x,  C=N -> {ratio_unscaled:.2f}x")
 
-# The crate's schedule (`Mamba3SsdPath::optimal_chunk_len`): the same square-root
+# The crate's schedule (`Mamba3ScanOptions::optimal_chunk_len`): the same square-root
 # rule, divided by the rank (which widens both of a chunk's axes) and put back on
 # the 32 grid, then rounded up to a whole number of tokens (`micro_steps` widens
 # only the write axis, so it subdivides the chunk instead of shortening it).

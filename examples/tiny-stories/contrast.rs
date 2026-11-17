@@ -65,7 +65,7 @@ use crate::dataset::{FIRST_LETTER, Split, VOCAB, VOCAB_SIZE, pair, stories};
 use burn::config::Config;
 use burn::prelude::*;
 use burn::tensor::activation::{log_sigmoid, sigmoid};
-use burn_mamba::prelude::{MambaSsdPath, MambaVocabNet, MambaVocabNetConfig};
+use burn_mamba::prelude::{MambaScanOptions, MambaVocabNet, MambaVocabNetConfig};
 use burn_stack::utils::ClassCursors;
 use rand::{Rng, RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -587,14 +587,14 @@ impl ContrastBatch {
 /// positions of the packed batch. Also returns the readouts of [`scored`].
 pub fn loss(
     model: &MambaVocabNet,
-    ssd_path: &MambaSsdPath,
+    scan_options: &MambaScanOptions,
     batch: ContrastBatch,
     config: &ContrastConfig,
     weight: f64,
     lm_positions: usize,
 ) -> (Tensor<1>, Tensor<1>) {
     let device = batch.own.device();
-    let (own_kn, other_kn) = pair_log_probs(model, ssd_path, batch);
+    let (own_kn, other_kn) = pair_log_probs(model, scan_options, batch);
     let other_kn = if config.one_sided { other_kn.detach() } else { other_kn };
     let (contrast, readouts) = scored(own_kn.clone(), other_kn, config.skip);
     let m = own_kn.dims()[1] - config.skip;
@@ -612,10 +612,10 @@ pub fn loss(
 /// The log-probabilities `[K, n]` of the continuations of `batch`: row `i`
 /// of both scores `C_i`, after `P_i` (own) and after its negative (other:
 /// `P_{i−1}`, or `N_i`).
-pub fn pair_log_probs(model: &MambaVocabNet, ssd_path: &MambaSsdPath, batch: ContrastBatch) -> (Tensor<2>, Tensor<2>) {
+pub fn pair_log_probs(model: &MambaVocabNet, scan_options: &MambaScanOptions, batch: ContrastBatch) -> (Tensor<2>, Tensor<2>) {
     let rolled = batch.negative.is_none();
     let [own, other] =
-        pair_passes(model, ssd_path, batch).map(|(log_p_knv, targets_kn)| target_log_p(log_p_knv, targets_kn));
+        pair_passes(model, scan_options, batch).map(|(log_p_knv, targets_kn)| target_log_p(log_p_knv, targets_kn));
     (own, if rolled { roll_back(other) } else { other })
 }
 
@@ -626,7 +626,7 @@ pub fn pair_log_probs(model: &MambaVocabNet, ssd_path: &MambaSsdPath, batch: Con
 /// `C_{i+1}` (see [`roll_back`]).
 fn pair_passes(
     model: &MambaVocabNet,
-    ssd_path: &MambaSsdPath,
+    scan_options: &MambaScanOptions,
     batch: ContrastBatch,
 ) -> [(Tensor<3>, Tensor<3, Int>); 2] {
     let n = batch.own.dims()[1];
@@ -634,7 +634,7 @@ fn pair_passes(
     // the cursor after them. So the passes over `C` emit none.
     let prompt_pass = |(ids, pad): (Tensor<3, Int>, Tensor<2, Bool>)| {
         let mut class = ClassCursors::stream();
-        let (_, caches) = model.forward(ids, None, ssd_path.clone(), Some(&mut class), Some(pad));
+        let (_, caches) = model.forward(ids, None, scan_options.clone(), Some(&mut class), Some(pad));
         (caches, class)
     };
     let (caches, mut class) = prompt_pass(batch.prompt);
@@ -642,9 +642,9 @@ fn pair_passes(
         None => (caches.clone(), class.clone()),
         Some(negative) => prompt_pass(negative),
     };
-    let (own_logits, _) = model.forward(batch.own, Some(caches), ssd_path.clone(), Some(&mut class), None);
+    let (own_logits, _) = model.forward(batch.own, Some(caches), scan_options.clone(), Some(&mut class), None);
     let (other_logits, _) =
-        model.forward(batch.other, Some(other_caches), ssd_path.clone(), Some(&mut class_other), None);
+        model.forward(batch.other, Some(other_caches), scan_options.clone(), Some(&mut class_other), None);
     assert_eq!(own_logits.dims()[1], n, "the passes over the continuations emit no latents");
     [
         (cased_log_probs(own_logits), batch.own_targets),
@@ -999,7 +999,7 @@ pub fn contrast_eval(
     model_config: MambaVocabNetConfig,
     device: Device,
     app_args: &AppArgs,
-    ssd_path: &MambaSsdPath,
+    scan_options: &MambaScanOptions,
     overrides: &ContrastOverrides,
     train_stories: usize,
     batches: usize,
@@ -1042,8 +1042,8 @@ pub fn contrast_eval(
         for _ in 0..batches {
             let batch = feed.batch(&device);
             let (own_kn, other_kn) = match profile_log.as_mut() {
-                Some(log) => profiled_pair_log_probs(&model, ssd_path, batch, log),
-                None => pair_log_probs(&model, ssd_path, batch),
+                Some(log) => profiled_pair_log_probs(&model, scan_options, batch, log),
+                None => pair_log_probs(&model, scan_options, batch),
             };
             let readouts: Vec<Tensor<1>> = skips
                 .iter()
@@ -1087,7 +1087,7 @@ pub fn contrast_eval(
 /// - `h_own`, `h_other`: the entropy (nats) of each of these predictions.
 pub fn profiled_pair_log_probs(
     model: &MambaVocabNet,
-    ssd_path: &MambaSsdPath,
+    scan_options: &MambaScanOptions,
     batch: ContrastBatch,
     log: &mut impl Write,
 ) -> (Tensor<2>, Tensor<2>) {
@@ -1095,7 +1095,7 @@ pub fn profiled_pair_log_probs(
     let rolled = batch.negative.is_none();
     // The first input of the own pass is the last character of the prompt.
     let text_ids = Tensor::cat(vec![batch.own.clone().narrow(1, 0, 1), batch.own_targets.clone()], 1);
-    let [(own_knv, own_targets), (other_knv, other_targets)] = pair_passes(model, ssd_path, batch);
+    let [(own_knv, own_targets), (other_knv, other_targets)] = pair_passes(model, scan_options, batch);
     let align = |other_kn: Tensor<2>| if rolled { roll_back(other_kn) } else { other_kn };
     let own_kn = target_log_p(own_knv.clone(), own_targets);
     let other_kn = align(target_log_p(other_knv.clone(), other_targets));

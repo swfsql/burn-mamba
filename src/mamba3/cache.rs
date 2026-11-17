@@ -30,7 +30,7 @@ use burn_stack::modules::sanity as san;
 /// The variant selects the Double-SSD or Single-SSD pathway. Without caches,
 /// the pathway is [`Self::SingleSsd`].
 ///
-/// See also [`crate::mamba3::ssd_path::Mamba3SsdPath`].
+/// See also [`crate::mamba3::scan_options::Mamba3ScanOptions`].
 #[derive(Debug, Clone)]
 pub enum Mamba3Caches {
     /// Caches for the double-ssd pathway.
@@ -45,7 +45,7 @@ pub enum Mamba3Caches {
 /// The variant selects the Double-SSD or Single-SSD pathway. Without a cache,
 /// the pathway is [`Self::SingleSsd`].
 ///
-/// See also [`crate::mamba3::ssd_path::Mamba3SsdPath`].
+/// See also [`crate::mamba3::scan_options::Mamba3ScanOptions`].
 #[derive(Debug, Clone)]
 pub enum Mamba3Cache {
     /// Cache for the double-ssd pathway.

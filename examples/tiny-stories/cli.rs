@@ -1,9 +1,9 @@
 //! The example's own flags, forwarded after the trailing `--`: the corpus knobs
-//! (`Overrides`, shared with `burn-deltanet`), the SSD path, the training-step
-//! profiler and the VRAM cap.
+//! (`Overrides`, shared with `burn-deltanet`), the scan options, the
+//! training-step profiler and the VRAM cap.
 
 use crate::common::cli::{AppArgs, TrainingStepFlags, finish_extra};
-use crate::common::parse_ssd_path;
+use crate::common::{parse_ssd_chunk_len, parse_ssd_path};
 use crate::common::tiny_stories::lm::Overrides;
 use crate::context::BATCH;
 use crate::contrast::ContrastOverrides;
@@ -12,7 +12,8 @@ use burn_mamba::prelude::*;
 
 /// `-- --help`, below the corpus knobs.
 const HELP: &str = concat!(
-    "    --ssd-path <PATH[:L]>  The SSD path of every chunkwise forward: recalc (default), serial or minimal. L sets the chunk length, in write positions (default: from the block shape)\n",
+    "    --ssd-path <P>         The SSD path of every chunkwise forward: recalc (default), serial or minimal\n",
+    "    --ssd-chunk-len <L>    The chunk length of every chunkwise forward, in write positions (default: from the block shape)\n",
     "    --pack-align <N>       With --pack, start each story at a multiple of N tokens. N must be a multiple of the chunk length (default: the chunk length)\n",
     "    --prompt <TEXT>        At inference, continue TEXT instead of the built-in prompts. Give the flag again for each prompt\n",
     "    --continuations <N>    At inference, the number of continuations of each prompt, each with its own seed (default 1)\n",
@@ -29,9 +30,10 @@ const HELP: &str = concat!(
 pub struct Cli {
     /// The corpus knobs, applied onto the training config.
     pub overrides: Overrides,
-    /// `--ssd-path`: the recalculated serial scan (the default) uses about 1/3
+    /// `--ssd-path` and `--ssd-chunk-len`: the scan options of every chunkwise
+    /// `forward`. The recalculated serial scan (the default) uses about 1/3
     /// less vram than `Minimal`.
-    pub ssd_path: MambaSsdPath,
+    pub scan_options: MambaScanOptions,
     /// `--pack-align`: see `training::Run::pack_align`.
     pub pack_align: Option<usize>,
     /// `--profile`, `--max-vram`, `--grad-checkpointing`.
@@ -70,10 +72,9 @@ impl Cli {
         );
         let mut pargs = app_args.extra(&help);
         let overrides = Overrides::parse(&mut pargs);
-        let ssd_path = pargs
-            .opt_value_from_fn("--ssd-path", parse_ssd_path)
-            .unwrap()
-            .unwrap_or(Mamba3SsdPath::SerialRecalculated(None));
+        let ssd_path = pargs.opt_value_from_fn("--ssd-path", parse_ssd_path).unwrap().unwrap_or_default();
+        let chunk_len = pargs.opt_value_from_fn("--ssd-chunk-len", parse_ssd_chunk_len).unwrap();
+        let scan_options = Mamba3ScanOptions::new(ssd_path).with_chunk_len(chunk_len);
         let pack_align: Option<usize> = pargs.opt_value_from_str("--pack-align").unwrap();
         assert!(pack_align != Some(0), "--pack-align must be at least 1");
         let training_step_flags = TrainingStepFlags::parse(&mut pargs);
@@ -100,7 +101,7 @@ impl Cli {
         finish_extra(pargs);
         Self {
             overrides,
-            ssd_path: MambaSsdPath::Mamba3(ssd_path),
+            scan_options: MambaScanOptions::Mamba3(scan_options),
             pack_align,
             training_step_flags,
             prompting,

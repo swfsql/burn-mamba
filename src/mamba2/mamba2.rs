@@ -189,7 +189,7 @@ pub struct Mamba2 {
     ///
     /// `None` ⇒ the initial state is zero (the standard default). `Some` ⇒
     /// each `forward` call adds this tensor, broadcast over the batch, to the
-    /// incoming cache state. Only [`Mamba2SsdPath::Minimal`] supports it: the
+    /// incoming cache state. Only [`SsdPath::Minimal`] supports it: the
     /// two serial paths panic. [`Self::step`] does not read it.
     pub init_state_hpr: Option<Param<Tensor<3>>>,
 
@@ -408,7 +408,7 @@ pub struct Mamba2Config {
     /// `false` (default) ⇒ the state starts at zero for every sequence.
     /// `true` ⇒ the block has a trainable `init_state_hpr` of shape
     /// `[nheads, per_head_dim, state_rank]`. Only
-    /// [`Mamba2SsdPath::Minimal`] supports it (see [`Mamba2::init_state_hpr`]).
+    /// [`SsdPath::Minimal`] supports it (see [`Mamba2::init_state_hpr`]).
     #[config(default = false)]
     pub has_learnable_init_state: bool,
 
@@ -662,8 +662,8 @@ impl Mamba2 {
     /// 4. **Discretise**: `Δ = softplus(dt_raw + dt_bias)`,
     ///    `Ā = exp(Δ · A)`, `B̄ = Δ · B`.
     /// 5. **Padding**: pad the sequence to a multiple of `chunk_len`.
-    /// 6. **SSD path**: the chunkwise scan that `ssd_path` selects (see
-    ///    [`Mamba2SsdPath`]).
+    /// 6. **SSD scan**: the chunkwise scan that `scan_options` selects (see
+    ///    [`Mamba2ScanOptions`]).
     /// 7. **Gated RMSNorm**: `y = RMSNorm(y · SiLU(z))`, or
     ///    `RMSNorm(y) · SiLU(z)` under `is_norm_before_gate`.
     /// 8. **Out-projection**: `y → output`.
@@ -692,10 +692,10 @@ impl Mamba2 {
         &self,
         input_bsm: Tensor<3>,
         cache: Option<Mamba2Cache>,
-        ssd_path: Mamba2SsdPath,
+        scan_options: Mamba2ScanOptions,
         pad_bs: Option<Tensor<2, Bool>>,
     ) -> (Tensor<3>, Mamba2Cache) {
-        self.forward_packed(input_bsm, cache, None, ssd_path, pad_bs, None)
+        self.forward_packed(input_bsm, cache, None, scan_options, pad_bs, None)
     }
 
     /// [`Self::forward`] over a **packed** batch: each row holds several
@@ -715,15 +715,15 @@ impl Mamba2 {
     ///
     /// At a start, the conv reads the window of `origin` in place of the
     /// positions before it, and the SSD carry between chunks starts again from the state of
-    /// `origin`. Only [`Mamba2SsdPath::Serial`] and
-    /// [`Mamba2SsdPath::SerialRecalculated`] take resets.
+    /// `origin`. Only [`SsdPath::Serial`] and
+    /// [`SsdPath::SerialRecalculated`] take resets.
     #[allow(non_snake_case)]
     pub fn forward_packed(
         &self,
         input_bsm: Tensor<3>,
         cache: Option<Mamba2Cache>,
         origin: Option<Mamba2Cache>,
-        ssd_path: Mamba2SsdPath,
+        scan_options: Mamba2ScanOptions,
         pad_bs: Option<Tensor<2, Bool>>,
         reset_bs: Option<Tensor<2, Bool>>,
     ) -> (Tensor<3>, Mamba2Cache) {
@@ -746,7 +746,7 @@ impl Mamba2 {
 
         // The chunk length is known before the conv, because a reset (at a
         // chunk start) also changes the conv.
-        let chunk_len = ssd_path.chunk_len_or_optimal(state_rank, per_head_dim);
+        let chunk_len = scan_options.chunk_len_or_optimal(state_rank, per_head_dim);
         assert!(chunk_len > 0);
         let reset_bn = reset_bs.map(|reset_bs| crate::packing::chunk_resets(reset_bs, chunk_len));
         // A conv tap reads `conv_kernel − 1` positions back, and only the first
@@ -959,7 +959,7 @@ impl Mamba2 {
             }),
         };
         ssd_input.sanity();
-        let (y_bnlhp, final_state_bhpr) = ssd_input.run(&ssd_path);
+        let (y_bnlhp, final_state_bhpr) = ssd_input.run(scan_options.ssd_path);
         assert_eq!(
             [batch, nchunks, chunk_len, nheads, per_head_dim],
             y_bnlhp.dims()

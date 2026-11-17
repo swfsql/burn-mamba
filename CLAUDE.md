@@ -223,19 +223,21 @@ src/
 ├─ padding.rs            right padding inside a block
 ├─ packing.rs            packed segments (`forward_packed`)
 ├─ row_end.rs            `RowEnd`: the read of each "last samples" cache field at the row end
+├─ ssd_path.rs           `SsdPath`: the SSD path of Mamba-2 and Mamba-3
 ├─ standard_ssd/         the standard SSD scan on primitives (ADR-0010)
 │  ├─ kernels.rs         the forward K1–K5, the backward of each kernel
 │  ├─ combined_backward.rs  the assembly of the backward of one SSD call
 │  └─ read_axis.rs       the read-axis helpers on primitives
 ├─ mamba1/               Mamba-1 block (sequential selective scan) + cache
 ├─ mamba2/               Mamba-2 block (`mamba2.rs`: the SSD math) + cache
-│  └─ ssd/               the three SSD paths, selected by `ssd_path.rs`
+│  ├─ scan_options.rs    `Mamba2ScanOptions`: the SSD path and the chunk length
+│  └─ ssd/               the three SSD paths, run by `Mamba2SsdInput` (`ssd_path.rs`)
 │     └─ serial_recalculated/  the chain rule and `D` skip around the standard scan
 ├─ mamba3/               Mamba-3 block (`mamba3.rs`: the math) + `cache.rs` (the enum, the frame cache, the tap FIFO, `zero_cache`)
 │  ├─ helpers.rs         shared by both pathways and by forward and step
 │  ├─ in_proj_layout.rs  the table of the channel groups of the in-projection
 │  ├─ plant_frame.rs     the entry and the tail around each scan
-│  ├─ ssd_path.rs        `Mamba3SsdPath` (both pathways), the chunk length
+│  ├─ scan_options.rs    `Mamba3ScanOptions` (both pathways): the SSD path and the chunk length
 │  ├─ tap_pattern.rs     the tap pattern (`TapPattern`)
 │  ├─ double_ssd/        double-SSD pathway + its cache
 │  │  ├─ double_ssd/     its forward, and the step of both pathways
@@ -253,7 +255,7 @@ src/
 │  ├─ positive/          positive systems: `scan.rs`, `kalman.rs` (gain), `tropical.rs`
 │  └─ quat_scan/         quaternion cumulative product, recompute backward
 └─ family/               the run-time family choice (ADR-0009)
-   ├─ mod.rs             `MambaSsdPath`, why the MIMO tensors are not Muon matrices
+   ├─ mod.rs             `MambaScanOptions`, why the MIMO tensors are not Muon matrices
    ├─ block.rs           `MambaBlock`, `MambaCache`, `MambaCaches`, the network aliases
    ├─ adapters.rs        `impl Block`/`BlockConfig`/`CacheStack` of each family
    ├─ config.rs          `MambaBlockConfig`, the `{ shape, block }` configs

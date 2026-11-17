@@ -39,8 +39,8 @@ use burn::nn::{Initializer, Linear, LinearConfig};
 use burn::prelude::*;
 use burn_stack::modules::bidi::OutputMergeConfig;
 use burn_mamba::prelude::{
-    BidiShape, ClassLatent, Mamba3Config, Mamba3SsdPath, Mamba3Untied, MambaBidiLayers,
-    MambaBidiLayersConfig, MambaBlockConfig, MambaSsdPath, RotationKind,
+    BidiShape, ClassLatent, Mamba3Config, Mamba3ScanOptions, Mamba3Untied, MambaBidiLayers,
+    MambaBidiLayersConfig, MambaBlockConfig, MambaScanOptions, RotationKind, SsdPath,
 };
 use burn_stack::utils::BidiSchedule;
 
@@ -116,9 +116,9 @@ pub struct AeModel {
 }
 
 impl AeModel {
-    /// Memory-saving SSD path shared by both stacks (saves ~⅓ vram vs `Minimal`).
-    fn ssd_path() -> MambaSsdPath {
-        MambaSsdPath::Mamba3(Mamba3SsdPath::SerialRecalculated(None))
+    /// The memory-saving scan options of both stacks (saves ~⅓ vram vs `Minimal`).
+    fn scan_options() -> MambaScanOptions {
+        MambaScanOptions::Mamba3(Mamba3ScanOptions::new(SsdPath::SerialRecalculated))
     }
 
     /// Encode the image into the latent `z`.
@@ -130,7 +130,7 @@ impl AeModel {
         let h_bsd = self.enc_in_proj.forward(patches_bsp); // [batch, npatch, d_model]
         let h_bsd = h_bsd + self.enc_pos.val().unsqueeze_dim::<3>(0); // + patch position
         // The bidi stack may splice class latents (lengthening the sequence).
-        let (enc_out, _caches) = self.enc_layers.forward(h_bsd, None, Self::ssd_path(), None, None);
+        let (enc_out, _caches) = self.enc_layers.forward(h_bsd, None, Self::scan_options(), None, None);
         // Read the summary out of the class-latent position if configured (with a
         // bidi encoder that token has seen the whole image), else mean-pool over
         // the patches — both are order-agnostic image summaries.
@@ -172,7 +172,7 @@ impl AeModel {
 
         let (d_bsd, _caches) = self
             .dec_layers
-            .forward(dec_in, None, Self::ssd_path(), None, None);
+            .forward(dec_in, None, Self::scan_options(), None, None);
         let patches_bsp = self.dec_out.forward(d_bsd); // [batch, npatch, patch²]
         unpatchify(patches_bsp, self.patch, HEIGHT, WIDTH) // [batch, HEIGHT*WIDTH]
     }

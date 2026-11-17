@@ -77,10 +77,10 @@ impl Mamba3 {
         &self,
         input_bsm: Tensor<3>,
         cache: Option<Mamba3SingleSsdCache>,
-        ssd_path: &Mamba3SsdPath,
+        scan_options: &Mamba3ScanOptions,
         pad_bt: Option<Tensor<2, Bool>>,
     ) -> (Tensor<3>, Mamba3SingleSsdCache) {
-        self.forward_single_ssd_packed(input_bsm, cache, None, ssd_path, pad_bt, None)
+        self.forward_single_ssd_packed(input_bsm, cache, None, scan_options, pad_bt, None)
     }
 
     /// [`Self::forward_single_ssd`] over a packed batch: `reset_bt` marks the
@@ -97,7 +97,7 @@ impl Mamba3 {
         input_bsm: Tensor<3>,
         cache: Option<Mamba3SingleSsdCache>,
         origin: Option<Mamba3SingleSsdCache>,
-        ssd_path: &Mamba3SsdPath,
+        scan_options: &Mamba3ScanOptions,
         pad_bt: Option<Tensor<2, Bool>>,
         reset_bt: Option<Tensor<2, Bool>>,
     ) -> (Tensor<3>, Mamba3SingleSsdCache) {
@@ -106,7 +106,7 @@ impl Mamba3 {
                 input_bsm,
                 cache.map(Into::into),
                 origin.map(Into::into),
-                ssd_path,
+                scan_options,
                 pad_bt,
                 reset_bt,
             );
@@ -124,7 +124,7 @@ impl Mamba3 {
         // ── The entry of the plant frame ──────────────────────────────────────
         // At a call boundary, the accumulator `h'` equals the state, so the
         // caches convert field by field.
-        let chunk_len = ssd_path.chunk_len_or_optimal(self);
+        let chunk_len = scan_options.chunk_len_or_optimal(self);
         let PlantEntry {
             mut cache,
             packed,
@@ -379,7 +379,7 @@ impl Mamba3 {
             }),
             seed_bnhpr,
         };
-        let (y_bntmhp, final_state_bhpr) = ssd_input.run(ssd_path);
+        let (y_bntmhp, final_state_bhpr) = ssd_input.run(scan_options.ssd_path);
 
         san(&y_bntmhp);
         san(&final_state_bhpr);

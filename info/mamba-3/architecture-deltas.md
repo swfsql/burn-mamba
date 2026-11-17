@@ -102,7 +102,7 @@ rule by `mimo_rank` (the advice of the source). Then it only *subdivides* it by
 
 §§3–7 propose no change of behaviour. They document three existing defaults
 and give the reasons for them. §8 is the exception. It is the argument for the
-divisor of `Mamba3SsdPath::optimal_chunk_len`, which changes the default chunk
+divisor of `Mamba3ScanOptions::optimal_chunk_len`, which changes the default chunk
 length for blocks with `mimo_rank > 1` or `micro_steps > 1`. The exact values
 do not change, and a SISO, `u = 1` block does not change.
 
@@ -411,7 +411,7 @@ This crate fuses the rank onto the chunk axis: `[L·M, L·M]` intra-chunk
 matrices in `single_ssd/ssd/serial.rs`. (§8.7 gives the general `[T·M, L·M]`,
 where `T` is the read positions of the chunk. At `u = 1`, the two are the same.) So
 the same arithmetic applies without change, and
-`Mamba3SsdPath::optimal_chunk_len` implements it: `√(N·P)` divided by
+`Mamba3ScanOptions::optimal_chunk_len` implements it: `√(N·P)` divided by
 `mimo_rank`, then rounded up to a multiple of 32 and clamped to `32..=512`.
 At `N = 128`, `P = 64`, that is `96 / 64 / 32` for a rank of `1 / 2 / ≥4`
 (§8.5). So the fused axis `C·M` is 128 for `M = 4`, where the unscaled chunk
@@ -449,7 +449,7 @@ FLOPs and in memory: the score, the state-to-output product, and the QK-norm
 and rotation of `C`. The block evaluates it only where the readout occurs
 (`helpers::read_positions`, and the kernels take the stride as
 `Mamba3*SsdInput::read_stride`). A model that wants a different trade can
-give an explicit chunk length (`Mamba3SsdPath::SerialRecalculated(Some(n))`).
+give an explicit chunk length (`Mamba3ScanOptions::new(SsdPath::SerialRecalculated).with_chunk_len(Some(n))`).
 It has priority over the schedule, and the block rounds it up to a whole
 number of tokens.
 
@@ -505,7 +505,7 @@ rows, and nothing here argues for it.
 
 ### 9.4 The chunk schedule divides by `mimo_rank`, and only subdivides by `micro_steps`
 
-See §8. `Mamba3SsdPath::optimal_chunk_len` divides the square-root rule by the
+See §8. `Mamba3ScanOptions::optimal_chunk_len` divides the square-root rule by the
 rank, rounds it up to a multiple of 32, and then rounds it *up* to a whole
 number of tokens. The rank half is the advice of the source (its kernels
 carry it as a comment on `chunk_size`). The different treatment of

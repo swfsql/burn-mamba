@@ -58,7 +58,7 @@ pub fn predict(model: &MambaLatentNet, images_norm: Tensor<4>) -> Tensor<2> {
         .sub_scalar(MnistBatch::MEAN)
         .div_scalar(MnistBatch::STDDEV)
         .reshape([n, h * w, 1]);
-    let (output, _caches) = model.forward(zscored, None, crate::training::ssd_path(), None, None);
+    let (output, _caches) = model.forward(zscored, None, crate::training::scan_options(), None, None);
     // The class latents lengthen the sequence. The readout is its last
     // position (see `model::OUTPUT_SEQUENCE_EXTRA`).
     let seq = h * w + crate::model::OUTPUT_SEQUENCE_EXTRA;

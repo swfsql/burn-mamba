@@ -105,8 +105,9 @@ adds:
 
 - `ARTIFACT_PREFIX`, which must expand in the example crate,
 - `parse_rotation`, the `--rotation` value of the rotating `reset-*` rungs,
-  and `parse_ssd_path`, the `--ssd-path` value of the TinyStories examples
-  (flags that name a `burn-mamba` type, which `burn-stack` cannot do),
+  and `parse_ssd_path` and `parse_ssd_chunk_len`, the `--ssd-path` and
+  `--ssd-chunk-len` values of the TinyStories examples (flags whose values go
+  into `burn-mamba` types, which `burn-stack` cannot do),
 - `common/context.rs` and `common/long_stories.rs`, the `--context-use` and
   `--long-stories` measures of `tiny-stories` and `hnet-stories`. They read
   a model only through a logits closure.

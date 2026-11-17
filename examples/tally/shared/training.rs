@@ -27,10 +27,10 @@ use burn::{
 use burn_mamba::prelude::*;
 use burn_stack::examples::trainer::Trainer;
 
-/// The SSD path of every call on this ladder. The models are tiny and the
+/// The scan options of every call on this ladder. The models are tiny and the
 /// sequences are short, so the simplest SSD path (autodiff backward) is right.
-pub fn ssd_path() -> MambaSsdPath {
-    MambaSsdPath::Mamba3(Mamba3SsdPath::Minimal(None))
+pub fn scan_options() -> MambaScanOptions {
+    MambaScanOptions::Mamba3(Mamba3ScanOptions::new(SsdPath::Minimal))
 }
 
 type Dataloader = std::sync::Arc<dyn DataLoader<TallyBatch> + 'static>;
@@ -270,7 +270,7 @@ fn forward_classification(
     targets: Tensor<2, Int>,
 ) -> ClassificationOutput {
     let [batch_size, seq, _] = inputs.dims();
-    let (output, _caches) = model.forward(inputs, None, ssd_path(), None, None);
+    let (output, _caches) = model.forward(inputs, None, scan_options(), None, None);
     let n = batch_size * seq;
     let logits = output.reshape([n, NUM_CLASSES]);
     let targets = targets.reshape([n]);

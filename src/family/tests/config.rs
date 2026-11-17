@@ -157,15 +157,15 @@ fn hnet_vocab_net_config_survives_a_json_round_trip() {
     }
 }
 
-/// A path of another family panics in `forward`.
+/// Scan options of another family panic in `forward`.
 #[test]
-fn default_ssd_path_fits_the_family_of_the_block() {
+fn default_scan_options_fit_the_family_of_the_block() {
     let device = test_device();
     for block in block_configs() {
-        let path = block.default_ssd_path();
+        let scan_options = block.default_scan_options();
         let net = MambaLatentNetConfig::new(LatentShape::new(3, 2, NetworkShape::new(1)), block)
             .init(&device);
-        let (y, _) = net.forward(Tensor::<3>::zeros([2, 5, 3], &device), None, path, None, None);
+        let (y, _) = net.forward(Tensor::<3>::zeros([2, 5, 3], &device), None, scan_options, None, None);
         assert_eq!(y.dims(), [2, 5, 2]);
     }
 }

@@ -34,8 +34,8 @@ fn m1() -> Mamba1Config {
     Mamba1Config::new(D_MODEL).with_state_rank(8)
 }
 
-/// The base setting of Mamba-2, at the width `d_model`, without its SSD
-/// path.
+/// The base setting of Mamba-2, at the width `d_model`, without its scan
+/// options.
 #[cfg(feature = "mamba2")]
 fn m2_of_width(d_model: usize) -> Mamba2Config {
     Mamba2Config::new(d_model)
@@ -52,7 +52,7 @@ fn m2() -> Mamba2Config {
     m2_of_width(D_MODEL)
 }
 
-/// The base setting of Mamba-3, without its SSD path.
+/// The base setting of Mamba-3, without its scan options.
 #[cfg(feature = "mamba3")]
 fn m3() -> Mamba3Config {
     Mamba3Config::new(D_MODEL)

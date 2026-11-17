@@ -52,7 +52,9 @@ fn shifted_latents(net: &MambaVocabNet) -> MambaVocabNet {
 
 fn eager_run(chunk_len: Option<usize>) -> Run {
     Run {
-        ssd_path: MambaSsdPath::Mamba3(Mamba3SsdPath::SerialRecalculated(chunk_len)),
+        scan_options: MambaScanOptions::Mamba3(
+            Mamba3ScanOptions::new(SsdPath::SerialRecalculated).with_chunk_len(chunk_len),
+        ),
         pack_align: None,
         capture: false,
         max_vram_mib: None,
@@ -119,7 +121,7 @@ fn check_decode(
     let (_, primed) = net.prime(1, None, Some(&mut primed_class));
     assert!(primed.is_some(), "the Start latents leave a cache");
     let (want, _) =
-        net.forward(pairs(tokens, device), primed, run.ssd_path.clone(), Some(&mut primed_class), None);
+        net.forward(pairs(tokens, device), primed, run.scan_options.clone(), Some(&mut primed_class), None);
     let want = last(want);
     assert_close(logits.clone(), want.clone(), tol, &format!("length {len}: prefill vs prime + forward"));
 
@@ -135,7 +137,7 @@ fn check_decode(
     // The decode: teacher-forced steps after each opening, against one
     // `forward` over the prompt and the continuation.
     let whole = [tokens, continuation].concat();
-    let (all, _) = net.forward(pairs(&whole, device), None, run.ssd_path.clone(), None, None);
+    let (all, _) = net.forward(pairs(&whole, device), None, run.scan_options.clone(), None, None);
     // The positions of the latents come first, then one position per token.
     let lead = all.dims()[1] - whole.len();
     assert_eq!(lead, N_LATENTS, "one position per latent, then one per token");

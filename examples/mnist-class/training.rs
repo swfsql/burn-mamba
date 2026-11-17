@@ -168,10 +168,10 @@ fn train_loss(net: &MambaLatentNet, (images, targets): (Tensor<4>, Tensor<1, Int
     (output.loss, output.output.inner())
 }
 
-/// The SSD path for both training and inference. It uses about 1/3 less vram
-/// than `Minimal`.
-pub fn ssd_path() -> MambaSsdPath {
-    MambaSsdPath::Mamba3(Mamba3SsdPath::SerialRecalculated(None))
+/// The scan options for both training and inference. They use about 1/3 less
+/// vram than `Minimal`.
+pub fn scan_options() -> MambaScanOptions {
+    MambaScanOptions::Mamba3(Mamba3ScanOptions::new(SsdPath::SerialRecalculated))
 }
 
 impl MnistModel for Wrap {
@@ -276,7 +276,7 @@ pub fn logits(model: &MambaLatentNet, input: Tensor<3>) -> Tensor<2> {
     assert_eq!(sequence_size, HEIGHT * WIDTH);
     assert_eq!(input_size, 1);
 
-    let (output, _caches) = model.forward(input, None, ssd_path(), None, None);
+    let (output, _caches) = model.forward(input, None, scan_options(), None, None);
     // The class latents of the model lengthen the sequence. The readout is its
     // last position (see `OUTPUT_SEQUENCE_EXTRA`).
     let output_size = sequence_size + OUTPUT_SEQUENCE_EXTRA;

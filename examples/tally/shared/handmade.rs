@@ -6,7 +6,7 @@
 //! that embedding, from its target value on each symbol.
 
 use super::data::{Generator, IGNORE, NUM_CLASSES, TallyBatcher, TallyDataset, Task};
-use super::training::ssd_path as training_ssd_path;
+use super::training::scan_options as training_scan_options;
 use burn::data::dataloader::batcher::Batcher;
 use burn::module::Param;
 use burn::prelude::*;
@@ -103,7 +103,7 @@ pub fn affine_channels(
 /// Per-position predicted classes (row-major over `batch × seq`).
 pub fn predictions(model: &MambaLatentNet, inputs: &Tensor<3>) -> Vec<i64> {
     let [batch, seq, _] = inputs.dims();
-    let (out, _) = model.forward(inputs.clone(), None, training_ssd_path(), None, None);
+    let (out, _) = model.forward(inputs.clone(), None, training_scan_options(), None, None);
     out.reshape([batch * seq, NUM_CLASSES])
         .argmax(1)
         .reshape([batch * seq])

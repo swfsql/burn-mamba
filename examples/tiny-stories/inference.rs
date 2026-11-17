@@ -253,7 +253,7 @@ fn open(
                     let input = Tensor::<1, Int>::from_ints(pairs.as_slice(), device)
                         .reshape([1, tokens.len(), 2]);
                     let (logits, caches) =
-                        model.forward(input, None, run.ssd_path.clone(), Some(&mut class), None);
+                        model.forward(input, None, run.scan_options.clone(), Some(&mut class), None);
                     let last = logits.dims()[1] - 1;
                     (logits.narrow(1, last, 1).squeeze_dim::<2>(1), Some(caches))
                 }
@@ -281,12 +281,12 @@ const PREFILL_WINDOW: usize = 256;
 /// `--eager`. Hold it across prompts: they share its opening and its
 /// recording.
 pub fn prefill<'a>(model: &'a MambaVocabNet, run: &Run, device: &Device) -> Prefill<'a, MambaCaches> {
-    let ssd_path = run.ssd_path.clone();
+    let scan_options = run.scan_options.clone();
     // Safety: the window reads only its arguments, `model` (borrowed for as long
-    // as the prefill lives), and `ssd_path`, which it owns.
+    // as the prefill lives), and `scan_options`, which it owns.
     unsafe {
         Prefill::new(device, PREFILL_WINDOW, run.capture, move |x, caches, pad, class| {
-            model.forward(x, Some(caches), ssd_path.clone(), Some(class), Some(pad))
+            model.forward(x, Some(caches), scan_options.clone(), Some(class), Some(pad))
         })
     }
 }

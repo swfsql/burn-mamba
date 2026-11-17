@@ -82,7 +82,7 @@ pub mod prelude {
         MambaCaches, MambaHNetVocabNet, MambaHNetVocabNetConfig, MambaLatentNet,
         MambaLatentNetConfig, MambaVocabNet, MambaVocabNetConfig,
     };
-    pub use crate::family::MambaSsdPath;
+    pub use crate::family::MambaScanOptions;
 
     // The block-generic composition layer (`burn-stack`).
     pub use burn_stack::modules::{BidiShape, LatentShape, NetworkShape, VocabShape};
@@ -94,6 +94,10 @@ pub mod family;
 pub mod packing;
 mod padding;
 mod row_end;
+/// The SSD path: the method that computes the chunkwise SSD scan of Mamba-2
+/// and Mamba-3.
+#[cfg(any(feature = "mamba2", feature = "mamba3"))]
+pub mod ssd_path;
 /// The standard SSD scan on primitives: the forward and the analytic backward
 /// that Mamba-2 and the double-SSD pathway of Mamba-3 call.
 #[cfg(any(feature = "mamba2", feature = "mamba3"))]

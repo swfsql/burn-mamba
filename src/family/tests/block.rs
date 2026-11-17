@@ -33,15 +33,15 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 const TOL: f32 = 1e-4;
 
-/// Each enabled family: its tag, its block config and its SSD path.
-fn families() -> Vec<(&'static str, MambaBlockConfig, MambaSsdPath)> {
+/// Each enabled family: its tag, its block config and its scan options.
+fn families() -> Vec<(&'static str, MambaBlockConfig, MambaScanOptions)> {
     vec![
         #[cfg(feature = "mamba1")]
-        ("Mamba1", MambaBlockConfig::Mamba1(m1()), MambaSsdPath::Mamba1),
+        ("Mamba1", MambaBlockConfig::Mamba1(m1()), MambaScanOptions::Mamba1),
         #[cfg(feature = "mamba2")]
-        ("Mamba2", MambaBlockConfig::Mamba2(m2()), MambaSsdPath::mamba2_default()),
+        ("Mamba2", MambaBlockConfig::Mamba2(m2()), MambaScanOptions::mamba2_default()),
         #[cfg(feature = "mamba3")]
-        ("Mamba3", MambaBlockConfig::Mamba3(m3()), MambaSsdPath::mamba3_default()),
+        ("Mamba3", MambaBlockConfig::Mamba3(m3()), MambaScanOptions::mamba3_default()),
     ]
 }
 
@@ -111,7 +111,7 @@ fn cache_diff<C: CacheTensors>(a: C, b: C) -> f32 {
 #[test]
 fn module_surface() {
     let device = test_device();
-    for (tag, block, path) in families() {
+    for (tag, block, scan_options) in families() {
         let net: MambaLatentNet = latent_shape(2).init(block, &device);
         assert!(net.num_params() > 0, "{tag}");
         assert!(!format!("{net}").is_empty(), "{tag}: Display");
@@ -119,11 +119,11 @@ fn module_surface() {
         assert!(!net.devices().is_empty(), "{tag}: devices");
         let moved = net.clone().fork(&device).to_device(&device).no_grad();
         let x = input(2, 6, &device);
-        let (a, _) = net.forward(x.clone(), None, path.clone(), None, None);
-        let (b, _) = moved.forward(x.clone(), None, path.clone(), None, None);
+        let (a, _) = net.forward(x.clone(), None, scan_options.clone(), None, None);
+        let (b, _) = moved.forward(x.clone(), None, scan_options.clone(), None, None);
         assert_eq!(max_abs_diff(a.clone(), b), 0.0, "{tag}: clone, fork, to_device");
         let jittered = net.clone().map(&mut Jitter);
-        let (c, _) = jittered.forward(x, None, path, None, None);
+        let (c, _) = jittered.forward(x, None, scan_options, None, None);
         assert!(max_abs_diff(a, c) > 0.0, "{tag}: a mapper reaches the block");
     }
 }
@@ -186,23 +186,23 @@ fn block_output_is_exact() {
         let block = BlockConfig::init_block(&m1(), 1, &device);
         let tagged = MambaBlock::Mamba1(block.clone());
         let (want, _) = block.block_forward(x.clone(), None, (), None);
-        let (got, _) = tagged.block_forward(x.clone(), None, MambaSsdPath::Mamba1, None);
+        let (got, _) = tagged.block_forward(x.clone(), None, MambaScanOptions::Mamba1, None);
         assert_eq!(max_abs_diff(want, got), 0.0);
     }
     #[cfg(feature = "mamba2")]
     {
         let block = BlockConfig::init_block(&m2(), 1, &device);
         let tagged = MambaBlock::Mamba2(block.clone());
-        let (want, _) = block.block_forward(x.clone(), None, Mamba2SsdPath::default(), None);
-        let (got, _) = tagged.block_forward(x.clone(), None, MambaSsdPath::mamba2_default(), None);
+        let (want, _) = block.block_forward(x.clone(), None, Mamba2ScanOptions::default(), None);
+        let (got, _) = tagged.block_forward(x.clone(), None, MambaScanOptions::mamba2_default(), None);
         assert_eq!(max_abs_diff(want, got), 0.0);
     }
     #[cfg(feature = "mamba3")]
     {
         let block = BlockConfig::init_block(&m3(), 1, &device);
         let tagged = MambaBlock::Mamba3(block.clone());
-        let (want, _) = block.block_forward(x.clone(), None, Mamba3SsdPath::default(), None);
-        let (got, _) = tagged.block_forward(x, None, MambaSsdPath::mamba3_default(), None);
+        let (want, _) = block.block_forward(x.clone(), None, Mamba3ScanOptions::default(), None);
+        let (got, _) = tagged.block_forward(x, None, MambaScanOptions::mamba3_default(), None);
         assert_eq!(max_abs_diff(want, got), 0.0);
     }
 }
@@ -223,8 +223,8 @@ fn network_output_and_gradients_are_exact() {
         tagged.block = MambaBlock::Mamba3(family.block.clone());
     }
     let x = input(2, 6, &device);
-    let (want, _) = family_net.forward(x.clone(), None, Mamba3SsdPath::default(), None, None);
-    let (got, _) = tagged_net.forward(x, None, MambaSsdPath::mamba3_default(), None, None);
+    let (want, _) = family_net.forward(x.clone(), None, Mamba3ScanOptions::default(), None, None);
+    let (got, _) = tagged_net.forward(x, None, MambaScanOptions::mamba3_default(), None, None);
     assert_eq!(max_abs_diff(want.clone(), got.clone()), 0.0, "values");
     let grads_want = want.sum().backward();
     let grads_got = got.sum().backward();
@@ -272,7 +272,7 @@ fn the_zero_cache_of_mamba3_is_single_ssd() {
 #[test]
 fn prime_and_class_tokens_through_the_enum() {
     let device = test_device();
-    for (tag, block, path) in families() {
+    for (tag, block, scan_options) in families() {
         let shape = LatentShape::new(3, 5, NetworkShape::new(2).with_class_latents(vec![ClassLatent::Start]))
             .with_class_tokens(vec![ClassToken::Start]);
         let net: MambaLatentNet = shape.init(block, &device);
@@ -281,7 +281,7 @@ fn prime_and_class_tokens_through_the_enum() {
 
         // The stack latent is below the class token of the network, so the
         // positions are `S N u0 u1 u2`.
-        let (whole, caches_forward) = net.forward(x.clone(), None, path, None, None);
+        let (whole, caches_forward) = net.forward(x.clone(), None, scan_options, None, None);
         assert_eq!(whole.dims(), [batch, seq + 2, 5], "{tag}");
         let at = |p: usize| whole.clone().narrow(1, p, 1).squeeze_dim::<2>(1);
 
@@ -329,8 +329,8 @@ fn hnet_mixes_stage_and_main_family() {
 
     let pairs: Vec<i64> = (0..16i64).flat_map(|i| [(i * 7 + 3) % VOCAB as i64, i % 2]).collect();
     let x = Tensor::<1, Int>::from_ints(pairs.as_slice(), &device).reshape([2, 8, 2]);
-    let paths = (MambaSsdPath::mamba2_default(), MambaSsdPath::mamba3_default());
-    let (whole, _, routing) = net.forward(x.clone(), None, paths, None);
+    let scan_options = (MambaScanOptions::mamba2_default(), MambaScanOptions::mamba3_default());
+    let (whole, _, routing) = net.forward(x.clone(), None, scan_options, None);
 
     let mut caches = None;
     for t in 0..8 {
@@ -354,12 +354,12 @@ fn hnet_mixes_stage_and_main_family() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[should_panic(expected = "the SSD path family does not match the block")]
+#[should_panic(expected = "the family of the scan options does not match the block")]
 #[cfg(all(feature = "mamba2", feature = "mamba3"))]
-fn wrong_path_panics() {
+fn wrong_scan_options_panic() {
     let device = test_device();
     let net: MambaLatentNet = latent_shape(1).init(MambaBlockConfig::Mamba3(m3()), &device);
-    let _ = net.forward(input(2, 6, &device), None, MambaSsdPath::mamba2_default(), None, None);
+    let _ = net.forward(input(2, 6, &device), None, MambaScanOptions::mamba2_default(), None, None);
 }
 
 #[test]
@@ -370,8 +370,8 @@ fn wrong_cache_panics() {
     let a: MambaLatentNet = latent_shape(1).init(MambaBlockConfig::Mamba2(m2()), &device);
     let b: MambaLatentNet = latent_shape(1).init(MambaBlockConfig::Mamba3(m3()), &device);
     let x = input(2, 6, &device);
-    let (_, caches) = a.forward(x.clone(), None, MambaSsdPath::mamba2_default(), None, None);
-    let _ = b.forward(x, Some(caches), MambaSsdPath::mamba3_default(), None, None);
+    let (_, caches) = a.forward(x.clone(), None, MambaScanOptions::mamba2_default(), None, None);
+    let _ = b.forward(x, Some(caches), MambaScanOptions::mamba3_default(), None, None);
 }
 
 /// A hand-built mixed stack panics at its first `forward` (one `Options` value)
@@ -386,7 +386,7 @@ fn mixed_stack_rules() {
     let x = input(2, 6, &device);
     let x0 = x.clone().narrow(1, 0, 1).squeeze_dim(1);
 
-    let forward = catch_unwind(AssertUnwindSafe(|| net.forward(x, None, MambaSsdPath::mamba3_default(), None, None)));
+    let forward = catch_unwind(AssertUnwindSafe(|| net.forward(x, None, MambaScanOptions::mamba3_default(), None, None)));
     assert!(forward.is_err(), "a mixed stack must panic at its first forward");
     let step = catch_unwind(AssertUnwindSafe(|| net.step(x0.clone(), None, None)));
     assert!(step.is_err(), "a mixed stack must panic at a step with no cache");

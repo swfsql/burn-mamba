@@ -15,7 +15,7 @@
 An expected value comes from a source outside the code under test:
 
 - A closed form or a definition. Examples: the half-angle closed form in `src/mamba3/rotation/tests.rs`, and `prefix_sum_matches_the_definition` in `src/mamba3/helpers/tests.rs`.
-- The float64 `numpy` check of an `info/` note, in `scripts/`. The test cites the note, as `src/mamba3/ssd_path/tests.rs` does.
+- The float64 `numpy` check of an `info/` note, in `scripts/`. The test cites the note, as `src/mamba3/scan_options/tests.rs` does.
 
 ## Outside the seams
 

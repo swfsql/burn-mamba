@@ -15,8 +15,9 @@
 //! It adds the things that must be *here*, in the example crate:
 //!
 //! - [`ARTIFACT_PREFIX`], the one constant that must expand in this crate.
-//! - [`parse_rotation`] and [`parse_ssd_path`], the parsers of flags that name
-//!   a type of this crate. `burn-stack` is family-agnostic, so it cannot have
+//! - [`parse_rotation`], [`parse_ssd_path`] and [`parse_ssd_chunk_len`], the
+//!   parsers of the flags of the rotation and of the scan options. These flags
+//!   are specific to Mamba. `burn-stack` is family-agnostic, so it cannot have
 //!   these parsers.
 //!
 //! It also holds two measures that the two TinyStories examples of this crate
@@ -69,22 +70,23 @@ pub fn parse_rotation(value: &str) -> Result<burn_mamba::prelude::RotationKind, 
     }
 }
 
-/// A `--ssd-path <path>[:<chunk_len>]` value (`recalc | serial | minimal`),
-/// for `pico_args::Arguments::opt_value_from_fn`. The chunk length counts
-/// write positions, as `Mamba3SsdPath` does.
-pub fn parse_ssd_path(arg: &str) -> Result<burn_mamba::prelude::Mamba3SsdPath, String> {
-    use burn_mamba::prelude::Mamba3SsdPath;
-    let (path, chunk_len) = match arg.split_once(':') {
-        None => (arg, None),
-        Some((path, len)) => match len.parse::<usize>() {
-            Ok(len) if len >= 1 => (path, Some(len)),
-            _ => return Err(format!("chunk length {len:?} is not a positive integer")),
-        },
-    };
-    match path {
-        "recalc" => Ok(Mamba3SsdPath::SerialRecalculated(chunk_len)),
-        "serial" => Ok(Mamba3SsdPath::Serial(chunk_len)),
-        "minimal" => Ok(Mamba3SsdPath::Minimal(chunk_len)),
+/// A `--ssd-path <p>` value (`recalc | serial | minimal`), for
+/// `pico_args::Arguments::opt_value_from_fn`.
+pub fn parse_ssd_path(arg: &str) -> Result<burn_mamba::prelude::SsdPath, String> {
+    use burn_mamba::prelude::SsdPath;
+    match arg {
+        "recalc" => Ok(SsdPath::SerialRecalculated),
+        "serial" => Ok(SsdPath::Serial),
+        "minimal" => Ok(SsdPath::Minimal),
         other => Err(format!("unknown SSD path {other:?} (recalc | serial | minimal)")),
+    }
+}
+
+/// A `--ssd-chunk-len <l>` value: a chunk length of at least 1, in write
+/// positions, for `pico_args::Arguments::opt_value_from_fn`.
+pub fn parse_ssd_chunk_len(arg: &str) -> Result<usize, String> {
+    match arg.parse::<usize>() {
+        Ok(chunk_len) if chunk_len >= 1 => Ok(chunk_len),
+        _ => Err(format!("chunk length {arg:?} is not a positive integer")),
     }
 }

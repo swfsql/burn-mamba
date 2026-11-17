@@ -2,7 +2,8 @@ use super::*;
 use crate::mamba3::cache::Mamba3Cache;
 use crate::mamba3::mamba3::{Mamba3, Mamba3Config};
 use crate::mamba3::rotation::RotationKind;
-use crate::mamba3::ssd_path::Mamba3SsdPath;
+use crate::mamba3::scan_options::Mamba3ScanOptions;
+use crate::ssd_path::SsdPath;
 use burn::tensor::Distribution;
 use burn_stack::utils::test_helpers::{dtype_tol, max_abs_diff};
 use burn_stack::utils::test_helpers::test_device;
@@ -123,7 +124,7 @@ fn forward_matches_step_double(kind: RotationKind, micro_steps: usize) {
     );
 
     let (out_fwd, cache_fwd) =
-        model.forward_double_ssd(input.clone(), None, &Mamba3SsdPath::default(), None);
+        model.forward_double_ssd(input.clone(), None, &Mamba3ScanOptions::default(), None);
 
     let mut cache = None;
     let mut outs = Vec::new();
@@ -200,7 +201,7 @@ fn forward_single_matches_step(kind: RotationKind, micro_steps: usize) {
         &device,
     );
 
-    let (out_fwd, _) = model.forward_single_ssd(input.clone(), None, &Mamba3SsdPath::default(), None);
+    let (out_fwd, _) = model.forward_single_ssd(input.clone(), None, &Mamba3ScanOptions::default(), None);
 
     let mut cache: Option<Mamba3Cache> = None;
     let mut outs = Vec::new();
@@ -243,15 +244,15 @@ fn split_prefill_matches_full() {
             Distribution::Normal(0.0, 1.0),
             &device,
         );
-        let path = Mamba3SsdPath::default();
+        let scan_options = Mamba3ScanOptions::default();
 
-        let (full, _) = model.forward_single_ssd(input.clone(), None, &path, None);
+        let (full, _) = model.forward_single_ssd(input.clone(), None, &scan_options, None);
         let (head, cache) =
-            model.forward_single_ssd(input.clone().narrow(1, 0, split), None, &path, None);
+            model.forward_single_ssd(input.clone().narrow(1, 0, split), None, &scan_options, None);
         let (tail, _) = model.forward_single_ssd(
             input.narrow(1, split, tokens - split),
             Some(cache),
-            &path,
+            &scan_options,
             None,
         );
         assert!(
@@ -292,7 +293,7 @@ fn forward_step_grad_parity(kind: RotationKind, micro_steps: usize) {
     let p_fwd = burn::module::Param::from_tensor(Tensor::from_inner(input.clone()));
     let p_step = burn::module::Param::from_tensor(Tensor::from_inner(input));
 
-    let (out_fwd, _) = model.forward(p_fwd.val(), None, Mamba3SsdPath::Minimal(None), None);
+    let (out_fwd, _) = model.forward(p_fwd.val(), None, Mamba3ScanOptions::new(SsdPath::Minimal), None);
     let g_fwd = (out_fwd * Tensor::from_inner(head.clone())).sum().backward();
 
     let mut cache: Option<Mamba3Cache> = None;
@@ -350,7 +351,7 @@ fn every_micro_step_receives_gradient() {
         Distribution::Normal(0.0, 1.0),
         &device,
     ));
-    let (out, _) = model.forward_single_ssd(input, None, &Mamba3SsdPath::default(), None);
+    let (out, _) = model.forward_single_ssd(input, None, &Mamba3ScanOptions::default(), None);
     let grads = out.sum().backward();
     let g = model
         .in_proj
