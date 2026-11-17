@@ -9,7 +9,8 @@
 //! - `config.rs`: the `{ shape, block }` configs,
 //! - `reset_align.rs`: the reset alignment of each family,
 //! - `capture.rs`: the cache write-back of Mamba-3,
-//! - `untied.rs`: the untied `in_proj` tail of Mamba-3,
+//! - `untied.rs`: the untied `in_proj` tail of Mamba-3, and the untie checks
+//!   of its Kalman gain and of its tropical register,
 //! - `optim.rs`: the Muon specs of each family.
 
 use crate::prelude::*;

@@ -30,10 +30,12 @@
 //!   - Mamba-2 unties each tensor of [`Mamba2Untied`] except `InitState`.
 //!     Only the `Minimal` path reads the learnable initial state, and the
 //!     step does not read it.
-//!   - Mamba-3 unties each tensor of [`Mamba3Untied`] except `InitState` (as
-//!     for Mamba-2) and the tensors of the Kalman gain and of the tropical
-//!     readout. It has `mimo_rank` 2 and the output norm, so that the MIMO
-//!     tensors and the output norm exist.
+//!   - Mamba-3 unties each tensor of [`Mamba3Untied`] except `InitState`, as
+//!     for Mamba-2. It has `mimo_rank` 2, the output norm,
+//!     [`Gain::KalmanProjectedNoise`] and [`Tropical::MaxPlus`], so that each
+//!     of these tensors exists. Its untied `in_proj` tail then also holds
+//!     three more channel groups. One is the noise of the Kalman gain, and two
+//!     are of the tropical register.
 //!   - [`MambaBlock`] unties `DtBias` and `D` of Mamba-3.
 //!
 //! A window of a contract has 7 tokens. So each Mamba-2 and Mamba-3 setting
@@ -269,12 +271,21 @@ fn mamba3_settings() -> Vec<Setting<Mamba3Config>> {
             f32_tol: MAMBA3_TOL,
         })
         .collect();
-    let untied = m3().with_mimo_rank(2).with_has_outproj_norm(true).with_untied(vec![
-        InProjTail, DtBias, D, BNorm, CNorm, BBias, CBias, MimoX, MimoZ, MimoO, OutNorm,
-    ]);
+    let untied = m3()
+        .with_mimo_rank(2)
+        .with_has_outproj_norm(true)
+        .with_gain(Gain::KalmanProjectedNoise)
+        .with_tropical(Tropical::MaxPlus)
+        .with_untied(vec![
+            InProjTail, DtBias, D, BNorm, CNorm, BBias, CBias, MimoX, MimoZ, MimoO, OutNorm, KalmanKappa,
+            KalmanRead, TropicalReadout,
+        ]);
     let scan_options = m3_scan_options(Minimal, &untied);
     settings.push(Setting {
-        name: format!("Mamba-3, untied, {scan_options:?}, mimo_rank 2, output norm"),
+        name: format!(
+            "Mamba-3, untied, {scan_options:?}, mimo_rank 2, output norm, {:?}, {:?}",
+            untied.gain, untied.tropical,
+        ),
         config: untied,
         options: scan_options,
         f32_tol: MAMBA3_TOL,

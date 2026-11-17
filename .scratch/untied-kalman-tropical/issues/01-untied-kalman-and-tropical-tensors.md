@@ -1,6 +1,6 @@
 # 01: The untied tensors of the Kalman gain and of the tropical register in the block contracts
 
-Status: ready-for-agent
+Status: resolved
 
 Blocked by: none (can start immediately)
 
@@ -51,13 +51,13 @@ run:
 error of the Kalman gain or of the tropical register under untied copies. Stop and ask
 the user. Do not remove a tensor from the setting to make it pass.
 
-- [ ] The untied Mamba-3 setting has `Gain::KalmanProjectedNoise` and `Tropical::MaxPlus`,
+- [x] The untied Mamba-3 setting has `Gain::KalmanProjectedNoise` and `Tropical::MaxPlus`,
       and it unties `KalmanKappa`, `KalmanRead` and `TropicalReadout`.
-- [ ] Each block contract passes on that setting, on `flex`.
-- [ ] A test checks the panic of each of the three untie choices without its tensor.
-- [ ] Each break of the red check fails its test, and each break is reverted.
-- [ ] The header of the contract tests names what the untied Mamba-3 setting unties.
-- [ ] `cargo test --lib -- --test-threads=1` passes on `flex`. `scripts/check.sh` passes.
+- [x] Each block contract passes on that setting, on `flex`.
+- [x] A test checks the panic of each of the three untie choices without its tensor.
+- [x] Each break of the red check fails its test, and each break is reverted.
+- [x] The header of the contract tests names what the untied Mamba-3 setting unties.
+- [x] `cargo test --lib -- --test-threads=1` passes on `flex`. `scripts/check.sh` passes.
 
 ## Comments
 
@@ -70,3 +70,45 @@ the user. Do not remove a tensor from the setting to make it pass.
 - The untied tail of the in-projection starts at `dd_dt`. With
   `Gain::KalmanProjectedNoise` and `Tropical::MaxPlus`, it also holds the groups
   `KalmanNoise`, `TropicalA` and `TropicalB` of the layout table.
+
+### The implementation
+
+- `src/family/tests/block_contract.rs`: the untied Mamba-3 setting has the gain, the
+  register and the three untie choices. Its name also gives the gain and the register.
+  Each block contract passes on it, on `flex`. The family code did not change.
+- `src/family/tests/untied.rs`: the test `mamba3_untie_choice_without_its_tensor_panics`.
+  It compares the full text of each panic with the message of its config check.
+
+### The red check
+
+One run with two temporary breaks in `src/mamba3/mamba3.rs`, reverted after the run:
+
+| Break | Test that fails | Line of the failure |
+|---|---|---|
+| `Mamba3::untied_params` gives no parameter for `KalmanKappa` | `untied_stack_equals_the_stack_of_its_application_views` | `Mamba-3, untied, …, KalmanProjectedNoise, MaxPlus`: the parameter `kalman_log_kappa_h` is not named |
+| The config check of `TropicalReadout` is gone | `mamba3_untie_choice_without_its_tensor_panics` | `TropicalReadout: the init does not panic` |
+
+The untied contract gave one line, for the untied Mamba-3 setting, and no line for the
+other settings.
+
+### The review
+
+Two reports: `tmp/untied-kalman-tropical/review-standards.md` and
+`tmp/untied-kalman-tropical/review-spec.md`. The fixes:
+
+- The headers of `untied.rs` and of `src/family/tests/mod.rs` name the checks of the
+  Kalman gain and of the tropical register. The test does not check the other config
+  checks of the untie list.
+- The header of `block_contract.rs` writes "channel group" (`GLOSSARY.md`).
+- A failure of the panic test gives the panic text, not an `Option`.
+
+Not changed:
+
+- The panic test compares the full text of each message, as this ticket asks ("with the
+  message of its config check"). A change of a message then also changes the test.
+- `panic_message` of `block_contract.rs` repeats `panic_text` of burn-stack. It is
+  outside this ticket.
+- The untied setting has no double-SSD twin. So no contract runs the Kalman gain and
+  the tropical register on the double-SSD pathway with untied copies.
+- The Muon contract checks the width of the tiled spec of the tail, not the order of its
+  groups.
