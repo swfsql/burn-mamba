@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["Mamba3Cache","Mamba3Caches","Mamba3FrameCache","TapFifo"]};
+window.SIDEBAR_ITEMS = {"struct":["Mamba3Cache","Mamba3FrameCache","TapFifo"]};

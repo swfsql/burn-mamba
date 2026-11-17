@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["Mamba2Cache","Mamba2Caches"]};
+window.SIDEBAR_ITEMS = {"struct":["Mamba2Cache"]};

@@ -7,14 +7,14 @@
 <a href=#7 id=7 data-nosnippet>7</a>//! fills `Block` (`docs/adr/0009-family-choice-at-the-block.md`). So the
 <a href=#8 id=8 data-nosnippet>8</a>//! containers need no enum of their own. [`MambaLatentNet`], [`MambaVocabNet`],
 <a href=#9 id=9 data-nosnippet>9</a>//! [`MambaBidiLayers`] and [`MambaHNetVocabNet`] are type aliases, and each has
-<a href=#10 id=10 data-nosnippet>10</a>//! a `{ shape, block }` config in [`config`]. [`MambaCaches`] is a flat list of
-<a href=#11 id=11 data-nosnippet>11</a>//! slots, and [`MambaScanOptions`] is the `Options` of the enum. A cache or
-<a href=#12 id=12 data-nosnippet>12</a>//! scan options of the wrong family panic.
+<a href=#10 id=10 data-nosnippet>10</a>//! a `{ shape, block }` config in [`config`]. The caches of a layer stack are a
+<a href=#11 id=11 data-nosnippet>11</a>//! `Vec&lt;MambaCache&gt;`, and [`MambaScanOptions`] is the `Options` of the enum. A
+<a href=#12 id=12 data-nosnippet>12</a>//! cache or scan options of the wrong family panic.
 <a href=#13 id=13 data-nosnippet>13</a>//!
 <a href=#14 id=14 data-nosnippet>14</a>//! This is also where the three families meet the generic stack: the
-<a href=#15 id=15 data-nosnippet>15</a>//! `impl Block for Mamba{1,2,3}`, `impl BlockConfig for Mamba{1,2,3}Config` and
-<a href=#16 id=16 data-nosnippet>16</a>//! `impl CacheStack for Mamba{1,2,3}Caches` blocks are in [`adapters`]. The
-<a href=#17 id=17 data-nosnippet>17</a>//! cache traversal of each family is in [`cache_traversal`].
+<a href=#15 id=15 data-nosnippet>15</a>//! `impl Block for Mamba{1,2,3}` and `impl BlockConfig for Mamba{1,2,3}Config`
+<a href=#16 id=16 data-nosnippet>16</a>//! blocks are in [`adapters`]. The cache traversal of each family is in
+<a href=#17 id=17 data-nosnippet>17</a>//! [`cache_traversal`].
 <a href=#18 id=18 data-nosnippet>18</a>//!
 <a href=#19 id=19 data-nosnippet>19</a>//! ## Muon: why the 3-D tensors are not "stacked matrices"
 <a href=#20 id=20 data-nosnippet>20</a>//!
@@ -55,9 +55,9 @@
 <a href=#55 id=55 data-nosnippet>55</a>
 <a href=#56 id=56 data-nosnippet>56</a></span><span class="kw">use </span>burn::config::Config;
 <a href=#57 id=57 data-nosnippet>57</a>
-<a href=#58 id=58 data-nosnippet>58</a><span class="doccomment">/// The `Block` / `BlockConfig` / `CacheStack` impls of each family.
+<a href=#58 id=58 data-nosnippet>58</a><span class="doccomment">/// The `Block` / `BlockConfig` impls of each family.
 <a href=#59 id=59 data-nosnippet>59</a></span><span class="kw">pub mod </span>adapters;
-<a href=#60 id=60 data-nosnippet>60</a><span class="doccomment">/// [`MambaBlock`], its caches, and the type aliases of the containers.
+<a href=#60 id=60 data-nosnippet>60</a><span class="doccomment">/// [`MambaBlock`], its cache, and the type aliases of the containers.
 <a href=#61 id=61 data-nosnippet>61</a></span><span class="attr">#[cfg(any(feature = <span class="string">"mamba1"</span>, feature = <span class="string">"mamba2"</span>, feature = <span class="string">"mamba3"</span>))]
 <a href=#62 id=62 data-nosnippet>62</a></span><span class="kw">pub mod </span>block;
 <a href=#63 id=63 data-nosnippet>63</a><span class="doccomment">/// The cache traversal of each family: the one list of the tensors of each
@@ -69,49 +69,48 @@
 <a href=#69 id=69 data-nosnippet>69</a>
 <a href=#70 id=70 data-nosnippet>70</a><span class="attr">#[cfg(any(feature = <span class="string">"mamba1"</span>, feature = <span class="string">"mamba2"</span>, feature = <span class="string">"mamba3"</span>))]
 <a href=#71 id=71 data-nosnippet>71</a></span><span class="kw">pub use </span>block::{
-<a href=#72 id=72 data-nosnippet>72</a>    MambaBidiLayers, MambaBlock, MambaCache, MambaCaches, MambaHNetVocabNet, MambaLatentNet,
-<a href=#73 id=73 data-nosnippet>73</a>    MambaVocabNet,
-<a href=#74 id=74 data-nosnippet>74</a>};
-<a href=#75 id=75 data-nosnippet>75</a><span class="attr">#[cfg(any(feature = <span class="string">"mamba1"</span>, feature = <span class="string">"mamba2"</span>, feature = <span class="string">"mamba3"</span>))]
-<a href=#76 id=76 data-nosnippet>76</a></span><span class="kw">pub use </span>config::{
-<a href=#77 id=77 data-nosnippet>77</a>    MambaBidiLayersConfig, MambaBlockConfig, MambaHNetVocabNetConfig, MambaLatentNetConfig,
-<a href=#78 id=78 data-nosnippet>78</a>    MambaVocabNetConfig,
-<a href=#79 id=79 data-nosnippet>79</a>};
-<a href=#80 id=80 data-nosnippet>80</a>
-<a href=#81 id=81 data-nosnippet>81</a><span class="attr">#[cfg(all(test, feature = <span class="string">"_dev-test"</span>))]
-<a href=#82 id=82 data-nosnippet>82</a></span><span class="kw">mod </span>tests;
-<a href=#83 id=83 data-nosnippet>83</a>
-<a href=#84 id=84 data-nosnippet>84</a><span class="doccomment">/// The scan options of a block, tagged with its family.
-<a href=#85 id=85 data-nosnippet>85</a>///
-<a href=#86 id=86 data-nosnippet>86</a>/// Each variant holds the scan options of its family, so a caller can choose
-<a href=#87 id=87 data-nosnippet>87</a>/// the SSD path and the chunk length explicitly. The `*_default`
-<a href=#88 id=88 data-nosnippet>88</a>/// constructors give the default scan options of the family, without making
-<a href=#89 id=89 data-nosnippet>89</a>/// them the *only* choice.
-<a href=#90 id=90 data-nosnippet>90</a></span><span class="attr">#[derive(Config, Debug)]
-<a href=#91 id=91 data-nosnippet>91</a></span><span class="kw">pub enum </span>MambaScanOptions {
-<a href=#92 id=92 data-nosnippet>92</a>    <span class="doccomment">/// Mamba-1 has no SSD chunking, so it has no scan options.
-<a href=#93 id=93 data-nosnippet>93</a>    </span><span class="attr">#[cfg(feature = <span class="string">"mamba1"</span>)]
-<a href=#94 id=94 data-nosnippet>94</a>    </span>Mamba1,
-<a href=#95 id=95 data-nosnippet>95</a>    <span class="doccomment">/// The scan options of Mamba-2.
-<a href=#96 id=96 data-nosnippet>96</a>    </span><span class="attr">#[cfg(feature = <span class="string">"mamba2"</span>)]
-<a href=#97 id=97 data-nosnippet>97</a>    </span>Mamba2(<span class="kw">crate</span>::mamba2::prelude::Mamba2ScanOptions),
-<a href=#98 id=98 data-nosnippet>98</a>    <span class="doccomment">/// The scan options of Mamba-3.
-<a href=#99 id=99 data-nosnippet>99</a>    </span><span class="attr">#[cfg(feature = <span class="string">"mamba3"</span>)]
-<a href=#100 id=100 data-nosnippet>100</a>    </span>Mamba3(<span class="kw">crate</span>::mamba3::prelude::Mamba3ScanOptions),
-<a href=#101 id=101 data-nosnippet>101</a>}
-<a href=#102 id=102 data-nosnippet>102</a>
-<a href=#103 id=103 data-nosnippet>103</a><span class="kw">impl </span>MambaScanOptions {
-<a href=#104 id=104 data-nosnippet>104</a>    <span class="doccomment">/// The default scan options of Mamba-2 (`SerialRecalculated`, optimal
-<a href=#105 id=105 data-nosnippet>105</a>    /// chunk).
-<a href=#106 id=106 data-nosnippet>106</a>    </span><span class="attr">#[cfg(feature = <span class="string">"mamba2"</span>)]
-<a href=#107 id=107 data-nosnippet>107</a>    </span><span class="kw">pub fn </span>mamba2_default() -&gt; <span class="self">Self </span>{
-<a href=#108 id=108 data-nosnippet>108</a>        <span class="self">Self</span>::Mamba2(Default::default())
-<a href=#109 id=109 data-nosnippet>109</a>    }
-<a href=#110 id=110 data-nosnippet>110</a>    <span class="doccomment">/// The default scan options of Mamba-3 (`SerialRecalculated`, optimal
-<a href=#111 id=111 data-nosnippet>111</a>    /// chunk).
-<a href=#112 id=112 data-nosnippet>112</a>    </span><span class="attr">#[cfg(feature = <span class="string">"mamba3"</span>)]
-<a href=#113 id=113 data-nosnippet>113</a>    </span><span class="kw">pub fn </span>mamba3_default() -&gt; <span class="self">Self </span>{
-<a href=#114 id=114 data-nosnippet>114</a>        <span class="self">Self</span>::Mamba3(Default::default())
-<a href=#115 id=115 data-nosnippet>115</a>    }
-<a href=#116 id=116 data-nosnippet>116</a>}
+<a href=#72 id=72 data-nosnippet>72</a>    MambaBidiLayers, MambaBlock, MambaCache, MambaHNetVocabNet, MambaLatentNet, MambaVocabNet,
+<a href=#73 id=73 data-nosnippet>73</a>};
+<a href=#74 id=74 data-nosnippet>74</a><span class="attr">#[cfg(any(feature = <span class="string">"mamba1"</span>, feature = <span class="string">"mamba2"</span>, feature = <span class="string">"mamba3"</span>))]
+<a href=#75 id=75 data-nosnippet>75</a></span><span class="kw">pub use </span>config::{
+<a href=#76 id=76 data-nosnippet>76</a>    MambaBidiLayersConfig, MambaBlockConfig, MambaHNetVocabNetConfig, MambaLatentNetConfig,
+<a href=#77 id=77 data-nosnippet>77</a>    MambaVocabNetConfig,
+<a href=#78 id=78 data-nosnippet>78</a>};
+<a href=#79 id=79 data-nosnippet>79</a>
+<a href=#80 id=80 data-nosnippet>80</a><span class="attr">#[cfg(all(test, feature = <span class="string">"_dev-test"</span>))]
+<a href=#81 id=81 data-nosnippet>81</a></span><span class="kw">mod </span>tests;
+<a href=#82 id=82 data-nosnippet>82</a>
+<a href=#83 id=83 data-nosnippet>83</a><span class="doccomment">/// The scan options of a block, tagged with its family.
+<a href=#84 id=84 data-nosnippet>84</a>///
+<a href=#85 id=85 data-nosnippet>85</a>/// Each variant holds the scan options of its family, so a caller can choose
+<a href=#86 id=86 data-nosnippet>86</a>/// the SSD path and the chunk length explicitly. The `*_default`
+<a href=#87 id=87 data-nosnippet>87</a>/// constructors give the default scan options of the family, without making
+<a href=#88 id=88 data-nosnippet>88</a>/// them the *only* choice.
+<a href=#89 id=89 data-nosnippet>89</a></span><span class="attr">#[derive(Config, Debug)]
+<a href=#90 id=90 data-nosnippet>90</a></span><span class="kw">pub enum </span>MambaScanOptions {
+<a href=#91 id=91 data-nosnippet>91</a>    <span class="doccomment">/// Mamba-1 has no SSD chunking, so it has no scan options.
+<a href=#92 id=92 data-nosnippet>92</a>    </span><span class="attr">#[cfg(feature = <span class="string">"mamba1"</span>)]
+<a href=#93 id=93 data-nosnippet>93</a>    </span>Mamba1,
+<a href=#94 id=94 data-nosnippet>94</a>    <span class="doccomment">/// The scan options of Mamba-2.
+<a href=#95 id=95 data-nosnippet>95</a>    </span><span class="attr">#[cfg(feature = <span class="string">"mamba2"</span>)]
+<a href=#96 id=96 data-nosnippet>96</a>    </span>Mamba2(<span class="kw">crate</span>::mamba2::prelude::Mamba2ScanOptions),
+<a href=#97 id=97 data-nosnippet>97</a>    <span class="doccomment">/// The scan options of Mamba-3.
+<a href=#98 id=98 data-nosnippet>98</a>    </span><span class="attr">#[cfg(feature = <span class="string">"mamba3"</span>)]
+<a href=#99 id=99 data-nosnippet>99</a>    </span>Mamba3(<span class="kw">crate</span>::mamba3::prelude::Mamba3ScanOptions),
+<a href=#100 id=100 data-nosnippet>100</a>}
+<a href=#101 id=101 data-nosnippet>101</a>
+<a href=#102 id=102 data-nosnippet>102</a><span class="kw">impl </span>MambaScanOptions {
+<a href=#103 id=103 data-nosnippet>103</a>    <span class="doccomment">/// The default scan options of Mamba-2 (`SerialRecalculated`, optimal
+<a href=#104 id=104 data-nosnippet>104</a>    /// chunk).
+<a href=#105 id=105 data-nosnippet>105</a>    </span><span class="attr">#[cfg(feature = <span class="string">"mamba2"</span>)]
+<a href=#106 id=106 data-nosnippet>106</a>    </span><span class="kw">pub fn </span>mamba2_default() -&gt; <span class="self">Self </span>{
+<a href=#107 id=107 data-nosnippet>107</a>        <span class="self">Self</span>::Mamba2(Default::default())
+<a href=#108 id=108 data-nosnippet>108</a>    }
+<a href=#109 id=109 data-nosnippet>109</a>    <span class="doccomment">/// The default scan options of Mamba-3 (`SerialRecalculated`, optimal
+<a href=#110 id=110 data-nosnippet>110</a>    /// chunk).
+<a href=#111 id=111 data-nosnippet>111</a>    </span><span class="attr">#[cfg(feature = <span class="string">"mamba3"</span>)]
+<a href=#112 id=112 data-nosnippet>112</a>    </span><span class="kw">pub fn </span>mamba3_default() -&gt; <span class="self">Self </span>{
+<a href=#113 id=113 data-nosnippet>113</a>        <span class="self">Self</span>::Mamba3(Default::default())
+<a href=#114 id=114 data-nosnippet>114</a>    }
+<a href=#115 id=115 data-nosnippet>115</a>}
 </code></pre></div></section></main></body></html>
