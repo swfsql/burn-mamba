@@ -1,9 +1,12 @@
 //! # Mamba-2 Inference Caches
 //!
-//! The state that the block keeps between calls. In *training* or *prefill*,
-//! the full sequence is available at once and [`Mamba2::forward`] uses the
-//! chunked SSD algorithm. In *decoding*, [`Mamba2::step`] processes one token
-//! per call with the pure recurrent form:
+//! [`Mamba2Cache`] is the state that one block keeps between calls. The caches
+//! of a layer stack are a `Vec<Mamba2Cache>`, with one cache for each virtual
+//! layer.
+//!
+//! In *training* or *prefill*, the full sequence is available at once and
+//! [`Mamba2::forward`] uses the chunked SSD algorithm. In *decoding*,
+//! [`Mamba2::step`] processes one token per call with the pure recurrent form:
 //!
 //! ```text
 //!   hₜ = Āₜ hₜ₋₁ + B̄ₜ xₜ        (state update)
@@ -28,25 +31,6 @@ use crate::mamba2::prelude::*;
 use burn_stack::modules::sanity as san;
 use burn::module::Module;
 use burn::prelude::*;
-
-// ---------------------------------------------------------------------------
-// Mamba2Caches  (one cache entry per layer)
-// ---------------------------------------------------------------------------
-
-/// A collection of per-layer caches for a complete Mamba-2 network.
-///
-/// Every `step` of the family-generic [`burn_stack::modules::Layers`] stack
-/// takes and returns one [`Mamba2Caches`]. Each element of `caches` is the
-/// cache of one (virtual) layer of the network.
-#[derive(Module, Debug)]
-pub struct Mamba2Caches {
-    /// Per-layer caches.
-    ///
-    /// Length: `n_caches`, the number of *virtual* layers. With shared weights
-    /// (a layer schedule), it can be larger than the number of *real* weight
-    /// layers.
-    pub caches: Vec<Mamba2Cache>,
-}
 
 // ---------------------------------------------------------------------------
 // Mamba2Cache  (cache for a single block)

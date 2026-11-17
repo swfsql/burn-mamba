@@ -17,9 +17,8 @@ pathway.
 
 - **A cache type for each pathway**: the type of the cache selects the pathway.
   It stops a mix of the two accumulators in the middle of a sequence, but no
-  caller can reach that mix. It costs a guess of the pathway in `from_slots`,
-  the `From` conversions between the two types, and block contracts that cannot
-  reach double-SSD.
+  caller can reach that mix. It costs the `From` conversions between the two
+  types, and block contracts that cannot reach double-SSD.
 
 ## Consequences
 

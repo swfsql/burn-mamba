@@ -1,8 +1,8 @@
 //! # The Mamba-3 cache
 //!
-//! [`Mamba3Cache`] is the cache that one Mamba-3 block keeps between calls.
-//! [`Mamba3Caches`] holds one cache for each (virtual) layer of a stack.
-//! [`Mamba3::zero_cache`] builds the cache of a fresh sequence.
+//! [`Mamba3Cache`] is the cache that one block keeps between calls. The caches
+//! of a layer stack are a `Vec<Mamba3Cache>`, with one cache for each virtual
+//! layer. [`Mamba3::zero_cache`] builds the cache of a fresh sequence.
 //!
 //! A cache holds:
 //!
@@ -50,24 +50,6 @@
 use crate::mamba3::mamba3::Mamba3;
 use burn::prelude::*;
 use burn_stack::modules::sanity as san;
-
-// ---------------------------------------------------------------------------
-// The caches of a stack
-// ---------------------------------------------------------------------------
-
-/// The caches of a stack of Mamba-3 blocks.
-///
-/// Every `step` of the family-generic [`burn_stack::modules::Layers`] stack
-/// takes and returns one [`Mamba3Caches`]. Each element of `caches` is the
-/// cache of one (virtual) layer of the network.
-#[derive(Module, Debug)]
-pub struct Mamba3Caches {
-    /// The cache of each layer.
-    ///
-    /// Length: the number of *virtual* layers. With shared weights (a layer
-    /// schedule), it can be larger than the number of *real* weight layers.
-    pub caches: Vec<Mamba3Cache>,
-}
 
 // ---------------------------------------------------------------------------
 // The cache of one block

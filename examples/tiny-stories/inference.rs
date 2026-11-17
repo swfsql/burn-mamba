@@ -33,7 +33,7 @@ use crate::AppArgs;
 use crate::dataset::{VOCAB, pair};
 use crate::training::Run;
 use burn::prelude::*;
-use burn_mamba::prelude::{MambaCaches, MambaVocabNet, MambaVocabNetConfig};
+use burn_mamba::prelude::{MambaCache, MambaVocabNet, MambaVocabNetConfig};
 use burn_stack::examples::tiny_stories::sample::{Prefill, decode};
 use burn_stack::utils::ClassCursors;
 use rand::SeedableRng;
@@ -173,7 +173,7 @@ pub fn generate(
     n_chars: usize,
     temperature: f64,
     seed: u64,
-    prefill: Option<&mut Prefill<'_, MambaCaches>>,
+    prefill: Option<&mut Prefill<'_, Vec<MambaCache>>>,
 ) -> String {
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     let tokens = prompt.map(|prompt| {
@@ -223,8 +223,8 @@ fn open(
     run: &Run,
     device: &Device,
     prompt: Option<&[u8]>,
-    prefill: Option<&mut Prefill<'_, MambaCaches>>,
-) -> (Tensor<2>, MambaCaches, ClassCursors) {
+    prefill: Option<&mut Prefill<'_, Vec<MambaCache>>>,
+) -> (Tensor<2>, Vec<MambaCache>, ClassCursors) {
     // One story: the cursors open the sequence here and are threaded through
     // every call below, so the latents are emitted once.
     let mut class = ClassCursors::stream();
@@ -280,7 +280,7 @@ const PREFILL_WINDOW: usize = 256;
 /// A [`Prefill`] of `model` in windows of [`PREFILL_WINDOW`], captured unless
 /// `--eager`. Hold it across prompts: they share its opening and its
 /// recording.
-pub fn prefill<'a>(model: &'a MambaVocabNet, run: &Run, device: &Device) -> Prefill<'a, MambaCaches> {
+pub fn prefill<'a>(model: &'a MambaVocabNet, run: &Run, device: &Device) -> Prefill<'a, Vec<MambaCache>> {
     let scan_options = run.scan_options.clone();
     // Safety: the window reads only its arguments, `model` (borrowed for as long
     // as the prefill lives), and `scan_options`, which it owns.

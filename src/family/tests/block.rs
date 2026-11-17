@@ -2,7 +2,7 @@
 //!
 //! - the derives, the records and the path segment of a variant,
 //! - exact outputs, and the class markers through the enum,
-//! - the empty slots of the flat caches, and the zero cache of Mamba-3,
+//! - the zero cache of Mamba-3,
 //! - an H-Net with stages of one family and a main stack of another,
 //! - the mismatch panics and the mixed-stack rule.
 //!
@@ -185,24 +185,27 @@ fn block_output_is_exact() {
     {
         let block = BlockConfig::init_block(&m1(), 1, &device);
         let tagged = MambaBlock::Mamba1(block.clone());
-        let (want, _) = block.block_forward(x.clone(), None, (), None);
-        let (got, _) = tagged.block_forward(x.clone(), None, MambaScanOptions::Mamba1, None);
+        let (want, _) = block.block_forward(x.clone(), block.zero_cache(2, &device), (), None);
+        let (got, _) = tagged.block_forward(x.clone(), tagged.zero_cache(2, &device), MambaScanOptions::Mamba1, None);
         assert_eq!(max_abs_diff(want, got), 0.0);
     }
     #[cfg(feature = "mamba2")]
     {
         let block = BlockConfig::init_block(&m2(), 1, &device);
         let tagged = MambaBlock::Mamba2(block.clone());
-        let (want, _) = block.block_forward(x.clone(), None, Mamba2ScanOptions::default(), None);
-        let (got, _) = tagged.block_forward(x.clone(), None, MambaScanOptions::mamba2_default(), None);
+        let (want, _) =
+            block.block_forward(x.clone(), block.zero_cache(2, &device), Mamba2ScanOptions::default(), None);
+        let (got, _) =
+            tagged.block_forward(x.clone(), tagged.zero_cache(2, &device), MambaScanOptions::mamba2_default(), None);
         assert_eq!(max_abs_diff(want, got), 0.0);
     }
     #[cfg(feature = "mamba3")]
     {
         let block = BlockConfig::init_block(&m3(), 1, &device);
         let tagged = MambaBlock::Mamba3(block.clone());
-        let (want, _) = block.block_forward(x.clone(), None, Mamba3ScanOptions::default(), None);
-        let (got, _) = tagged.block_forward(x, None, MambaScanOptions::mamba3_default(), None);
+        let (want, _) =
+            block.block_forward(x.clone(), block.zero_cache(2, &device), Mamba3ScanOptions::default(), None);
+        let (got, _) = tagged.block_forward(x, tagged.zero_cache(2, &device), MambaScanOptions::mamba3_default(), None);
         assert_eq!(max_abs_diff(want, got), 0.0);
     }
 }
@@ -238,15 +241,6 @@ fn network_output_and_gradients_are_exact() {
 // ---------------------------------------------------------------------------
 // The caches
 // ---------------------------------------------------------------------------
-
-/// The flat caches hold empty slots. Each slot has its own family tag, so
-/// `from_slots` needs no family for a slot of `None`.
-#[test]
-fn the_flat_caches_keep_empty_slots() {
-    let empty = MambaCaches::from_slots(vec![None, None]);
-    assert_eq!(empty.slot_count(), 2);
-    assert!(empty.into_slots().iter().all(Option::is_none), "a slot of `None` must stay empty");
-}
 
 /// The zero cache of a Mamba-3 block in the enum has the tag of the Mamba-3
 /// family.
@@ -391,7 +385,8 @@ fn mixed_stack_rules() {
     let step = catch_unwind(AssertUnwindSafe(|| net.step(x0.clone(), None, None)));
     assert!(step.is_err(), "a mixed stack must panic at a step with no cache");
 
-    let slots = net.layers.real_layers.iter().map(|layer| Some(layer.block.zero_cache(2, &device))).collect();
-    let (y, _) = net.step(x0, Some(MambaCaches::from_slots(slots)), None);
+    let caches: Vec<MambaCache> =
+        net.layers.real_layers.iter().map(|layer| layer.block.zero_cache(2, &device)).collect();
+    let (y, _) = net.step(x0, Some(caches), None);
     assert_eq!(y.dims(), [2, 5]);
 }

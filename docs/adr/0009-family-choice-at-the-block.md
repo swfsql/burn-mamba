@@ -31,5 +31,5 @@ bidirectional stack or an H-Net varies per family.
   `init` does not check this. `forward` panics on mixed stages, because `Options`
   is one value for all stages. `step` and `prime` take no `Options`, and each
   stage sizes its own zero caches. So they do not enforce the rule.
-- `MambaCaches` is a flat list of slots, and each slot has its family tag. So
-  `CacheStack::from_slots` guesses nothing.
+- The caches of a layer stack are a `Vec<MambaCache>`, and each cache has its
+  family tag.

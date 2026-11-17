@@ -7,14 +7,14 @@
 //! fills `Block` (`docs/adr/0009-family-choice-at-the-block.md`). So the
 //! containers need no enum of their own. [`MambaLatentNet`], [`MambaVocabNet`],
 //! [`MambaBidiLayers`] and [`MambaHNetVocabNet`] are type aliases, and each has
-//! a `{ shape, block }` config in [`config`]. [`MambaCaches`] is a flat list of
-//! slots, and [`MambaScanOptions`] is the `Options` of the enum. A cache or
-//! scan options of the wrong family panic.
+//! a `{ shape, block }` config in [`config`]. The caches of a layer stack are a
+//! `Vec<MambaCache>`, and [`MambaScanOptions`] is the `Options` of the enum. A
+//! cache or scan options of the wrong family panic.
 //!
 //! This is also where the three families meet the generic stack: the
-//! `impl Block for Mamba{1,2,3}`, `impl BlockConfig for Mamba{1,2,3}Config` and
-//! `impl CacheStack for Mamba{1,2,3}Caches` blocks are in [`adapters`]. The
-//! cache traversal of each family is in [`cache_traversal`].
+//! `impl Block for Mamba{1,2,3}` and `impl BlockConfig for Mamba{1,2,3}Config`
+//! blocks are in [`adapters`]. The cache traversal of each family is in
+//! [`cache_traversal`].
 //!
 //! ## Muon: why the 3-D tensors are not "stacked matrices"
 //!
@@ -55,9 +55,9 @@
 
 use burn::config::Config;
 
-/// The `Block` / `BlockConfig` / `CacheStack` impls of each family.
+/// The `Block` / `BlockConfig` impls of each family.
 pub mod adapters;
-/// [`MambaBlock`], its caches, and the type aliases of the containers.
+/// [`MambaBlock`], its cache, and the type aliases of the containers.
 #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
 pub mod block;
 /// The cache traversal of each family: the one list of the tensors of each
@@ -69,8 +69,7 @@ pub mod config;
 
 #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
 pub use block::{
-    MambaBidiLayers, MambaBlock, MambaCache, MambaCaches, MambaHNetVocabNet, MambaLatentNet,
-    MambaVocabNet,
+    MambaBidiLayers, MambaBlock, MambaCache, MambaHNetVocabNet, MambaLatentNet, MambaVocabNet,
 };
 #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
 pub use config::{

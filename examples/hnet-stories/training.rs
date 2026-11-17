@@ -26,8 +26,8 @@ use burn::{
 use burn_mamba::prelude::*;
 use burn_stack::examples::tiny_stories::lm::{self, Frontier, LmModel, dataloaders_for, epoch_train, epoch_valid};
 use burn_stack::examples::{prof, vram};
-use burn_stack::modules::ModelConfigExt;
 use burn_stack::modules::hnet::{HNetCaches, Routing, StepMode};
+use burn_stack::modules::{ModelConfigExt, cache_detach};
 use burn_stack::utils::ClassCursors;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -272,7 +272,7 @@ impl LmModel for Wrap {
     }
 
     fn detach_caches(caches: Self::Caches) -> Self::Caches {
-        caches.detach()
+        cache_detach(caches)
     }
 
     fn valid_window(

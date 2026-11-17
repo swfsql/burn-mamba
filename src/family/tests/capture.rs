@@ -10,8 +10,6 @@
 //!
 //! The contracts of `block_contract.rs` compare no field directly.
 //! `cache_traversal_moves_every_field` reads the outputs from a moved cache.
-//! `cache_stack_moves_every_slot` compares each pair of slots through the
-//! traversal.
 
 use crate::prelude::*;
 use burn::prelude::*;
@@ -89,20 +87,21 @@ fn owned_buffers_keep_values_and_assign_moves_them() {
     assert_fields("owned", &owned, &first);
     let assigned = owned.assign_in_place(second.clone());
     assert_fields("assigned", &assigned, &second);
-    // The slotted form: the same through `Mamba3Caches`.
-    let stack = |c: Mamba3Cache| Mamba3Caches::from_slots(vec![Some(c)]);
-    let assigned = stack(first.clone())
+    // The stacked form: the same through the caches of a layer stack.
+    let assigned = vec![first.clone()]
         .into_owned_buffers()
-        .assign_in_place(stack(second.clone()));
-    let assigned = assigned.into_slots().pop().flatten().unwrap();
-    assert_fields("stacked", &assigned, &second);
-    // The same through the flat caches of the enum.
-    let flat = |c: Mamba3Cache| MambaCaches::from_slots(vec![Some(MambaCache::Mamba3(c))]);
+        .assign_in_place(vec![second.clone()]);
+    let [assigned] = assigned.as_slice() else {
+        panic!("the caches of the stack must hold one slot");
+    };
+    assert_fields("stacked", assigned, &second);
+    // The same through the caches of the enum.
+    let flat = |c: Mamba3Cache| vec![MambaCache::Mamba3(c)];
     let assigned = flat(first.clone())
         .into_owned_buffers()
         .assign_in_place(flat(second.clone()));
-    let [Some(MambaCache::Mamba3(assigned))] = assigned.slots.as_slice() else {
-        panic!("the flat caches must hold one slot of the Mamba-3 family");
+    let [MambaCache::Mamba3(assigned)] = assigned.as_slice() else {
+        panic!("the caches of the stack must hold one slot of the Mamba-3 family");
     };
     assert_fields("flat", assigned, &second);
 }

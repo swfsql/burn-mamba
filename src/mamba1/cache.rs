@@ -1,9 +1,12 @@
 //! # Mamba-1 Inference Caches
 //!
-//! The state that the block carries between calls. In *training* or
-//! *prefill*, [`Mamba1::forward`] processes the whole sequence at once. In
-//! *decoding*, [`Mamba1::step`] processes one token per call. Both modes carry
-//! the same two pieces of state:
+//! [`Mamba1Cache`] is the state that one block carries between calls. The
+//! caches of a layer stack are a `Vec<Mamba1Cache>`, with one cache for each
+//! virtual layer.
+//!
+//! In *training* or *prefill*, [`Mamba1::forward`] processes the whole
+//! sequence at once. In *decoding*, [`Mamba1::step`] processes one token per
+//! call. Both modes carry the same two pieces of state:
 //!
 //! 1. **Convolution window** — the last `conv_kernel` pre-activation inputs to
 //!    the depthwise Conv1d. With it, each step applies the causal filter
@@ -67,23 +70,4 @@ impl Mamba1 {
         let ssm_bir = Tensor::zeros([batch, d_inner, state_rank], device);
         Mamba1Cache { conv_bik, ssm_bir }
     }
-}
-
-// ---------------------------------------------------------------------------
-// Mamba1Caches  (one cache entry per layer)
-// ---------------------------------------------------------------------------
-
-/// A collection of per-layer caches for a complete Mamba-1 network.
-///
-/// Every `step` of the family-generic [`burn_stack::modules::Layers`] stack
-/// takes and returns one [`Mamba1Caches`]. Each element is the cache of one
-/// (virtual) layer of the network.
-#[derive(Module, Debug)]
-pub struct Mamba1Caches {
-    /// Per-layer caches.
-    ///
-    /// Length: `n_caches`, the number of *virtual* layers. With shared
-    /// weights (a layer schedule), it can be larger than the number of *real*
-    /// weight layers.
-    pub caches: Vec<Mamba1Cache>,
 }

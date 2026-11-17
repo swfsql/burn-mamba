@@ -12,9 +12,7 @@ use crate::family::MambaScanOptions;
 use burn::prelude::*;
 use burn_stack::modules::bidi::BidiLayers;
 use burn_stack::modules::hnet::HNetVocabNetwork;
-use burn_stack::modules::{
-    Block, CacheStack, CacheTensors, LatentNetwork, TensorZip, VocabNetwork,
-};
+use burn_stack::modules::{Block, CacheTensors, LatentNetwork, TensorZip, VocabNetwork};
 use burn_stack::utils::UntiedParam;
 
 #[cfg(feature = "mamba1")]
@@ -38,7 +36,11 @@ pub enum MambaBlock {
     Mamba3(Mamba3),
 }
 
-/// The cache of one block, tagged with its family.
+/// The cache of one block, tagged with its family. The caches of a layer stack
+/// are a `Vec<MambaCache>`, and each cache has its own family tag.
+///
+/// This is run-time state, and not a `Module`. `forward` and `step` take and
+/// give caches, and no record holds them.
 #[derive(Clone, Debug)]
 pub enum MambaCache {
     /// A Mamba-1 cache.
@@ -50,17 +52,6 @@ pub enum MambaCache {
     /// A Mamba-3 cache.
     #[cfg(feature = "mamba3")]
     Mamba3(Mamba3Cache),
-}
-
-/// The caches of a stack: a flat list of slots. Each slot has its own family
-/// tag.
-///
-/// This is run-time state, and not a `Module`. `forward` and `step` take and
-/// give caches, and no record holds them.
-#[derive(Clone, Debug)]
-pub struct MambaCaches {
-    /// One entry for each virtual layer.
-    pub slots: Vec<Option<MambaCache>>,
 }
 
 /// A latent network over any family.
@@ -133,13 +124,12 @@ fn mamba3_scan_options(scan_options: MambaScanOptions) -> Mamba3ScanOptions {
 
 impl Block for MambaBlock {
     type Cache = MambaCache;
-    type Caches = MambaCaches;
     type Options = MambaScanOptions;
 
     fn block_forward(
         &self,
         x: Tensor<3>,
-        cache: Option<MambaCache>,
+        cache: MambaCache,
         options: MambaScanOptions,
         pad: Option<Tensor<2, Bool>>,
     ) -> (Tensor<3>, MambaCache) {
@@ -147,17 +137,17 @@ impl Block for MambaBlock {
             #[cfg(feature = "mamba1")]
             Self::Mamba1(b) => {
                 check_mamba1_scan_options(options);
-                let (y, c) = b.block_forward(x, cache.map(mamba1_cache), (), pad);
+                let (y, c) = b.block_forward(x, mamba1_cache(cache), (), pad);
                 (y, MambaCache::Mamba1(c))
             }
             #[cfg(feature = "mamba2")]
             Self::Mamba2(b) => {
-                let (y, c) = b.block_forward(x, cache.map(mamba2_cache), mamba2_scan_options(options), pad);
+                let (y, c) = b.block_forward(x, mamba2_cache(cache), mamba2_scan_options(options), pad);
                 (y, MambaCache::Mamba2(c))
             }
             #[cfg(feature = "mamba3")]
             Self::Mamba3(b) => {
-                let (y, c) = b.block_forward(x, cache.map(mamba3_cache), mamba3_scan_options(options), pad);
+                let (y, c) = b.block_forward(x, mamba3_cache(cache), mamba3_scan_options(options), pad);
                 (y, MambaCache::Mamba3(c))
             }
         }
@@ -166,7 +156,7 @@ impl Block for MambaBlock {
     fn block_forward_packed(
         &self,
         x: Tensor<3>,
-        cache: Option<MambaCache>,
+        cache: MambaCache,
         options: MambaScanOptions,
         reset: Tensor<2, Bool>,
     ) -> (Tensor<3>, MambaCache) {
@@ -174,19 +164,19 @@ impl Block for MambaBlock {
             #[cfg(feature = "mamba1")]
             Self::Mamba1(b) => {
                 check_mamba1_scan_options(options);
-                let (y, c) = b.block_forward_packed(x, cache.map(mamba1_cache), (), reset);
+                let (y, c) = b.block_forward_packed(x, mamba1_cache(cache), (), reset);
                 (y, MambaCache::Mamba1(c))
             }
             #[cfg(feature = "mamba2")]
             Self::Mamba2(b) => {
                 let (y, c) =
-                    b.block_forward_packed(x, cache.map(mamba2_cache), mamba2_scan_options(options), reset);
+                    b.block_forward_packed(x, mamba2_cache(cache), mamba2_scan_options(options), reset);
                 (y, MambaCache::Mamba2(c))
             }
             #[cfg(feature = "mamba3")]
             Self::Mamba3(b) => {
                 let (y, c) =
-                    b.block_forward_packed(x, cache.map(mamba3_cache), mamba3_scan_options(options), reset);
+                    b.block_forward_packed(x, mamba3_cache(cache), mamba3_scan_options(options), reset);
                 (y, MambaCache::Mamba3(c))
             }
         }
@@ -206,21 +196,21 @@ impl Block for MambaBlock {
         }
     }
 
-    fn block_step(&self, x: Tensor<2>, cache: Option<MambaCache>) -> (Tensor<2>, MambaCache) {
+    fn block_step(&self, x: Tensor<2>, cache: MambaCache) -> (Tensor<2>, MambaCache) {
         match self {
             #[cfg(feature = "mamba1")]
             Self::Mamba1(b) => {
-                let (y, c) = b.block_step(x, cache.map(mamba1_cache));
+                let (y, c) = b.block_step(x, mamba1_cache(cache));
                 (y, MambaCache::Mamba1(c))
             }
             #[cfg(feature = "mamba2")]
             Self::Mamba2(b) => {
-                let (y, c) = b.block_step(x, cache.map(mamba2_cache));
+                let (y, c) = b.block_step(x, mamba2_cache(cache));
                 (y, MambaCache::Mamba2(c))
             }
             #[cfg(feature = "mamba3")]
             Self::Mamba3(b) => {
-                let (y, c) = b.block_step(x, cache.map(mamba3_cache));
+                let (y, c) = b.block_step(x, mamba3_cache(cache));
                 (y, MambaCache::Mamba3(c))
             }
         }
@@ -250,22 +240,6 @@ impl Block for MambaBlock {
     }
 }
 
-impl CacheStack for MambaCaches {
-    type Cache = MambaCache;
-
-    fn slot_count(&self) -> usize {
-        self.slots.len()
-    }
-
-    fn into_slots(self) -> Vec<Option<MambaCache>> {
-        self.slots
-    }
-
-    fn from_slots(slots: Vec<Option<MambaCache>>) -> Self {
-        Self { slots }
-    }
-}
-
 impl CacheTensors for MambaCache {
     fn zip_tensors(self, other: Self, z: &mut impl TensorZip) -> Self {
         match (self, other) {
@@ -278,22 +252,5 @@ impl CacheTensors for MambaCache {
             #[allow(unreachable_patterns)]
             _ => panic!("the two caches differ in family"),
         }
-    }
-}
-
-impl CacheTensors for MambaCaches {
-    fn zip_tensors(self, other: Self, z: &mut impl TensorZip) -> Self {
-        assert_eq!(self.slots.len(), other.slots.len(), "the two caches differ in slot count");
-        let slots = self
-            .slots
-            .into_iter()
-            .zip(other.slots)
-            .map(|pair| match pair {
-                (Some(a), Some(b)) => Some(a.zip_tensors(b, z)),
-                (None, None) => None,
-                _ => panic!("the two caches differ in which slots they hold"),
-            })
-            .collect();
-        Self { slots }
     }
 }

@@ -61,7 +61,6 @@ use super::m2;
 use super::m3;
 use crate::prelude::*;
 use burn_stack::block_contract;
-use burn_stack::modules::CacheTensors;
 use std::any::Any;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -98,8 +97,7 @@ trait Contract {
     fn run<C>(config: &C, options: Options<C>, f32_tol: f32)
     where
         C: BlockConfig + Clone,
-        Options<C>: Clone,
-        <C::Block as Block>::Caches: CacheTensors;
+        Options<C>: Clone;
 }
 
 /// One test for each contract. The test has the name of the contract, and it
@@ -115,7 +113,6 @@ macro_rules! contract_tests {
                 where
                     C: BlockConfig + Clone,
                     Options<C>: Clone,
-                    <C::Block as Block>::Caches: CacheTensors,
                 {
                     block_contract::$contract(config, options, f32_tol);
                 }
@@ -128,13 +125,11 @@ macro_rules! contract_tests {
 contract_tests! {
     forward_equals_step_unrolled,
     forward_splits_into_windows_through_the_cache,
-    zero_cache_equals_no_cache,
     padded_rows_equal_each_row_alone,
     packed_segments_equal_each_segment_alone,
     record_round_trip_keeps_the_block,
     json_round_trip_keeps_the_config,
     cache_traversal_moves_every_field,
-    cache_stack_moves_every_slot,
     untied_stack_equals_the_stack_of_its_application_views,
     cut_keeps_the_outputs_and_the_caches,
     #[cfg(feature = "optim")]
@@ -163,7 +158,6 @@ fn run_on<K: Contract, C>(settings: Vec<Setting<C>>, failures: &mut Vec<String>)
 where
     C: BlockConfig + Clone,
     Options<C>: Clone,
-    <C::Block as Block>::Caches: CacheTensors,
 {
     for setting in settings {
         let Setting { name, config, options, f32_tol } = setting;

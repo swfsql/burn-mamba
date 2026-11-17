@@ -27,7 +27,7 @@ pub mod ssd;
 pub mod prelude {
     use super::*;
     pub use crate::ssd_path::SsdPath;
-    pub use cache::{Mamba2Cache, Mamba2Caches};
+    pub use cache::Mamba2Cache;
     pub use mamba2::{Mamba2, Mamba2Config, Mamba2Untied};
     pub use scan_options::Mamba2ScanOptions;
     pub use ssd::Mamba2BackendExt;

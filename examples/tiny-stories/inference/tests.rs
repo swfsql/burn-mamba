@@ -108,7 +108,7 @@ fn check_decode(
     shifted: &MambaVocabNet,
     run: &Run,
     device: &Device,
-    windowed: &mut Prefill<'_, MambaCaches>,
+    windowed: &mut Prefill<'_, Vec<MambaCache>>,
     tokens: &[u8],
     continuation: &[u8],
     tol: f32,

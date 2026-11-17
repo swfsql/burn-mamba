@@ -20,7 +20,7 @@ use burn_stack::modules::{CacheTensors, TensorZip};
 #[cfg(feature = "mamba1")]
 mod impl_mamba1 {
     use super::*;
-    use crate::mamba1::prelude::{Mamba1Cache, Mamba1Caches};
+    use crate::mamba1::prelude::Mamba1Cache;
 
     impl CacheTensors for Mamba1Cache {
         fn zip_tensors(self, other: Self, z: &mut impl TensorZip) -> Self {
@@ -30,20 +30,12 @@ mod impl_mamba1 {
             }
         }
     }
-
-    impl CacheTensors for Mamba1Caches {
-        fn zip_tensors(self, other: Self, z: &mut impl TensorZip) -> Self {
-            Self {
-                caches: self.caches.zip_tensors(other.caches, z),
-            }
-        }
-    }
 }
 
 #[cfg(feature = "mamba2")]
 mod impl_mamba2 {
     use super::*;
-    use crate::mamba2::prelude::{Mamba2Cache, Mamba2Caches};
+    use crate::mamba2::prelude::Mamba2Cache;
 
     impl CacheTensors for Mamba2Cache {
         fn zip_tensors(self, other: Self, z: &mut impl TensorZip) -> Self {
@@ -53,22 +45,12 @@ mod impl_mamba2 {
             }
         }
     }
-
-    impl CacheTensors for Mamba2Caches {
-        fn zip_tensors(self, other: Self, z: &mut impl TensorZip) -> Self {
-            Self {
-                caches: self.caches.zip_tensors(other.caches, z),
-            }
-        }
-    }
 }
 
 #[cfg(feature = "mamba3")]
 mod impl_mamba3 {
     use super::*;
-    use crate::mamba3::prelude::{
-        Mamba3Cache, Mamba3Caches, Mamba3FrameCache, RotationState, TapFifo,
-    };
+    use crate::mamba3::prelude::{Mamba3Cache, Mamba3FrameCache, RotationState, TapFifo};
 
     /// An optional field: both present or both absent.
     fn zip_option<T: CacheTensors>(a: Option<T>, b: Option<T>, z: &mut impl TensorZip) -> Option<T> {
@@ -116,14 +98,6 @@ mod impl_mamba3 {
             Self {
                 ssm_bhpr: z.zip(self.ssm_bhpr, other.ssm_bhpr),
                 frame: self.frame.zip_tensors(other.frame, z),
-            }
-        }
-    }
-
-    impl CacheTensors for Mamba3Caches {
-        fn zip_tensors(self, other: Self, z: &mut impl TensorZip) -> Self {
-            Self {
-                caches: self.caches.zip_tensors(other.caches, z),
             }
         }
     }

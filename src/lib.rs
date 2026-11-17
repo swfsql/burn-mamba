@@ -79,8 +79,8 @@ pub mod prelude {
     #[cfg(any(feature = "mamba1", feature = "mamba2", feature = "mamba3"))]
     pub use crate::family::{
         MambaBidiLayers, MambaBidiLayersConfig, MambaBlock, MambaBlockConfig, MambaCache,
-        MambaCaches, MambaHNetVocabNet, MambaHNetVocabNetConfig, MambaLatentNet,
-        MambaLatentNetConfig, MambaVocabNet, MambaVocabNetConfig,
+        MambaHNetVocabNet, MambaHNetVocabNetConfig, MambaLatentNet, MambaLatentNetConfig,
+        MambaVocabNet, MambaVocabNetConfig,
     };
     pub use crate::family::MambaScanOptions;
 

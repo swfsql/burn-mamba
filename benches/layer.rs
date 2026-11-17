@@ -319,8 +319,8 @@ fn mamba3_cases(shape: Shape) -> Vec<(&'static str, Mamba3Config)> {
 // Runners
 // ---------------------------------------------------------------------------
 
-/// `forward` on a plain device. No case gives a cache. So each call builds its
-/// zero cache in the timed region, and every case pays the same.
+/// `forward` on a plain device. Each call builds its zero cache in the timed
+/// region, so every case pays the same.
 ///
 /// The bench builds the block, its input and the warm-up *inside* the closure.
 /// Criterion calls the closure only when the case passes its filter. So
@@ -344,7 +344,8 @@ fn run_forward<M, B>(
         let block = build(device);
         let x = input_3d(shape, device);
         let work = || {
-            let (y, _cache) = block.block_forward(x.clone(), None, options.clone(), None);
+            let zero = block.zero_cache(shape.batch, device);
+            let (y, _cache) = block.block_forward(x.clone(), zero, options.clone(), None);
             y
         };
 
@@ -355,7 +356,8 @@ fn run_forward<M, B>(
 }
 
 /// `forward` + `backward` on an autodiff device: one training iteration minus
-/// the optimizer update.
+/// the optimizer update. As in [`run_forward`], each call builds its zero cache
+/// in the timed region.
 fn run_train<M, B>(
     group: &mut BenchmarkGroup<'_, WallTime>,
     name: &str,
@@ -372,7 +374,8 @@ fn run_train<M, B>(
         let block = build(device);
         let x = input_3d(shape, device);
         let work = || {
-            let (y, _cache) = block.block_forward(x.clone(), None, options.clone(), None);
+            let zero = block.zero_cache(shape.batch, device);
+            let (y, _cache) = block.block_forward(x.clone(), zero, options.clone(), None);
             y.powf_scalar(2.0).mean().backward()
         };
 
@@ -384,7 +387,8 @@ fn run_train<M, B>(
 
 /// One decode step, fed by the cache of the previous iteration (so the
 /// recurrence advances, as it does during generation). The first step starts
-/// from no cache.
+/// from the zero cache. The bench builds it before the warm-up, which is not
+/// timed.
 fn run_step<M, B>(
     group: &mut BenchmarkGroup<'_, WallTime>,
     name: &str,
@@ -398,9 +402,9 @@ fn run_step<M, B>(
     group.bench_function(name, |b| {
         let block = build(device);
         let x = input_2d(shape, device);
-        let mut cache = None;
+        let mut cache = Some(block.zero_cache(shape.batch, device));
         let mut work = || {
-            let (y, next) = block.block_step(x.clone(), cache.take());
+            let (y, next) = block.block_step(x.clone(), cache.take().expect("each step stores the cache of the next step"));
             cache = Some(next);
             y
         };

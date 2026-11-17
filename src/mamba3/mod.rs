@@ -90,7 +90,7 @@ pub mod prelude {
     use super::*;
 
     pub use crate::ssd_path::SsdPath;
-    pub use cache::{Mamba3Cache, Mamba3Caches, Mamba3FrameCache, TapFifo};
+    pub use cache::{Mamba3Cache, Mamba3FrameCache, TapFifo};
     pub use mamba3::{Mamba3, Mamba3Config, Mamba3Untied};
     pub use positive::{Gain, Tropical};
     pub use quat_scan::Mamba3QuatScanBackendExt;

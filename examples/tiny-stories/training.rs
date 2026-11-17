@@ -8,9 +8,9 @@
 //! adapts the network to the `TrainStep` / `InferenceStep` of Burn, with a
 //! next-character cross-entropy over **every** position of the window. It also
 //! supplies the `LmModel` interface that the shared loops use, including its
-//! two cache-aware halves. The loops train a *run* of windows, and they carry
-//! [`MambaCaches`] from each window into the next (see "Runs, carried state,
-//! and the frontier" in that module).
+//! two cache-aware halves. The loops train a *run* of windows. They carry the
+//! caches of the network, a `Vec<MambaCache>`, from each window into the next
+//! (see "Runs, carried state, and the frontier" in that module).
 
 pub use crate::common::{
     cli::AppArgs,
@@ -30,6 +30,7 @@ use burn_stack::examples::tiny_stories::lm::{
     self, Frontier, LmModel, dataloaders_for, epoch_train, epoch_valid,
 };
 use burn_stack::examples::{prof, vram};
+use burn_stack::modules::cache_detach;
 use burn_stack::utils::ClassCursors;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -191,7 +192,7 @@ pub struct Wrap(pub MambaVocabNet, pub Run);
 
 impl LmModel for Wrap {
     type Valid = Wrap;
-    type Caches = MambaCaches;
+    type Caches = Vec<MambaCache>;
 
     fn valid(&self) -> Self::Valid {
         Wrap(self.0.valid(), self.1.clone())
@@ -253,7 +254,7 @@ impl LmModel for Wrap {
     }
 
     fn detach_caches(caches: Self::Caches) -> Self::Caches {
-        caches.detach()
+        cache_detach(caches)
     }
 
     fn valid_window(
@@ -324,9 +325,9 @@ impl Wrap {
     pub fn forward_lm(
         &self,
         batch: TinyStoriesBatch,
-        caches: Option<MambaCaches>,
+        caches: Option<Vec<MambaCache>>,
         class: &mut ClassCursors,
-    ) -> (ClassificationOutput, MambaCaches) {
+    ) -> (ClassificationOutput, Vec<MambaCache>) {
         let TinyStoriesBatch {
             inputs,
             targets,

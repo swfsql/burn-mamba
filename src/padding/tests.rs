@@ -318,7 +318,7 @@ fn padded_mamba3_network_closes_each_row_at_its_own_end() {
             1,
         );
         assert_close(y_own, y_b, VAL_TOL, &format!("row {b}'s positions"));
-        for (l, (c, c_b)) in caches.caches.iter().zip(&caches_b.caches).enumerate() {
+        for (l, (c, c_b)) in caches.iter().zip(&caches_b).enumerate() {
             for (k, (f, f_b)) in mamba3_fields!(c).into_iter().zip(mamba3_fields!(c_b)).enumerate() {
                 let what = format!("row {b}, layer {l}, cache field {k}");
                 assert_close(f.narrow(0, b, 1), f_b, VAL_TOL, &what);

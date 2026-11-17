@@ -1,8 +1,8 @@
 //! The place where each family connects to the block-generic stack: `impl
-//! Block`, `impl BlockConfig`, `impl CacheStack`.
+//! Block` and `impl BlockConfig`.
 //!
-//! Each `CacheStack` impl holds only the slot logic of its family. The backend
-//! hop of a cache follows from its cache traversal in
+//! A block always gets a cache. Each `Block` call gives `Some(cache)` to the
+//! family API. The backend hop of a cache follows from its cache traversal in
 //! [`crate::family::cache_traversal`].
 //!
 //! Three trait methods have the name of an inherent method of their family:
@@ -13,46 +13,30 @@
 //! method, but it reads like an endless recursion.
 
 use burn::prelude::*;
-use burn_stack::modules::{Block, BlockConfig, CacheStack};
+use burn_stack::modules::{Block, BlockConfig};
 use burn_stack::utils::UntiedParam;
 
 #[cfg(feature = "mamba1")]
 mod impl_mamba1 {
     use super::*;
-    use crate::mamba1::prelude::{Mamba1, Mamba1Cache, Mamba1Caches, Mamba1Config};
-
-    impl CacheStack for Mamba1Caches {
-        type Cache = Mamba1Cache;
-        fn slot_count(&self) -> usize {
-            self.caches.len()
-        }
-        fn into_slots(self) -> Vec<Option<Mamba1Cache>> {
-            self.caches.into_iter().map(Some).collect()
-        }
-        fn from_slots(slots: Vec<Option<Mamba1Cache>>) -> Self {
-            Self {
-                caches: slots.into_iter().map(Option::unwrap).collect(),
-            }
-        }
-    }
+    use crate::mamba1::prelude::{Mamba1, Mamba1Cache, Mamba1Config};
 
     impl Block for Mamba1 {
         type Cache = Mamba1Cache;
-        type Caches = Mamba1Caches;
         /// Mamba-1 has no SSD chunking, so it has no scan options.
         type Options = ();
 
         fn block_forward(
             &self,
             x: Tensor<3>,
-            cache: Option<Mamba1Cache>,
+            cache: Mamba1Cache,
             _options: (),
             pad: Option<Tensor<2, Bool>>,
         ) -> (Tensor<3>, Mamba1Cache) {
-            self.forward(x, cache, pad)
+            self.forward(x, Some(cache), pad)
         }
-        fn block_step(&self, x: Tensor<2>, cache: Option<Mamba1Cache>) -> (Tensor<2>, Mamba1Cache) {
-            self.step(x, cache)
+        fn block_step(&self, x: Tensor<2>, cache: Mamba1Cache) -> (Tensor<2>, Mamba1Cache) {
+            self.step(x, Some(cache))
         }
         fn zero_cache(&self, batch: usize, device: &Device) -> Mamba1Cache {
             Mamba1::zero_cache(self, batch, device)
@@ -80,47 +64,31 @@ mod impl_mamba1 {
 #[cfg(feature = "mamba2")]
 mod impl_mamba2 {
     use super::*;
-    use crate::mamba2::prelude::{Mamba2, Mamba2Cache, Mamba2Caches, Mamba2Config, Mamba2ScanOptions};
+    use crate::mamba2::prelude::{Mamba2, Mamba2Cache, Mamba2Config, Mamba2ScanOptions};
     use crate::ssd_path::SsdPath;
-
-    impl CacheStack for Mamba2Caches {
-        type Cache = Mamba2Cache;
-        fn slot_count(&self) -> usize {
-            self.caches.len()
-        }
-        fn into_slots(self) -> Vec<Option<Mamba2Cache>> {
-            self.caches.into_iter().map(Some).collect()
-        }
-        fn from_slots(slots: Vec<Option<Mamba2Cache>>) -> Self {
-            Self {
-                caches: slots.into_iter().map(Option::unwrap).collect(),
-            }
-        }
-    }
 
     impl Block for Mamba2 {
         type Cache = Mamba2Cache;
-        type Caches = Mamba2Caches;
         type Options = Mamba2ScanOptions;
 
         fn block_forward(
             &self,
             x: Tensor<3>,
-            cache: Option<Mamba2Cache>,
+            cache: Mamba2Cache,
             options: Mamba2ScanOptions,
             pad: Option<Tensor<2, Bool>>,
         ) -> (Tensor<3>, Mamba2Cache) {
-            self.forward(x, cache, options, pad)
+            self.forward(x, Some(cache), options, pad)
         }
         /// A reset only at a chunk start (see [`crate::packing`]).
         fn block_forward_packed(
             &self,
             x: Tensor<3>,
-            cache: Option<Mamba2Cache>,
+            cache: Mamba2Cache,
             options: Mamba2ScanOptions,
             reset: Tensor<2, Bool>,
         ) -> (Tensor<3>, Mamba2Cache) {
-            self.forward_packed(x, cache, None, options, None, Some(reset))
+            self.forward_packed(x, Some(cache), None, options, None, Some(reset))
         }
         /// The chunk length of `options`, in tokens. `None` for
         /// [`SsdPath::Minimal`], which takes no resets.
@@ -131,8 +99,8 @@ mod impl_mamba2 {
                 Some(options.chunk_len_or_optimal(self.state_rank, self.per_head_dim()))
             }
         }
-        fn block_step(&self, x: Tensor<2>, cache: Option<Mamba2Cache>) -> (Tensor<2>, Mamba2Cache) {
-            self.step(x, cache)
+        fn block_step(&self, x: Tensor<2>, cache: Mamba2Cache) -> (Tensor<2>, Mamba2Cache) {
+            self.step(x, Some(cache))
         }
         fn zero_cache(&self, batch: usize, device: &Device) -> Mamba2Cache {
             Mamba2::zero_cache(self, batch, device)
@@ -160,48 +128,32 @@ mod impl_mamba2 {
 #[cfg(feature = "mamba3")]
 mod impl_mamba3 {
     use super::*;
-    use crate::mamba3::prelude::{Mamba3, Mamba3Cache, Mamba3Caches, Mamba3Config, Mamba3ScanOptions};
+    use crate::mamba3::prelude::{Mamba3, Mamba3Cache, Mamba3Config, Mamba3ScanOptions};
     use crate::ssd_path::SsdPath;
-
-    impl CacheStack for Mamba3Caches {
-        type Cache = Mamba3Cache;
-        fn slot_count(&self) -> usize {
-            self.caches.len()
-        }
-        fn into_slots(self) -> Vec<Option<Mamba3Cache>> {
-            self.caches.into_iter().map(Some).collect()
-        }
-        fn from_slots(slots: Vec<Option<Mamba3Cache>>) -> Self {
-            Self {
-                caches: slots.into_iter().map(Option::unwrap).collect(),
-            }
-        }
-    }
 
     impl Block for Mamba3 {
         type Cache = Mamba3Cache;
-        type Caches = Mamba3Caches;
         type Options = Mamba3ScanOptions;
 
         fn block_forward(
             &self,
             x: Tensor<3>,
-            cache: Option<Mamba3Cache>,
+            cache: Mamba3Cache,
             options: Mamba3ScanOptions,
             pad: Option<Tensor<2, Bool>>,
         ) -> (Tensor<3>, Mamba3Cache) {
-            self.forward(x, cache, options, pad)
+            self.forward(x, Some(cache), options, pad)
         }
         /// A reset only at a chunk start: every `chunk_len / micro_steps`
         /// tokens (see [`crate::packing`]).
         fn block_forward_packed(
             &self,
             x: Tensor<3>,
-            cache: Option<Mamba3Cache>,
+            cache: Mamba3Cache,
             options: Mamba3ScanOptions,
             reset: Tensor<2, Bool>,
         ) -> (Tensor<3>, Mamba3Cache) {
-            self.forward_packed(x, cache, None, options, None, Some(reset))
+            self.forward_packed(x, Some(cache), None, options, None, Some(reset))
         }
         /// The chunk length of `options`, in tokens: `chunk_len / micro_steps`.
         /// `None` for [`SsdPath::Minimal`], which takes no resets.
@@ -212,8 +164,8 @@ mod impl_mamba3 {
                 Some(crate::standard_ssd::chunk_tokens(options.chunk_len_or_optimal(self), self.micro_steps))
             }
         }
-        fn block_step(&self, x: Tensor<2>, cache: Option<Mamba3Cache>) -> (Tensor<2>, Mamba3Cache) {
-            self.step(x, cache)
+        fn block_step(&self, x: Tensor<2>, cache: Mamba3Cache) -> (Tensor<2>, Mamba3Cache) {
+            self.step(x, Some(cache))
         }
         fn zero_cache(&self, batch: usize, device: &Device) -> Mamba3Cache {
             Mamba3::zero_cache(self, batch, device)

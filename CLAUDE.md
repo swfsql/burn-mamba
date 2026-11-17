@@ -256,8 +256,8 @@ src/
 │  └─ quat_scan/         quaternion cumulative product, recompute backward
 └─ family/               the run-time family choice (ADR-0009)
    ├─ mod.rs             `MambaScanOptions`, why the MIMO tensors are not Muon matrices
-   ├─ block.rs           `MambaBlock`, `MambaCache`, `MambaCaches`, the network aliases
-   ├─ adapters.rs        `impl Block`/`BlockConfig`/`CacheStack` of each family
+   ├─ block.rs           `MambaBlock`, `MambaCache`, the network aliases
+   ├─ adapters.rs        `impl Block`/`BlockConfig` of each family
    ├─ config.rs          `MambaBlockConfig`, the `{ shape, block }` configs
    ├─ cache_traversal.rs  the cache traversal (`CacheTensors`) of each family: the one list of the tensors (backend hop, captured steps)
    └─ tests/             the block contracts on each block setting (`block_contract.rs`), the tests that only Mamba needs
