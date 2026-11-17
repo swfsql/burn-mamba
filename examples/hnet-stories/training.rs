@@ -110,8 +110,8 @@ pub fn train(
 #[derive(Clone, Debug)]
 pub struct Run {
     /// The scan options of every chunkwise `forward`: (the stages, the main
-    /// stack), from `--ssd-path`, `--ssd-chunk-len`, `--main-ssd-path` and
-    /// `--main-ssd-chunk-len`.
+    /// stack), from `--ssd-path`, `--ssd-chunk-len`, `--pathway`,
+    /// `--main-ssd-path`, `--main-ssd-chunk-len` and `--main-pathway`.
     pub scan_options: (MambaScanOptions, MambaScanOptions),
     /// `--max-vram`, in MiB: the cap of [`vram`], with its cleanups.
     pub max_vram_mib: Option<u64>,

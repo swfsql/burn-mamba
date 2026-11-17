@@ -21,7 +21,7 @@ use burn::prelude::*;
 
 /// MIMO-first input bundle for the merged-form SSD.
 ///
-/// The caller (`Mamba3::forward_single_ssd`) pre-processes all tensors:
+/// The caller (`Mamba3::forward_single_ssd_packed`) pre-processes all tensors:
 ///
 /// - B/C are QK-normed, bias-added, rotated, and expanded to per-head,
 /// - V is the raw, *unscaled* MIMO-expanded value,

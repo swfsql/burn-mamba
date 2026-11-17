@@ -29,7 +29,7 @@
 //! This is the one place where the two pathways do not agree pointwise. They
 //! stay equivalent on **everything that a caller can observe**: the output of
 //! the block and every field of the returned cache. That is all that
-//! `forward_single_ssd` promises. The correction does not apply to the
+//! `forward_single_ssd_packed` promises. The correction does not apply to the
 //! intermediate `y` at the `u−1` write positions per token that the read axis
 //! does not read (and does not compute): partial sums on the way to the read,
 //! never a value that the block returns. The **state** is exact at every

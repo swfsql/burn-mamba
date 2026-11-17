@@ -17,12 +17,11 @@
 //! [`single_ssd`](crate::mamba3::single_ssd) pathway, which stays at one call
 //! for any number of taps and suits a two-tap pattern better.
 //!
-//! `step` always uses this recurrence, for both cache variants.
+//! [`Pathway::DoubleSsd`](crate::mamba3::scan_options::Pathway::DoubleSsd)
+//! in the scan options selects this pathway. `step` has no pathway, and it
+//! always uses this recurrence.
 
-/// The double-SSD cache (state, tap FIFO, rotation, positive-system fields,
-/// and no conv cache).
-pub mod cache;
-/// `forward_double_ssd` / `step_double_ssd` and their step helpers.
+/// The forward of this pathway, `step_double_ssd` and its step helpers.
 pub mod double_ssd;
 /// The standard SSD kernels reused by both the γ and β passes.
 pub mod ssd;
@@ -30,7 +29,6 @@ pub mod ssd;
 /// Public re-exports for the double-SSD pathway.
 pub mod prelude {
     use super::*;
-    pub use cache::{Mamba3DoubleSsdCache, Mamba3DoubleSsdCaches};
     pub use ssd::Mamba3DoubleSsdBackendExt;
     pub use ssd::Mamba3DoubleSsdInput;
 }

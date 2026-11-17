@@ -17,5 +17,5 @@ module has its own tests against its definitions.
 
 ## Consequences
 
-The defaults are the fast forms: the SSD path `SerialRecalculated` in the
-default scan options, and single-SSD when the caller gives no cache.
+The defaults are the fast forms: the default scan options give the SSD path
+`SerialRecalculated` and the pathway single-SSD.

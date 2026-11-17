@@ -15,10 +15,10 @@
 //! It adds the things that must be *here*, in the example crate:
 //!
 //! - [`ARTIFACT_PREFIX`], the one constant that must expand in this crate.
-//! - [`parse_rotation`], [`parse_ssd_path`] and [`parse_ssd_chunk_len`], the
-//!   parsers of the flags of the rotation and of the scan options. These flags
-//!   are specific to Mamba. `burn-stack` is family-agnostic, so it cannot have
-//!   these parsers.
+//! - [`parse_rotation`], [`parse_ssd_path`], [`parse_ssd_chunk_len`] and
+//!   [`parse_pathway`], the parsers of the flags of the rotation and of the
+//!   scan options. These flags are specific to Mamba. `burn-stack` is
+//!   family-agnostic, so it cannot have these parsers.
 //!
 //! It also holds two measures that the two TinyStories examples of this crate
 //! (`tiny-stories`, `hnet-stories`) share: [`context`] (the context use) and
@@ -79,6 +79,17 @@ pub fn parse_ssd_path(arg: &str) -> Result<burn_mamba::prelude::SsdPath, String>
         "serial" => Ok(SsdPath::Serial),
         "minimal" => Ok(SsdPath::Minimal),
         other => Err(format!("unknown SSD path {other:?} (recalc | serial | minimal)")),
+    }
+}
+
+/// A `--pathway <p>` value (`single | double`), for
+/// `pico_args::Arguments::opt_value_from_fn`.
+pub fn parse_pathway(arg: &str) -> Result<burn_mamba::prelude::Pathway, String> {
+    use burn_mamba::prelude::Pathway;
+    match arg {
+        "single" => Ok(Pathway::SingleSsd),
+        "double" => Ok(Pathway::DoubleSsd),
+        other => Err(format!("unknown pathway {other:?} (single | double)")),
     }
 }
 

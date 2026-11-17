@@ -1,27 +1,57 @@
 //! # The scan options of Mamba-3
 //!
-//! [`Mamba3ScanOptions`] holds the [SSD path](crate::ssd_path::SsdPath) and the
-//! chunk length of the chunkwise SSD scan. Both pathways read the same scan
-//! options. The cache variant selects the pathway.
+//! [`Mamba3ScanOptions`] holds the [SSD path](crate::ssd_path::SsdPath), the
+//! chunk length of the chunkwise SSD scan and the [`Pathway`].
 //! [`Mamba3::forward_packed`](crate::mamba3::mamba3::Mamba3::forward_packed),
-//! which `forward` calls, sends the scan options to the pathway of the cache.
+//! which `forward` calls, sends the scan options to the pathway that they
+//! select. Both pathways read the SSD path and the chunk length.
 
 use crate::mamba3::prelude::*;
 use burn::config::Config;
 
-/// The scan options of a Mamba-3 block: the SSD path and the chunk length.
+/// The pathway of a Mamba-3 forward: how the forward maps the trapezoidal
+/// recurrence onto SSD calls. Both pathways give the same outputs, final
+/// caches and gradients (ADR-0003).
 ///
-/// All scan options give the same values and gradients. The cache variant
-/// selects the *pathway* (double- or single-ssd, see
-/// [`crate::mamba3::cache::Mamba3Caches`]). The packed forward of that pathway
-/// ([`Mamba3::forward_double_ssd_packed`] or
-/// [`Mamba3::forward_single_ssd_packed`]) computes the chunk length. It builds
-/// the input bundle of the pathway at that length
+/// [`Mamba3::step`] has no pathway. It runs the double-SSD recurrence.
+///
+/// The default is [`Self::SingleSsd`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum Pathway {
+    /// One standard SSD call for each term of the trapezoid: a γ-SSD for the
+    /// current sample, and one β-SSD for each `β` tap. That is two calls at
+    /// the default tap pattern, three under a two-tap pattern, and one under
+    /// [`TapPattern::None`].
+    ///
+    /// It follows the "two-SSD decomposition" of mamba3-minimal. See
+    /// [`crate::mamba3::double_ssd`].
+    DoubleSsd,
+
+    /// One SSD call, at every tap pattern. It follows the form of the official
+    /// kernels: Triton for SISO and Tilelang for MIMO. See
+    /// [`crate::mamba3::single_ssd`].
+    ///
+    /// It uses about half the training memory of [`Self::DoubleSsd`] at the
+    /// default tap pattern, and less than a third under a two-tap pattern.
+    #[default]
+    SingleSsd,
+}
+
+/// The scan options of a Mamba-3 block: the SSD path, the chunk length and
+/// the pathway.
+///
+/// All scan options give the same values and gradients.
+/// [`Mamba3::forward_packed`] runs the packed forward of the pathway of
+/// [`Self::pathway`]. That forward computes the chunk length. It builds the
+/// input bundle of the pathway at that length
 /// ([`crate::mamba3::double_ssd::ssd::Mamba3DoubleSsdInput`] or
 /// [`crate::mamba3::single_ssd::ssd::Mamba3SingleSsdInput`]). Then it gives
 /// the SSD path to the `run` of the bundle.
 ///
-/// The default is [`SsdPath::SerialRecalculated`] with an unset chunk length.
+/// The default is [`SsdPath::SerialRecalculated`] with an unset chunk length,
+/// on [`Pathway::SingleSsd`]. For example,
+/// `Mamba3ScanOptions::new(SsdPath::Serial).with_pathway(Pathway::DoubleSsd)`
+/// selects the `Serial` SSD path on double-SSD.
 #[derive(Config, Debug)]
 pub struct Mamba3ScanOptions {
     /// The method that computes the chunkwise SSD scan.
@@ -33,6 +63,9 @@ pub struct Mamba3ScanOptions {
     /// is approximately `√(state_rank · per_head_dim)`, divided by the widening
     /// that `mimo_rank` and `micro_steps` already give the chunk.
     pub chunk_len: Option<usize>,
+    /// The pathway of [`Mamba3::forward`] and [`Mamba3::forward_packed`].
+    #[config(default = "Pathway::SingleSsd")]
+    pub pathway: Pathway,
 }
 
 impl Default for Mamba3ScanOptions {

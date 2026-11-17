@@ -3,7 +3,7 @@
 //! training-step profiler and the VRAM cap.
 
 use crate::common::cli::{AppArgs, TrainingStepFlags, finish_extra};
-use crate::common::{parse_ssd_chunk_len, parse_ssd_path};
+use crate::common::{parse_pathway, parse_ssd_chunk_len, parse_ssd_path};
 use crate::common::tiny_stories::lm::Overrides;
 use crate::context::BATCH;
 use crate::contrast::ContrastOverrides;
@@ -14,6 +14,7 @@ use burn_mamba::prelude::*;
 const HELP: &str = concat!(
     "    --ssd-path <P>         The SSD path of every chunkwise forward: recalc (default), serial or minimal\n",
     "    --ssd-chunk-len <L>    The chunk length of every chunkwise forward, in write positions (default: from the block shape)\n",
+    "    --pathway <P>          The pathway of every chunkwise forward: single (default) or double\n",
     "    --pack-align <N>       With --pack, start each story at a multiple of N tokens. N must be a multiple of the chunk length (default: the chunk length)\n",
     "    --prompt <TEXT>        At inference, continue TEXT instead of the built-in prompts. Give the flag again for each prompt\n",
     "    --continuations <N>    At inference, the number of continuations of each prompt, each with its own seed (default 1)\n",
@@ -30,9 +31,9 @@ const HELP: &str = concat!(
 pub struct Cli {
     /// The corpus knobs, applied onto the training config.
     pub overrides: Overrides,
-    /// `--ssd-path` and `--ssd-chunk-len`: the scan options of every chunkwise
-    /// `forward`. The recalculated serial scan (the default) uses about 1/3
-    /// less vram than `Minimal`.
+    /// `--ssd-path`, `--ssd-chunk-len` and `--pathway`: the scan options of
+    /// every chunkwise `forward`. The recalculated serial scan (the default)
+    /// uses about 1/3 less vram than `Minimal`.
     pub scan_options: MambaScanOptions,
     /// `--pack-align`: see `training::Run::pack_align`.
     pub pack_align: Option<usize>,
@@ -74,7 +75,8 @@ impl Cli {
         let overrides = Overrides::parse(&mut pargs);
         let ssd_path = pargs.opt_value_from_fn("--ssd-path", parse_ssd_path).unwrap().unwrap_or_default();
         let chunk_len = pargs.opt_value_from_fn("--ssd-chunk-len", parse_ssd_chunk_len).unwrap();
-        let scan_options = Mamba3ScanOptions::new(ssd_path).with_chunk_len(chunk_len);
+        let pathway = pargs.opt_value_from_fn("--pathway", parse_pathway).unwrap().unwrap_or_default();
+        let scan_options = Mamba3ScanOptions::new(ssd_path).with_chunk_len(chunk_len).with_pathway(pathway);
         let pack_align: Option<usize> = pargs.opt_value_from_str("--pack-align").unwrap();
         assert!(pack_align != Some(0), "--pack-align must be at least 1");
         let training_step_flags = TrainingStepFlags::parse(&mut pargs);

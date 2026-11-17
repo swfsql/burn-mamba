@@ -9,11 +9,7 @@ use crate::mamba1::prelude::*;
 #[cfg(feature = "mamba2")]
 use crate::mamba2::prelude::*;
 #[cfg(feature = "mamba3")]
-use crate::mamba3::double_ssd::prelude::Mamba3DoubleSsdCache;
-#[cfg(feature = "mamba3")]
 use crate::mamba3::prelude::*;
-#[cfg(feature = "mamba3")]
-use crate::mamba3::single_ssd::prelude::Mamba3SingleSsdCache;
 use burn::module::{ModuleVisitor, Param};
 use burn::prelude::*;
 use burn::tensor::{Distribution, Gradients};
@@ -186,8 +182,7 @@ fn padded_mamba2_is_each_row_alone() {
     }
 }
 
-/// Every Mamba-3 cache field, whichever pathway it comes from (the two are
-/// field-identical).
+/// Every field of a Mamba-3 cache, from either pathway.
 #[cfg(feature = "mamba3")]
 macro_rules! mamba3_fields {
     ($c:expr) => {{
@@ -259,12 +254,12 @@ fn padded_mamba3_is_each_row_alone() {
         check_each_row_alone(
             &block,
             |x, cache, pad| block.forward_double_ssd(x, cache, &scan_options, pad),
-            |c: &Mamba3DoubleSsdCache| mamba3_fields!(c),
+            |c: &Mamba3Cache| mamba3_fields!(c),
         );
         check_each_row_alone(
             &block,
             |x, cache, pad| block.forward_single_ssd(x, cache, &scan_options, pad),
-            |c: &Mamba3SingleSsdCache| mamba3_fields!(c),
+            |c: &Mamba3Cache| mamba3_fields!(c),
         );
     }
 }
@@ -312,15 +307,9 @@ fn padded_mamba3_network_closes_each_row_at_its_own_end() {
     // Positions: `Start`, the tokens, then `End` — after the padding
     // batch-wide.
     assert_eq!(y.dims()[1], padded + 2);
-    let Mamba3Caches::SingleSsd(caches) = caches else {
-        panic!("a fresh call runs the single-SSD pathway");
-    };
     for (b, &len) in lens.iter().enumerate() {
         let (y_b, caches_b) =
             net.forward(x.clone().narrow(0, b, 1).narrow(1, 0, len), None, scan_options.clone(), None, None);
-        let Mamba3Caches::SingleSsd(caches_b) = caches_b else {
-            panic!("a fresh call runs the single-SSD pathway");
-        };
         let y_own = Tensor::cat(
             vec![
                 y.clone().narrow(0, b, 1).narrow(1, 0, 1 + len),

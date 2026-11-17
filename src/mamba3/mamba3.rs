@@ -246,8 +246,8 @@ use burn_stack::utils::{UntiedParam, untied};
 /// data-dependent rotation, for SISO (mimo_rank=1) and MIMO (mimo_rank>1). It
 /// has two execution modes:
 ///
-/// - [`Self::forward`] — chunkwise SSD for training / prefill (the cache
-///   variant selects the double- or single-SSD pathway)
+/// - [`Self::forward`] — chunkwise SSD for training / prefill (the scan
+///   options select the double- or single-SSD pathway)
 /// - [`Self::step`]    — recurrent form for token-by-token decoding
 #[derive(Module, Debug)]
 pub struct Mamba3 {
@@ -1505,9 +1505,9 @@ impl Mamba3Config {
 pub(crate) struct PackedCall {
     /// The resets on the write axis.
     pub segments: crate::packing::Segments,
-    /// The origin cache. The two pathways have the same fields, and at a
-    /// call boundary the same values (see [`crate::mamba3::cache`]).
-    pub origin: crate::mamba3::double_ssd::prelude::Mamba3DoubleSsdCache,
+    /// The origin cache. Both pathways read it in the same way (see
+    /// [`crate::mamba3::cache`]).
+    pub origin: Mamba3Cache,
 }
 
 // ---------------------------------------------------------------------------
@@ -1517,10 +1517,10 @@ pub(crate) struct PackedCall {
 impl Mamba3 {
     /// Process a full input sequence with the chunkwise trapezoidal SSD.
     ///
-    /// The cache variant selects the pathway: [`Mamba3Cache::DoubleSsd`] runs
-    /// `forward_double_ssd`, and [`Mamba3Cache::SingleSsd`] (also the choice
-    /// for a missing cache) runs `forward_single_ssd`. Both give the same
-    /// output and final cache.
+    /// [`Mamba3ScanOptions::pathway`] selects the pathway:
+    /// [`Pathway::DoubleSsd`] or [`Pathway::SingleSsd`] (the default). Both
+    /// give the same output and final cache. A cache from either pathway
+    /// continues its sequence on either pathway.
     ///
     /// For MIMO (mimo_rank>1), B/C have mimo_rank parallel rank channels. All
     /// ranks share the state, and each rank writes to it independently.
@@ -1564,9 +1564,8 @@ impl Mamba3 {
     /// At a reset, every carried quantity starts again from `origin`: the SSD
     /// carry between chunks (plus the single-SSD boundary seed of that chunk),
     /// the `β` taps (they read the tap FIFO), the cumulative rotation, and the
-    /// positive systems. The variant of `cache` selects the pathway, and
-    /// `origin` of either variant converts to it. Only
-    /// [`SsdPath::Serial`] and [`SsdPath::SerialRecalculated`] take
+    /// positive systems. [`Mamba3ScanOptions::pathway`] selects the pathway.
+    /// Only [`SsdPath::Serial`] and [`SsdPath::SerialRecalculated`] take
     /// resets.
     #[allow(non_snake_case)]
     pub fn forward_packed(
@@ -1588,45 +1587,14 @@ impl Mamba3 {
         san(&input_bsm);
 
         // ── Initialise cache if not provided ──────────────────────────────────
-        // A missing cache selects the single-ssd pathway (every rotation kind
-        // runs on it).
-        let cache = cache.unwrap_or_else(|| self.zero_cache(batch, &device).into());
+        let cache = cache.unwrap_or_else(|| self.zero_cache(batch, &device));
 
         // ── SSD Pathway Selection ─────────────────────────────────────────────
-        // The two cache types have the same fields, so `origin` converts to
-        // the pathway of `cache`.
-        match cache {
-            Mamba3Cache::DoubleSsd(cache) => {
-                let origin = origin.map(|origin| match origin {
-                    Mamba3Cache::DoubleSsd(origin) => origin,
-                    Mamba3Cache::SingleSsd(origin) => origin.into(),
-                });
-                let (out_bsm, cache) = self.forward_double_ssd_packed(
-                    input_bsm,
-                    Some(cache),
-                    origin,
-                    &scan_options,
-                    pad_bs,
-                    reset_bs,
-                );
-                (out_bsm, cache.into())
-            }
-            Mamba3Cache::SingleSsd(cache) => {
-                let origin = origin.map(|origin| match origin {
-                    Mamba3Cache::DoubleSsd(origin) => origin.into(),
-                    Mamba3Cache::SingleSsd(origin) => origin,
-                });
-                let (out_bsm, cache) = self.forward_single_ssd_packed(
-                    input_bsm,
-                    Some(cache),
-                    origin,
-                    &scan_options,
-                    pad_bs,
-                    reset_bs,
-                );
-                (out_bsm, cache.into())
-            }
-        }
+        let forward_pathway = match scan_options.pathway {
+            Pathway::DoubleSsd => Self::forward_double_ssd_packed,
+            Pathway::SingleSsd => Self::forward_single_ssd_packed,
+        };
+        forward_pathway(self, input_bsm, Some(cache), origin, &scan_options, pad_bs, reset_bs)
     }
 
     /// How far back the `β` tap of this block reaches, in write positions:
@@ -1747,9 +1715,9 @@ mod step {
         /// ```
         ///
         /// At `u > 1`, one call solves the `u` micro-steps of the token in
-        /// closed form (see [`crate::mamba3::product`]). Both cache variants
-        /// decode through the double-ssd recurrence. A missing cache starts a
-        /// single-ssd one.
+        /// closed form (see [`crate::mamba3::product`]). `step` has no
+        /// pathway. It runs the double-SSD recurrence on a cache from either
+        /// pathway.
         ///
         /// # Shapes
         /// - `input_bd` : `[batch, d_model]`
@@ -1769,20 +1737,9 @@ mod step {
             san(&input_bd);
 
             // ── Initialise cache if not provided ──────────────────────────────────
-            // A missing cache selects the single-ssd pathway.
-            let cache = cache.unwrap_or_else(|| self.zero_cache(batch, &device).into());
+            let cache = cache.unwrap_or_else(|| self.zero_cache(batch, &device));
 
-            // ── SSD Pathway Selection ─────────────────────────────────────────────
-            match cache {
-                Mamba3Cache::DoubleSsd(cache) => {
-                    let (out_bsm, cache) = self.step_double_ssd(input_bd, Some(cache));
-                    (out_bsm, cache.into())
-                }
-                Mamba3Cache::SingleSsd(cache) => {
-                    let (out_bsm, cache) = self.step_single_ssd(input_bd, Some(cache));
-                    (out_bsm, cache.into())
-                }
-            }
+            self.step_double_ssd(input_bd, Some(cache))
         }
     }
 }

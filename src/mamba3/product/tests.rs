@@ -185,9 +185,9 @@ fn forward_matches_step_double_rotor() {
     forward_matches_step_double(RotationKind::Rotor4D, 2);
 }
 
-/// The same for the single-pass pathway, which reaches `step` by round-tripping
-/// through the double-ssd cache — so this also pins that the two accumulators
-/// still coincide at token boundaries when a token is `u` micro-steps long.
+/// The same for the single-pass pathway. `step` runs the double-SSD
+/// recurrence on its cache, so this also pins that the two accumulators still
+/// coincide at token boundaries when a token is `u` micro-steps long.
 fn forward_single_matches_step(kind: RotationKind, micro_steps: usize) {
     let device = test_device();
     let config = cfg(kind, micro_steps);

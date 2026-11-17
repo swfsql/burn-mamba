@@ -17,6 +17,8 @@
 //! - the rotation algebra,
 //! - the SSD pathway (`mamba3/siso-double-ssd`).
 //!
+//! `mamba3/siso-double-ssd` has no `step` case, because `step` has no pathway.
+//!
 //! ## Running
 //!
 //! ```bash
@@ -75,7 +77,6 @@
 use burn::prelude::*;
 use burn_mamba::mamba1::prelude::*;
 use burn_mamba::mamba2::prelude::*;
-use burn_mamba::mamba3::double_ssd::prelude::*;
 use burn_mamba::mamba3::prelude::*;
 use burn_mamba::prelude::*;
 use criterion::measurement::WallTime;
@@ -314,23 +315,12 @@ fn mamba3_cases(shape: Shape) -> Vec<(&'static str, Mamba3Config)> {
     ]
 }
 
-/// A zero double-SSD cache. It selects the double-SSD pathway, because a
-/// missing cache selects single-SSD. The block of `config` gives its shapes.
-fn double_ssd_cache(config: &Mamba3Config, batch: usize, device: &Device) -> Mamba3Cache {
-    let block = config.init(device);
-    Mamba3DoubleSsdCache::from(block.zero_cache(batch, device)).into()
-}
-
 // ---------------------------------------------------------------------------
 // Runners
 // ---------------------------------------------------------------------------
 
-/// `forward` on a plain device. The call consumes its cache, so each iteration
-/// needs a fresh one. But the bench *builds* it once, before the timed region,
-/// and clones it in. A clone is a refcount increment, and a build is an
-/// allocation and a zero-fill. Only `mamba3/siso-double-ssd` gives a real
-/// cache. For the single-SSD default the cache is `None`, and every case pays
-/// the same.
+/// `forward` on a plain device. No case gives a cache. So each call builds its
+/// zero cache in the timed region, and every case pays the same.
 ///
 /// The bench builds the block, its input and the warm-up *inside* the closure.
 /// Criterion calls the closure only when the case passes its filter. So
@@ -338,27 +328,23 @@ fn double_ssd_cache(config: &Mamba3Config, batch: usize, device: &Device) -> Mam
 /// at a time. Code moved out of the closure runs on every invocation of the
 /// binary, for any filter. So the closure is what lets `kernels.sh` attribute
 /// the kernel launches of a filtered run to the named case.
-fn run_forward<M, B, C>(
+fn run_forward<M, B>(
     group: &mut BenchmarkGroup<'_, WallTime>,
     name: &str,
     shape: Shape,
     device: &Device,
     build: B,
-    cache: C,
     options: M::Options,
 ) where
     M: Block,
-    M::Cache: Clone,
     M::Options: Clone,
     B: Fn(&Device) -> M,
-    C: Fn(&Device) -> Option<M::Cache>,
 {
     group.bench_function(name, |b| {
         let block = build(device);
         let x = input_3d(shape, device);
-        let seed = cache(device);
         let work = || {
-            let (y, _cache) = block.block_forward(x.clone(), seed.clone(), options.clone(), None);
+            let (y, _cache) = block.block_forward(x.clone(), None, options.clone(), None);
             y
         };
 
@@ -370,27 +356,23 @@ fn run_forward<M, B, C>(
 
 /// `forward` + `backward` on an autodiff device: one training iteration minus
 /// the optimizer update.
-fn run_train<M, B, C>(
+fn run_train<M, B>(
     group: &mut BenchmarkGroup<'_, WallTime>,
     name: &str,
     shape: Shape,
     device: &Device,
     build: B,
-    cache: C,
     options: M::Options,
 ) where
     M: Block,
-    M::Cache: Clone,
     M::Options: Clone,
     B: Fn(&Device) -> M,
-    C: Fn(&Device) -> Option<M::Cache>,
 {
     group.bench_function(name, |b| {
         let block = build(device);
         let x = input_3d(shape, device);
-        let seed = cache(device);
         let work = || {
-            let (y, _cache) = block.block_forward(x.clone(), seed.clone(), options.clone(), None);
+            let (y, _cache) = block.block_forward(x.clone(), None, options.clone(), None);
             y.powf_scalar(2.0).mean().backward()
         };
 
@@ -401,23 +383,22 @@ fn run_train<M, B, C>(
 }
 
 /// One decode step, fed by the cache of the previous iteration (so the
-/// recurrence advances, as it does during generation).
-fn run_step<M, B, C>(
+/// recurrence advances, as it does during generation). The first step starts
+/// from no cache.
+fn run_step<M, B>(
     group: &mut BenchmarkGroup<'_, WallTime>,
     name: &str,
     shape: Shape,
     device: &Device,
     build: B,
-    cache: C,
 ) where
     M: Block,
     B: Fn(&Device) -> M,
-    C: Fn(&Device) -> Option<M::Cache>,
 {
     group.bench_function(name, |b| {
         let block = build(device);
         let x = input_2d(shape, device);
-        let mut cache = cache(device);
+        let mut cache = None;
         let mut work = || {
             let (y, next) = block.block_step(x.clone(), cache.take());
             cache = Some(next);
@@ -465,7 +446,6 @@ fn bench_forward(c: &mut Criterion) {
         shape,
         &device,
         |d| mamba1_config(shape).init(d),
-        |_| None,
         (),
     );
 
@@ -475,7 +455,6 @@ fn bench_forward(c: &mut Criterion) {
         shape,
         &device,
         |d| mamba2_config(shape).init(d),
-        |_| None,
         Mamba2ScanOptions::default(),
     );
 
@@ -487,13 +466,11 @@ fn bench_forward(c: &mut Criterion) {
             shape,
             &device,
             |d| config.init(d),
-            |_| None,
             m3_scan_options.clone(),
         );
     }
 
-    // The other SSD pathway: the same block, with a double-SSD cache that
-    // selects it (without a cache, the block selects single-SSD).
+    // The other SSD pathway: the same block, with scan options that select it.
     let config = mamba3_config(shape, 1, RotationKind::Complex2D, true);
     run_forward(
         &mut group,
@@ -501,8 +478,7 @@ fn bench_forward(c: &mut Criterion) {
         shape,
         &device,
         |d| config.init(d),
-        |d| Some(double_ssd_cache(&config, shape.batch, d)),
-        m3_scan_options,
+        m3_scan_options.with_pathway(Pathway::DoubleSsd),
     );
 
     group.finish();
@@ -522,7 +498,6 @@ fn bench_train(c: &mut Criterion) {
         shape,
         &device,
         |d| mamba1_config(shape).init(d),
-        |_| None,
         (),
     );
 
@@ -532,7 +507,6 @@ fn bench_train(c: &mut Criterion) {
         shape,
         &device,
         |d| mamba2_config(shape).init(d),
-        |_| None,
         Mamba2ScanOptions::default(),
     );
 
@@ -544,7 +518,6 @@ fn bench_train(c: &mut Criterion) {
             shape,
             &device,
             |d| config.init(d),
-            |_| None,
             m3_scan_options.clone(),
         );
     }
@@ -556,8 +529,7 @@ fn bench_train(c: &mut Criterion) {
         shape,
         &device,
         |d| config.init(d),
-        |d| Some(double_ssd_cache(&config, shape.batch, d)),
-        m3_scan_options,
+        m3_scan_options.with_pathway(Pathway::DoubleSsd),
     );
 
     group.finish();
@@ -578,7 +550,6 @@ fn bench_step(c: &mut Criterion) {
         shape,
         &device,
         |d| mamba1_config(shape).init(d),
-        |_| None,
     );
 
     run_step(
@@ -587,7 +558,6 @@ fn bench_step(c: &mut Criterion) {
         shape,
         &device,
         |d| mamba2_config(shape).init(d),
-        |_| None,
     );
 
     for (name, config) in mamba3_cases(shape) {
@@ -597,21 +567,8 @@ fn bench_step(c: &mut Criterion) {
             shape,
             &device,
             |d| config.init(d),
-            |_| None,
         );
     }
-
-    // Decode on the double-SSD cache. (A single-SSD decode goes through this
-    // same recurrence, so the two differ only by the cache conversion.)
-    let config = mamba3_config(shape, 1, RotationKind::Complex2D, true);
-    run_step(
-        &mut group,
-        "mamba3/siso-double-ssd",
-        shape,
-        &device,
-        |d| config.init(d),
-        |d| Some(double_ssd_cache(&config, shape.batch, d)),
-    );
 
     group.finish();
 }

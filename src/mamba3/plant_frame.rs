@@ -21,18 +21,16 @@
 //!   the MIMO merge and `out_proj`. The band correction of single-SSD runs
 //!   before the tail and stays in that pathway.
 //!
-//! The frame has one cache type, `Mamba3DoubleSsdCache`. A forward starts and
-//! ends at a call boundary, where the accumulator of single-SSD equals the
-//! state. So the `From` impls convert the cache of that pathway (ADR-0003).
-//! The frame writes the frame cache ([`Mamba3FrameCache`]) of the cache. Only
-//! the scan of each pathway writes the state.
+//! The frame takes and returns the one cache type of both pathways,
+//! [`Mamba3Cache`] (ADR-0003). The frame writes the frame cache
+//! ([`Mamba3FrameCache`]) of the cache. Only the scan of each pathway writes
+//! the state.
 //!
 //! A bug in the frame fails both pathways alike, and a parity test cannot show
 //! it. So the tests of this module compare the split and the tail with their
 //! definitions (ADR-0007).
 
-use crate::mamba3::cache::{Mamba3FrameCache, TapFifo};
-use crate::mamba3::double_ssd::prelude::Mamba3DoubleSsdCache;
+use crate::mamba3::cache::{Mamba3Cache, Mamba3FrameCache, TapFifo};
 use crate::mamba3::helpers;
 use crate::mamba3::in_proj_layout::GroupKey;
 use crate::mamba3::mamba3::{Mamba3, PackedCall};
@@ -72,7 +70,7 @@ pub(crate) struct PlantResets {
     /// The first token of each segment, `[batch, tokens]`.
     pub reset_bt: Tensor<2, Bool>,
     /// The cache that each segment starts from. `None` uses a fresh cache.
-    pub origin: Option<Mamba3DoubleSsdCache>,
+    pub origin: Option<Mamba3Cache>,
     /// The chunk length on the write axis.
     pub chunk_len: usize,
 }
@@ -83,7 +81,7 @@ pub(crate) struct PlantResets {
 /// its scan, so each tensor drops at its last use.
 pub(crate) struct PlantEntry {
     /// The cache of the call: the one that the caller gave, or a fresh one.
-    pub cache: Mamba3DoubleSsdCache,
+    pub cache: Mamba3Cache,
     /// The resets and the origin of a packed call.
     pub packed: Option<PackedCall>,
     /// The row-end reader of the call, on the write axis.
@@ -144,7 +142,7 @@ impl Mamba3 {
     pub(crate) fn plant_entry(
         &self,
         input_btd: Tensor<3>,
-        cache: Option<Mamba3DoubleSsdCache>,
+        cache: Option<Mamba3Cache>,
         pad_bt: Option<Tensor<2, Bool>>,
         resets: Option<PlantResets>,
     ) -> PlantEntry {
@@ -170,7 +168,7 @@ impl Mamba3 {
         let pad_bs = pad_bt.map(|pad_bt| crate::padding::repeat_positions(pad_bt, u));
 
         // ── Initialise the caches that the caller did not give ────────────────
-        let fresh = || Mamba3DoubleSsdCache::from(self.zero_cache(batch, &device));
+        let fresh = || self.zero_cache(batch, &device);
         let cache = cache.unwrap_or_else(fresh);
         // A reset is at the first token of a chunk, which is its first
         // micro-step on the write axis. See [`crate::packing`].
@@ -330,8 +328,8 @@ impl Mamba3 {
     pub(crate) fn plant_tail(
         &self,
         tail: PlantTail,
-        mut cache: Mamba3DoubleSsdCache,
-    ) -> (Tensor<3>, Mamba3DoubleSsdCache) {
+        mut cache: Mamba3Cache,
+    ) -> (Tensor<3>, Mamba3Cache) {
         let PlantTail {
             y_btmhp,
             z_bti,

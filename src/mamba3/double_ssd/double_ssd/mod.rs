@@ -1,8 +1,7 @@
 //! # Mamba-3 — Double-Pass SSD Forward
 //!
-//! [`Mamba3::forward_double_ssd`](crate::mamba3::mamba3::Mamba3::forward_double_ssd)
-//! and [`Mamba3::step_double_ssd`](crate::mamba3::mamba3::Mamba3::step_double_ssd):
-//! the decomposition of
+//! `forward_double_ssd_packed` and `step_double_ssd` on
+//! [`Mamba3`](crate::mamba3::mamba3::Mamba3): the decomposition of
 //! [`VikramLex/mamba3-minimal`](https://github.com/VikramLex/mamba3-minimal).
 //!
 //! ```text
@@ -39,40 +38,44 @@ use burn::prelude::*;
 // ---------------------------------------------------------------------------
 
 impl Mamba3 {
-    /// Process a full input sequence with the double-ssd pathway.
+    /// [`Self::forward_double_ssd_packed`] with no resets. Only the tests call
+    /// it.
+    #[cfg(all(test, feature = "_dev-test"))]
+    pub(crate) fn forward_double_ssd(
+        &self,
+        input_bsm: Tensor<3>,
+        cache: Option<Mamba3Cache>,
+        scan_options: &Mamba3ScanOptions,
+        pad_bt: Option<Tensor<2, Bool>>,
+    ) -> (Tensor<3>, Mamba3Cache) {
+        self.forward_double_ssd_packed(input_bsm, cache, None, scan_options, pad_bt, None)
+    }
+
+    /// Process a full input sequence with the double-SSD pathway.
+    /// [`Self::forward_packed`] calls it for [`Pathway::DoubleSsd`].
     ///
     /// For MIMO (mimo_rank>1), B/C have mimo_rank parallel rank channels. All
     /// ranks share the state, and each rank writes to it independently.
     ///
     /// `pad_bt` marks a right-padded batch of tokens, as in [`Self::forward`].
+    /// `reset_bt` marks the first token of each segment of a packed batch,
+    /// which starts from `origin`, as in [`Self::forward_packed`].
     ///
     /// # Shapes
     /// - `input_bsm` : `[batch, sequence, d_model]`
     /// - `pad_bt`    : `[batch, sequence]`
+    /// - `reset_bt`  : `[batch, sequence]`
     /// - output      : `[batch, sequence, d_model]`
-    pub fn forward_double_ssd(
-        &self,
-        input_bsm: Tensor<3>,
-        cache: Option<Mamba3DoubleSsdCache>,
-        scan_options: &Mamba3ScanOptions,
-        pad_bt: Option<Tensor<2, Bool>>,
-    ) -> (Tensor<3>, Mamba3DoubleSsdCache) {
-        self.forward_double_ssd_packed(input_bsm, cache, None, scan_options, pad_bt, None)
-    }
-
-    /// [`Self::forward_double_ssd`] over a packed batch: `reset_bt` marks the
-    /// first token of each segment, which starts from `origin`, as in
-    /// [`Self::forward_packed`].
     #[allow(non_snake_case)]
-    pub fn forward_double_ssd_packed(
+    pub(crate) fn forward_double_ssd_packed(
         &self,
         input_bsm: Tensor<3>,
-        cache: Option<Mamba3DoubleSsdCache>,
-        origin: Option<Mamba3DoubleSsdCache>,
+        cache: Option<Mamba3Cache>,
+        origin: Option<Mamba3Cache>,
         scan_options: &Mamba3ScanOptions,
         pad_bt: Option<Tensor<2, Bool>>,
         reset_bt: Option<Tensor<2, Bool>>,
-    ) -> (Tensor<3>, Mamba3DoubleSsdCache) {
+    ) -> (Tensor<3>, Mamba3Cache) {
         let [batch, tokens, _d_model] = input_bsm.dims();
         let nheads = self.nheads();
         let per_head_dim = self.per_head_dim();
@@ -381,8 +384,8 @@ mod step {
         }
 
         /// Process a **single token** with the pure recurrent form (the
-        /// formulas are in [`Mamba3::step`]). Both cache variants decode here:
-        /// `step_single_ssd` converts its cache and calls this function.
+        /// formulas are in [`Mamba3::step`]). `step` has no pathway, and it
+        /// calls this function.
         ///
         /// At `micro_steps = u > 1` the token is `u` of those micro-steps
         /// ([`crate::mamba3::product`]). They are evaluated **together**, not one
@@ -391,11 +394,11 @@ mod step {
         /// # Shapes
         /// - `input_bd` : `[batch, d_model]`
         /// - output     : `[batch, d_model]`
-        pub fn step_double_ssd(
+        pub(crate) fn step_double_ssd(
             &self,
             input_bd: Tensor<2>,
-            cache: Option<Mamba3DoubleSsdCache>,
-        ) -> (Tensor<2>, Mamba3DoubleSsdCache) {
+            cache: Option<Mamba3Cache>,
+        ) -> (Tensor<2>, Mamba3Cache) {
             let [batch, _d_model] = input_bd.dims();
             let nheads = self.nheads();
             let per_head_dim = self.per_head_dim();

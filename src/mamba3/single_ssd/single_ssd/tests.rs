@@ -1,5 +1,4 @@
 use super::*;
-use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::mamba3::Mamba3Config;
 use crate::mamba3::rotation::{RotationKind, RotationState};
 use burn::module::Param;
@@ -51,9 +50,8 @@ fn cfg_real1d_scalar() -> Mamba3Config {
     cfg_real1d().with_state_rank(1)
 }
 
-/// Build a matched pair of initial caches for cross-pathway parity
-/// (`forward_double_ssd`/`step_double_ssd` use [`Mamba3DoubleSsdCache`];
-/// `forward_single_ssd` uses [`Mamba3SingleSsdCache`]).
+/// Build a matched pair of initial caches for cross-pathway parity: the first
+/// for `forward_double_ssd` and `step`, the second for `forward_single_ssd`.
 /// With `random = true` the state and cumulative rotation angle are random
 /// while the previous-token K/V history is **zero** — so the single-ssd form's
 /// boundary-β seed is zero and both forms share the exact same logical initial state.
@@ -62,7 +60,7 @@ fn build_cross_caches(
     cfg: &Mamba3Config,
     batch: usize,
     random: bool,
-) -> (Mamba3DoubleSsdCache, Mamba3SingleSsdCache) {
+) -> (Mamba3Cache, Mamba3Cache) {
     let device = test_device();
     let nheads = cfg.nheads();
     let per_head_dim = cfg.per_head_dim;
@@ -76,7 +74,7 @@ fn build_cross_caches(
         Tensor::<4>::zeros([batch, nheads, per_head_dim, state_rank], &device)
     };
     // `Real1D` has no accumulator at all; the other kinds exercised here are
-    // abelian. Built once, so both cache forms start from the same rotation.
+    // abelian. Built once, so both caches start from the same rotation.
     let angle = (cfg.rotation != RotationKind::Real1D).then(|| {
         if random {
             Tensor::<3>::random([batch, nheads, num_rotation_angles], dist, &device)
@@ -98,19 +96,19 @@ fn build_cross_caches(
         log_precision_bh: None,
         tropical_bh: None,
     };
-    let c3 = Mamba3DoubleSsdCache {
+    let c3 = Mamba3Cache {
         ssm_bhpr: Tensor::from_inner(ssm.clone()),
         frame: frame(k.clone(), v.clone()),
     };
-    let cm = Mamba3SingleSsdCache { ssm_bhpr: Tensor::from_inner(ssm), frame: frame(k, v) };
+    let cm = Mamba3Cache { ssm_bhpr: Tensor::from_inner(ssm), frame: frame(k, v) };
     (c3, cm)
 }
 
-/// Build an initial [`Mamba3SingleSsdCache`] for the single-ssd form continuity test.
+/// Build an initial [`Mamba3Cache`] for the single-ssd form continuity test.
 /// With `random = true` *every* field (including the previous-token K/V
 /// history) is random, exercising forward_single_ssd continuation from an arbitrary
 /// accumulator.
-fn build_single_ssd_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3SingleSsdCache {
+fn build_single_ssd_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3Cache {
     let device = test_device();
     let nheads = cfg.nheads();
     let per_head_dim = cfg.per_head_dim;
@@ -150,7 +148,7 @@ fn build_single_ssd_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mam
     };
     let slots = cfg.tap_pattern.tap_slots(cfg.micro_steps);
     let tap = slots > 0;
-    Mamba3SingleSsdCache {
+    Mamba3Cache {
         ssm_bhpr: mk4([batch, nheads, per_head_dim, state_rank]),
         frame: Mamba3FrameCache {
             tap_fifo: tap.then(|| TapFifo {
@@ -286,13 +284,13 @@ struct SingleSsdRun {
 }
 
 /// Like [`run_with_grads`] but the loss couples the output with every final
-/// single-ssd cache field, and the final cache is returned for comparison. Both
-/// runs being compared use `forward_single_ssd`, so the single-ssd cache semantics match.
+/// cache field, and the final cache is returned for comparison. Both runs
+/// being compared use `forward_single_ssd`.
 fn run_with_grads_single_ssd(
     model: &Mamba3,
     input: &Param<Tensor<3>>,
     heads: &Heads,
-    runner: impl FnOnce(&Mamba3, Tensor<3>) -> (Tensor<3>, Mamba3SingleSsdCache),
+    runner: impl FnOnce(&Mamba3, Tensor<3>) -> (Tensor<3>, Mamba3Cache),
 ) -> SingleSsdRun {
     let (out, cache) = runner(model, input.val());
     let out_inner = out.clone().inner();
@@ -430,9 +428,9 @@ fn guard_random_init_consumed(
 /// initial state. With `random_init = true` the shared logical initial state
 /// is random (random state + cumulative rotation angle; zero previous-token
 /// history so the single-ssd and double-ssd forms coincide). The output and all
-/// parameter gradients must agree. The accumulator of the single-ssd cache is
-/// not compared here (different semantics from the state); the
-/// single-ssd cache is compared in `run_forward_single_ssd_split_matches_full`.
+/// parameter gradients must agree. The final cache is not compared here.
+/// `run_forward_single_ssd_split_matches_full` and
+/// `run_cross_pathway_continuation_parity` compare it.
 fn forward_match(cfg: Mamba3Config, scan_options: Mamba3ScanOptions, random_init: bool) {
     forward_match_tol(cfg, scan_options, random_init, 1e-3);
 }
@@ -582,6 +580,59 @@ fn forward_match_real1d_scalar_random_init() {
     );
 }
 
+/// The largest absolute difference over every tensor of two caches. The cache
+/// traversal ([`CacheTensors`](burn_stack::modules::CacheTensors)) visits each
+/// field.
+fn cache_max_abs_diff(a: Mamba3Cache, b: Mamba3Cache) -> f32 {
+    use burn_stack::modules::{CacheTensors, TensorZip};
+    use burn_stack::utils::test_helpers::max_abs_diff;
+    struct MaxAbsDiff(f32);
+    impl TensorZip for MaxAbsDiff {
+        fn zip<const D: usize>(&mut self, a: Tensor<D>, b: Tensor<D>) -> Tensor<D> {
+            self.0 = self.0.max(max_abs_diff(a.clone(), b));
+            a
+        }
+    }
+    let mut diff = MaxAbsDiff(0.0);
+    let _ = a.zip_tensors(b, &mut diff);
+    diff.0
+}
+
+/// `forward` runs the pathway of its scan options. Each pathway of `forward`
+/// gives exactly the output and the final cache of the forward of that
+/// pathway.
+///
+/// The block has a β tap (the default tap pattern), and the input has three
+/// chunks. So the two pathways run different arithmetic, and their outputs
+/// differ by rounding. The test checks this precondition first.
+#[test]
+fn forward_runs_the_pathway_of_the_scan_options() {
+    use burn_stack::utils::test_helpers::max_abs_diff;
+    let device = test_device();
+    let config = small_config();
+    let model = config.init(&device);
+    let input = Tensor::<3>::random([2, 12, config.d_model], Distribution::Normal(0.0, 1.0), &device);
+    let scan_options = Mamba3ScanOptions::new(SsdPath::SerialRecalculated).with_chunk_len(Some(4));
+
+    let (out_double, cache_double) = model.forward_double_ssd(input.clone(), None, &scan_options, None);
+    let (out_single, cache_single) = model.forward_single_ssd(input.clone(), None, &scan_options, None);
+    assert!(
+        max_abs_diff(out_double.clone(), out_single.clone()) > 0.0,
+        "the input cannot tell the two pathways apart: their outputs are equal",
+    );
+
+    for (pathway, out_pathway, cache_pathway) in [
+        (Pathway::DoubleSsd, out_double, cache_double),
+        (Pathway::SingleSsd, out_single, cache_single),
+    ] {
+        let (out, cache) = model.forward(input.clone(), None, scan_options.clone().with_pathway(pathway), None);
+        let d = max_abs_diff(out, out_pathway);
+        assert_eq!(d, 0.0, "{pathway:?}: the output of forward differs by {d}");
+        let d = cache_max_abs_diff(cache, cache_pathway);
+        assert_eq!(d, 0.0, "{pathway:?}: the final cache of forward differs by {d}");
+    }
+}
+
 /// forward_single_ssd ≡ token-by-token step on values and gradients, from the same
 /// initial state (random when `random_init = true`, with zero previous-token
 /// history so the single-ssd and recurrent forms coincide).
@@ -614,11 +665,11 @@ fn run_forward_single_ssd_matches_step(
     let input_b = param_input(&input);
     let cmc = cm;
     let r_step = run_with_grads(&model, &input_b, &head, |m, x| {
-        let mut cache: Option<Mamba3SingleSsdCache> = Some(cmc);
+        let mut cache: Option<Mamba3Cache> = Some(cmc);
         let mut outs: Vec<Tensor<2>> = Vec::with_capacity(seq_len);
         for t in 0..seq_len {
             let token = x.clone().narrow(1, t, 1).squeeze_dim(1);
-            let (out_t, new_cache) = m.step_single_ssd(token, cache);
+            let (out_t, new_cache) = m.step(token, cache);
             cache = Some(new_cache);
             outs.push(out_t);
         }
@@ -810,11 +861,11 @@ fn forward_single_ssd_split_matches_full_mimo() {
     );
 }
 
-// ── Cross-pathway cache conversion parity ───────────────────────────────
+// ── Cross-pathway continuation parity ───────────────────────────────────
 
 /// Like [`run_with_grads_single_ssd`], but the runner hands back the four
-/// final-cache field tensors directly (so the concrete cache type — single
-/// or double — does not matter). The loss couples the output with every
+/// final-cache field tensors directly (so the pathway of the last call does
+/// not matter). The loss couples the output with every
 /// final-cache field; gradients of the input and representative parameters
 /// are returned alongside the (inner) output and final-cache values.
 #[allow(clippy::type_complexity)]
@@ -882,22 +933,19 @@ fn run_cache_fields_with_grads(
     }
 }
 
-/// Cache-conversion parity. From one shared, fully-random initial cache,
-/// two consecutive forward calls split a sequence into prefix+suffix with a
-/// cross-pathway cache conversion in between:
+/// Cross-pathway continuation parity. From one shared, fully-random initial
+/// cache, two consecutive forward calls split a sequence into prefix+suffix.
+/// The cache of the prefix continues its sequence on the other pathway:
 ///
-/// - **A**: `forward_double_ssd(prefix)` → convert (double→single) →
-///   `forward_single_ssd(suffix)`.
-/// - **B**: `forward_single_ssd(prefix)` → convert (single→double) →
-///   `forward_double_ssd(suffix)`.
+/// - **A**: `forward_double_ssd(prefix)` → `forward_single_ssd(suffix)`.
+/// - **B**: `forward_single_ssd(prefix)` → `forward_double_ssd(suffix)`.
 ///
 /// Both directions must yield the same concatenated output, the same final
-/// cache (every field — compared directly, with no further conversion), and
-/// the same parameter/input gradients. This exercises the `From` impls in
-/// [`crate::mamba3::cache`] inside the autodiff graph (so the conversion must
-/// also be gradient-transparent), and the mid-point cache always carries a
-/// non-trivial previous-token K/V history.
-fn run_cache_conversion_parity(cfg: Mamba3Config, scan_options: Mamba3ScanOptions) {
+/// cache (every field, compared directly), and the same parameter/input
+/// gradients. So a cache from one pathway continues its sequence on the other,
+/// inside the autodiff graph (see [`crate::mamba3::cache`]). The mid-point
+/// cache always carries a non-trivial previous-token K/V history.
+fn run_cross_pathway_continuation_parity(cfg: Mamba3Config, scan_options: Mamba3ScanOptions) {
     let device = test_device();
     let model = cfg.init(&device.clone().autodiff());
 
@@ -953,7 +1001,7 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, scan_options: Mamba3ScanOption
     let double_scan_options = scan_options.clone();
     let single_scan_options = scan_options;
 
-    // ── Run A: double → (convert) → single ───────────────────────────────
+    // ── Run A: double → single ───────────────────────────────────────────
     let input_a = param_input(&input);
     let (pd_a, ps_a) = (double_scan_options.clone(), single_scan_options.clone());
     let (ssm_a, k_a, v_a, ang_a) = (
@@ -963,7 +1011,7 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, scan_options: Mamba3ScanOption
         init_angle.clone(),
     );
     let run_a = run_cache_fields_with_grads(&model, &input_a, &heads, move |m, x| {
-        let init_double = Mamba3DoubleSsdCache {
+        let init_double = Mamba3Cache {
             ssm_bhpr: Tensor::from_inner(ssm_a),
             frame: Mamba3FrameCache {
                 tap_fifo: Some(TapFifo {
@@ -978,19 +1026,18 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, scan_options: Mamba3ScanOption
         let prefix = x.clone().narrow(1, 0, split);
         let suffix = x.narrow(1, split, seq_len - split);
         let (out_prefix, mid_double) = m.forward_double_ssd(prefix, Some(init_double), &pd_a, None);
-        let mid_single = Mamba3SingleSsdCache::from(mid_double);
-        let (out_suffix, last) = m.forward_single_ssd(suffix, Some(mid_single), &ps_a, None);
+        let (out_suffix, last) = m.forward_single_ssd(suffix, Some(mid_double), &ps_a, None);
         let out = Tensor::cat(vec![out_prefix, out_suffix], 1);
         let fifo = last.frame.tap_fifo.expect("a β tap keeps its tap FIFO");
         (out, last.ssm_bhpr, fifo.b_bumhr, fifo.x_buhp, last.frame.rotation.angle())
     });
 
-    // ── Run B: single → (convert) → double ───────────────────────────────
+    // ── Run B: single → double ───────────────────────────────────────────
     let input_b = param_input(&input);
     let (pd_b, ps_b) = (double_scan_options, single_scan_options);
     let (ssm_b, k_b, v_b, ang_b) = (init_ssm, init_k, init_v, init_angle);
     let run_b = run_cache_fields_with_grads(&model, &input_b, &heads, move |m, x| {
-        let init_single = Mamba3SingleSsdCache {
+        let init_single = Mamba3Cache {
             ssm_bhpr: Tensor::from_inner(ssm_b),
             frame: Mamba3FrameCache {
                 tap_fifo: Some(TapFifo {
@@ -1005,15 +1052,14 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, scan_options: Mamba3ScanOption
         let prefix = x.clone().narrow(1, 0, split);
         let suffix = x.narrow(1, split, seq_len - split);
         let (out_prefix, mid_single) = m.forward_single_ssd(prefix, Some(init_single), &ps_b, None);
-        let mid_double = Mamba3DoubleSsdCache::from(mid_single);
-        let (out_suffix, last) = m.forward_double_ssd(suffix, Some(mid_double), &pd_b, None);
+        let (out_suffix, last) = m.forward_double_ssd(suffix, Some(mid_single), &pd_b, None);
         let out = Tensor::cat(vec![out_prefix, out_suffix], 1);
         let fifo = last.frame.tap_fifo.expect("a β tap keeps its tap FIFO");
         (out, last.ssm_bhpr, fifo.b_bumhr, fifo.x_buhp, last.frame.rotation.angle())
     });
 
     check_single_ssd_match(
-        "cache conversion parity (double↔single)",
+        "cross-pathway continuation parity (double↔single)",
         &run_a,
         &run_b,
         1e-4,
@@ -1022,23 +1068,23 @@ fn run_cache_conversion_parity(cfg: Mamba3Config, scan_options: Mamba3ScanOption
 }
 
 #[test]
-fn cache_conversion_parity() {
-    run_cache_conversion_parity(small_config(), Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)));
+fn cross_pathway_continuation_parity() {
+    run_cross_pathway_continuation_parity(small_config(), Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)));
 }
 
 #[test]
-fn cache_conversion_parity_mimo() {
-    run_cache_conversion_parity(small_config_mimo(), Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)));
+fn cross_pathway_continuation_parity_mimo() {
+    run_cross_pathway_continuation_parity(small_config_mimo(), Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)));
 }
 
 #[test]
-fn cache_conversion_parity_ngroups2() {
-    run_cache_conversion_parity(cfg_ngroups2(), Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)));
+fn cross_pathway_continuation_parity_ngroups2() {
+    run_cross_pathway_continuation_parity(cfg_ngroups2(), Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)));
 }
 
 #[test]
-fn cache_conversion_parity_mimo_ngroups2() {
-    run_cache_conversion_parity(cfg_mimo_ngroups2(), Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)));
+fn cross_pathway_continuation_parity_mimo_ngroups2() {
+    run_cross_pathway_continuation_parity(cfg_mimo_ngroups2(), Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)));
 }
 
 // ── Quaternion4D on the single-ssd pathway ──────────────────────────────
@@ -1105,7 +1151,7 @@ fn quaternion_single_matches_double(cfg: Mamba3Config, scan_options: Mamba3ScanO
     check_grads_match("quaternion single vs double", &r_double, &r_single, 1e-3);
 }
 
-/// Quaternion4D: `forward_single_ssd ≡ step_single_ssd` unrolling, both fresh.
+/// Quaternion4D: `forward_single_ssd ≡ step` unrolling, both fresh.
 fn quaternion_single_matches_step(cfg: Mamba3Config, scan_options: Mamba3ScanOptions) {
     let device = test_device();
     let model = cfg.init(&device.clone().autodiff());
@@ -1122,11 +1168,11 @@ fn quaternion_single_matches_step(cfg: Mamba3Config, scan_options: Mamba3ScanOpt
         m.forward_single_ssd(x, None, &single_scan_options, None).0
     });
     let r_step = run_with_grads(&model, &param_input(&input), &head, |m, x| {
-        let mut cache: Option<Mamba3SingleSsdCache> = None;
+        let mut cache: Option<Mamba3Cache> = None;
         let mut outs: Vec<Tensor<2>> = Vec::with_capacity(seq_len);
         for t in 0..seq_len {
             let token = x.clone().narrow(1, t, 1).squeeze_dim(1);
-            let (out_t, new_cache) = m.step_single_ssd(token, cache);
+            let (out_t, new_cache) = m.step(token, cache);
             cache = Some(new_cache);
             outs.push(out_t);
         }

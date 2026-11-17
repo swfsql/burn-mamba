@@ -233,18 +233,18 @@ src/
 │  ├─ scan_options.rs    `Mamba2ScanOptions`: the SSD path and the chunk length
 │  └─ ssd/               the three SSD paths, run by `Mamba2SsdInput` (`ssd_path.rs`)
 │     └─ serial_recalculated/  the chain rule and `D` skip around the standard scan
-├─ mamba3/               Mamba-3 block (`mamba3.rs`: the math) + `cache.rs` (the enum, the frame cache, the tap FIFO, `zero_cache`)
+├─ mamba3/               Mamba-3 block (`mamba3.rs`: the math) + `cache.rs` (the cache of both pathways, the frame cache, the tap FIFO, `zero_cache`)
 │  ├─ helpers.rs         shared by both pathways and by forward and step
 │  ├─ in_proj_layout.rs  the table of the channel groups of the in-projection
 │  ├─ plant_frame.rs     the entry and the tail around each scan
-│  ├─ scan_options.rs    `Mamba3ScanOptions` (both pathways): the SSD path and the chunk length
+│  ├─ scan_options.rs    `Mamba3ScanOptions`: the SSD path, the chunk length and the `Pathway`
 │  ├─ tap_pattern.rs     the tap pattern (`TapPattern`)
-│  ├─ double_ssd/        double-SSD pathway + its cache
-│  │  ├─ double_ssd/     its forward, and the step of both pathways
+│  ├─ double_ssd/        double-SSD pathway
+│  │  ├─ double_ssd/     its forward, and `step`
 │  │  └─ ssd/            the standard SSD paths
 │  │     ├─ serial_recalculated/  the calls into the standard scan
 │  │     └─ ssd_path/    `Mamba3DoubleSsdInput`
-│  ├─ single_ssd/        single-SSD pathway + its cache
+│  ├─ single_ssd/        single-SSD pathway
 │  │  ├─ single_ssd/     its forward
 │  │  ├─ token_band.rs   the lag-`u` correction band
 │  │  └─ ssd/            one-pass SSD paths, `diag.rs` (the diagonal γ-correction)

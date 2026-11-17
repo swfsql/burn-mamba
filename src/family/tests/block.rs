@@ -248,17 +248,17 @@ fn the_flat_caches_keep_empty_slots() {
     assert!(empty.into_slots().iter().all(Option::is_none), "a slot of `None` must stay empty");
 }
 
-/// The zero cache of a Mamba-3 block in the enum is a single-SSD cache,
-/// because a missing cache selects that pathway.
+/// The zero cache of a Mamba-3 block in the enum has the tag of the Mamba-3
+/// family.
 #[test]
 #[cfg(feature = "mamba3")]
-fn the_zero_cache_of_mamba3_is_single_ssd() {
+fn the_zero_cache_of_mamba3_has_the_mamba3_tag() {
     let device = test_device();
     let block = MambaBlock::Mamba3(BlockConfig::init_block(&m3(), 1, &device));
     let zero = block.zero_cache(3, &device);
     assert!(
-        matches!(zero, MambaCache::Mamba3(Mamba3Cache::SingleSsd(_))),
-        "the zero cache of Mamba-3 must be a single-SSD cache",
+        matches!(zero, MambaCache::Mamba3(_)),
+        "the zero cache of Mamba-3 must have the Mamba-3 tag",
     );
 }
 

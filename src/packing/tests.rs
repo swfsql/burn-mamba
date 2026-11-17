@@ -26,11 +26,7 @@
 #[cfg(feature = "mamba2")]
 use crate::mamba2::prelude::*;
 #[cfg(feature = "mamba3")]
-use crate::mamba3::double_ssd::prelude::Mamba3DoubleSsdCache;
-#[cfg(feature = "mamba3")]
 use crate::mamba3::prelude::*;
-#[cfg(feature = "mamba3")]
-use crate::mamba3::single_ssd::prelude::Mamba3SingleSsdCache;
 use burn::module::{ModuleVisitor, Param};
 use burn::prelude::*;
 use burn::tensor::{Distribution, Gradients, TensorData};
@@ -229,33 +225,24 @@ impl TestCache for Mamba2Cache {
     }
 }
 
-/// The two Mamba-3 caches have the same fields.
 #[cfg(feature = "mamba3")]
-macro_rules! impl_mamba3_cache {
-    ($cache:ty) => {
-        impl TestCache for $cache {
-            fn visit(&self, v: &mut impl FieldVisit) {
-                v.visit(&self.ssm_bhpr);
-                let frame = &self.frame;
-                if let Some(fifo) = &frame.tap_fifo {
-                    v.visit(&fifo.b_bumhr);
-                    v.visit(&fifo.x_buhp);
-                }
-                match &frame.rotation {
-                    RotationState::Real(_) => {}
-                    RotationState::Angle(t) => v.visit_angle(t),
-                    RotationState::Quaternion(t) | RotationState::Rotor(t) => v.visit(t),
-                }
-                frame.log_precision_bh.iter().for_each(|t| v.visit(t));
-                frame.tropical_bh.iter().for_each(|t| v.visit(t));
-            }
+impl TestCache for Mamba3Cache {
+    fn visit(&self, v: &mut impl FieldVisit) {
+        v.visit(&self.ssm_bhpr);
+        let frame = &self.frame;
+        if let Some(fifo) = &frame.tap_fifo {
+            v.visit(&fifo.b_bumhr);
+            v.visit(&fifo.x_buhp);
         }
-    };
+        match &frame.rotation {
+            RotationState::Real(_) => {}
+            RotationState::Angle(t) => v.visit_angle(t),
+            RotationState::Quaternion(t) | RotationState::Rotor(t) => v.visit(t),
+        }
+        frame.log_precision_bh.iter().for_each(|t| v.visit(t));
+        frame.tropical_bh.iter().for_each(|t| v.visit(t));
+    }
 }
-#[cfg(feature = "mamba3")]
-impl_mamba3_cache!(Mamba3DoubleSsdCache);
-#[cfg(feature = "mamba3")]
-impl_mamba3_cache!(Mamba3SingleSsdCache);
 
 /// A leaf that takes gradients: the origin cache of the test.
 struct Leaf;

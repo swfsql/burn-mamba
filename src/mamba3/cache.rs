@@ -1,92 +1,106 @@
-//! # Mamba-3 Cache and Pathway Selection
+//! # The Mamba-3 cache
 //!
-//! [`Mamba3Cache`] / [`Mamba3Caches`] are **enums** that tag the SSD pathway
-//! of a cache (`DoubleSsd` | `SingleSsd`). The variant given to
-//! [`Mamba3::forward`](crate::mamba3::mamba3::Mamba3::forward) /
-//! [`Mamba3::step`](crate::mamba3::mamba3::Mamba3::step) selects the pathway
-//! at runtime. A missing cache selects `SingleSsd`:
-//! [`Mamba3::zero_cache`] builds each fresh cache, of that pathway.
+//! [`Mamba3Cache`] is the cache that one Mamba-3 block keeps between calls.
+//! [`Mamba3Caches`] holds one cache for each (virtual) layer of a stack.
+//! [`Mamba3::zero_cache`] builds the cache of a fresh sequence.
 //!
-//! The accumulator of single-SSD and the state of double-SSD are different
-//! **mid-sequence**, so the cache types are distinct: this prevents a silent
-//! mix inside a chunked pass. They are equal at call boundaries, where caches
-//! are produced and consumed. So the `From` impls at the bottom convert
-//! between them by a lossless field-by-field move (see the note there).
+//! A cache holds:
 //!
-//! Both cache types hold the `ssm_bhpr` of their pathway and one
-//! [`Mamba3FrameCache`]: the fields that the plant frame writes. Its
-//! [`TapFifo`] is the tap FIFO of the trapezoid. It owns its layout: its
-//! zeros, and the docs of the slot order and of the decay pre-scale of `x`.
+//! 1. **State** (`ssm_bhpr`): `hₜ ∈ ℝ^{per_head_dim×state_rank}` for each
+//!    head, the compressed context.
+//! 2. **Frame cache** ([`Mamba3FrameCache`]): the fields that the plant frame
+//!    writes.
+//!    - **Tap FIFO** ([`TapFifo`]): the `B` and the `x` of the last `lag`
+//!      write positions, oldest first. With them, the β term of the next call
+//!      rebuilds `β Bₚ₋ₗₐ₉ ⊗ xₚ₋ₗₐ₉`. The FIFO exists only when the
+//!      [`TapPattern`](crate::mamba3::tap_pattern::TapPattern) of the block
+//!      has a β tap. It owns its layout: its zeros, and the docs of the slot
+//!      order and of the decay pre-scale of `x`.
+//!    - **Cumulative rotation**
+//!      ([`RotationState`](crate::mamba3::rotation::RotationState)): the
+//!      rotation up to the last position, to continue the data-dependent
+//!      rotation.
+//!    - **Positive-system fields**: `ln Λ` of a Kalman gain and `c` of a
+//!      tropical register, when the block has them.
+//!
+//! Mamba-3 has **no conv cache**. It removes the short 1-D convolution of
+//! Mamba-2: the trapezoidal discretisation and the learnable B/C biases take
+//! its role (`info/mamba-3/architecture-deltas.md`).
+//!
+//! ## One cache for both pathways
+//!
+//! One cache type serves both pathways (ADR-0003). In the middle of a
+//! sequence, single-SSD carries its accumulator `h'`, which is different from
+//! the state `h` of double-SSD. But a cache exists only at a call boundary,
+//! and there the two are equal:
+//!
+//! - At a call boundary, the look-ahead term `νₜ₊ₗₐ₉` is zero, so `scaleₜ = γₜ`
+//!   for the last `lag` positions. The next call pays their second
+//!   installment, from the tap FIFO.
+//! - With this substitution, the accumulator
+//!   `h'ₜ = αₜ h'ₜ₋₁ + scaleₜ Bₜ⊗xₜ` is exactly the state
+//!   `hₜ = αₜ hₜ₋₁ + Σ_taps βₜ Bₜ₋ₗ⊗xₜ₋ₗ + γₜ Bₜ⊗xₜ`.
+//! - The next call rebuilds the deferred β term from the tap FIFO, in the
+//!   same way on both pathways.
+//!
+//! The frame cache has the same meaning on both pathways. So a cache from a
+//! forward of one pathway continues its sequence on either pathway, and on
+//! `step`.
 
-use crate::mamba3::double_ssd::prelude::*;
 use crate::mamba3::mamba3::Mamba3;
-use crate::mamba3::single_ssd::prelude::*;
 use burn::prelude::*;
 use burn_stack::modules::sanity as san;
 
-/// A pathway-tagged bundle of per-layer caches, so one dispatch entry can
-/// take and return either cache family.
+// ---------------------------------------------------------------------------
+// The caches of a stack
+// ---------------------------------------------------------------------------
+
+/// The caches of a stack of Mamba-3 blocks.
 ///
-/// The variant selects the Double-SSD or Single-SSD pathway. Without caches,
-/// the pathway is [`Self::SingleSsd`].
-///
-/// See also [`crate::mamba3::scan_options::Mamba3ScanOptions`].
-#[derive(Debug, Clone)]
-pub enum Mamba3Caches {
-    /// Caches for the double-ssd pathway.
-    DoubleSsd(Mamba3DoubleSsdCaches),
-    /// Caches for the single-ssd pathway.
-    SingleSsd(Mamba3SingleSsdCaches),
+/// Every `step` of the family-generic [`burn_stack::modules::Layers`] stack
+/// takes and returns one [`Mamba3Caches`]. Each element of `caches` is the
+/// cache of one (virtual) layer of the network.
+#[derive(Module, Debug)]
+pub struct Mamba3Caches {
+    /// The cache of each layer.
+    ///
+    /// Length: the number of *virtual* layers. With shared weights (a layer
+    /// schedule), it can be larger than the number of *real* weight layers.
+    pub caches: Vec<Mamba3Cache>,
 }
 
-/// A pathway-tagged cache of one block, so one dispatch entry can take and
-/// return either cache family.
-///
-/// The variant selects the Double-SSD or Single-SSD pathway. Without a cache,
-/// the pathway is [`Self::SingleSsd`].
-///
-/// See also [`crate::mamba3::scan_options::Mamba3ScanOptions`].
-#[derive(Debug, Clone)]
-pub enum Mamba3Cache {
-    /// Cache for the double-ssd pathway.
-    DoubleSsd(Mamba3DoubleSsdCache),
-    /// Cache for the single-ssd pathway.
-    SingleSsd(Mamba3SingleSsdCache),
-}
+// ---------------------------------------------------------------------------
+// The cache of one block
+// ---------------------------------------------------------------------------
 
-impl Mamba3Caches {
-    /// Unwrap to the double-SSD caches, or `None` if this is the single-SSD variant.
-    pub fn double_ssd(self) -> Option<Mamba3DoubleSsdCaches> {
-        match self {
-            Self::DoubleSsd(caches) => Some(caches),
-            Self::SingleSsd(_caches) => None,
-        }
-    }
+/// The cache that one Mamba-3 block carries between calls, on both pathways.
+///
+/// Each call to [`Mamba3::step`] or [`Mamba3::forward`] returns a new cache
+/// with all tensors updated.
+#[derive(Module, Debug)]
+pub struct Mamba3Cache {
+    /// **State** `hₜ`, at a call boundary.
+    ///
+    /// The trapezoidal recurrence of double-SSD and of `step` updates it, here
+    /// at the default lag 1:
+    /// `hₜ = αₜ hₜ₋₁ + βₜ (sumₘ Bₜ₋₁[m] ⊗ (xₜ₋₁ * mimo_x[m])) + γₜ (sumₘ Bₜ[m] ⊗ (xₜ * mimo_x[m]))`
+    ///
+    /// Single-SSD writes its accumulator `h'` here. At a call boundary, the
+    /// accumulator equals the state (see the module header).
+    ///
+    /// Shape: `[batch, nheads, per_head_dim, state_rank]`
+    pub ssm_bhpr: Tensor<4>,
 
-    /// Unwrap to the single-SSD caches, or `None` if this is the double-SSD variant.
-    pub fn single_ssd(self) -> Option<Mamba3SingleSsdCaches> {
-        match self {
-            Self::DoubleSsd(_caches) => None,
-            Self::SingleSsd(caches) => Some(caches),
-        }
-    }
+    /// **The frame cache** ([`Mamba3FrameCache`]): the tap FIFO, the
+    /// cumulative rotation and the registers of the positive systems.
+    pub frame: Mamba3FrameCache,
 }
 
 impl Mamba3Cache {
-    /// Unwrap to the double-SSD cache, or `None` if this is the single-SSD variant.
-    pub fn double_ssd(self) -> Option<Mamba3DoubleSsdCache> {
-        match self {
-            Self::DoubleSsd(cache) => Some(cache),
-            Self::SingleSsd(_cache) => None,
-        }
-    }
-
-    /// Unwrap to the single-SSD cache, or `None` if this is the double-SSD variant.
-    pub fn single_ssd(self) -> Option<Mamba3SingleSsdCache> {
-        match self {
-            Self::DoubleSsd(_cache) => None,
-            Self::SingleSsd(cache) => Some(cache),
-        }
+    /// Run the [`NaN`/`Inf` guards](burn_stack::modules::misc::sanity) on every cached tensor.
+    pub fn sanity(&self) {
+        san(&self.ssm_bhpr);
+        self.frame.sanity();
     }
 }
 
@@ -167,8 +181,8 @@ impl TapFifo {
 // ---------------------------------------------------------------------------
 
 /// The frame cache: the part of a Mamba-3 cache that the plant frame writes.
-/// It has the same meaning in both pathways, and both cache types hold it
-/// beside their `ssm_bhpr`.
+/// It has the same meaning on both pathways. [`Mamba3Cache`] holds it beside
+/// `ssm_bhpr`.
 #[derive(Module, Debug)]
 pub struct Mamba3FrameCache {
     /// **The tap FIFO** ([`TapFifo`]). The `β` taps of the next call read it.
@@ -242,12 +256,7 @@ impl Mamba3 {
     /// positive systems. A `forward` or a `step` without a cache starts from it, and
     /// so does each segment of a packed call without an origin. The shapes come
     /// from the block.
-    ///
-    /// It is a single-SSD cache, because a missing cache selects that pathway.
-    /// A caller that needs a fresh double-SSD cache converts it with `.into()`.
-    /// A fresh cache is at a call boundary, so this move is lossless (see the
-    /// note on the conversions below).
-    pub fn zero_cache(&self, batch: usize, device: &Device) -> Mamba3SingleSsdCache {
+    pub fn zero_cache(&self, batch: usize, device: &Device) -> Mamba3Cache {
         let ssm_bhpr = Tensor::zeros(
             [batch, self.nheads(), self.per_head_dim(), self.state_rank],
             device,
@@ -256,78 +265,6 @@ impl Mamba3 {
         let rotation = self.zero_rotation_state(batch, device);
         let (log_precision_bh, tropical_bh) = self.zero_positive_state(batch, device);
         let frame = Mamba3FrameCache { tap_fifo, rotation, log_precision_bh, tropical_bh };
-        Mamba3SingleSsdCache { ssm_bhpr, frame }
-    }
-}
-
-impl From<Mamba3DoubleSsdCaches> for Mamba3Caches {
-    fn from(caches: Mamba3DoubleSsdCaches) -> Self {
-        Mamba3Caches::DoubleSsd(caches)
-    }
-}
-
-impl From<Mamba3SingleSsdCaches> for Mamba3Caches {
-    fn from(caches: Mamba3SingleSsdCaches) -> Self {
-        Mamba3Caches::SingleSsd(caches)
-    }
-}
-
-impl From<Mamba3DoubleSsdCache> for Mamba3Cache {
-    fn from(cache: Mamba3DoubleSsdCache) -> Self {
-        Mamba3Cache::DoubleSsd(cache)
-    }
-}
-
-impl From<Mamba3SingleSsdCache> for Mamba3Cache {
-    fn from(cache: Mamba3SingleSsdCache) -> Self {
-        Mamba3Cache::SingleSsd(cache)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Conversions between the two pathway caches
-// ---------------------------------------------------------------------------
-//
-// At a cache boundary, the look-ahead term `νₜ₊ₗₐ₉` vanishes, so `scaleₜ = γₜ`
-// for the final `lag` positions. The *next* call pays their second
-// installment, from the tap FIFO. With this substitution, the single-ssd
-// accumulator `h'ₜ = αₜ h'ₜ₋₁ + scaleₜ Bₜ⊗xₜ` is *exactly* the double-ssd state
-// `hₜ = αₜ hₜ₋₁ + Σ_taps βₜ Bₜ₋ₗ⊗xₜ₋ₗ + γₜ Bₜ⊗xₜ`. The next call rebuilds the
-// deferred β contribution from the saved tap FIFO, identically in both forms.
-//
-// The frame cache has the same meaning in both caches. It holds the tap FIFO
-// (the `B` and `x` of the last `lag` positions) and the cumulative rotation.
-// It also holds the `ln Λ` and `c` of the positive systems, which read only
-// the inputs. So the conversion moves the two fields.
-//
-// The accumulators differ only *mid-sequence*. Caches exist only at
-// boundaries, so the move is lossless. The distinct types still prevent a
-// silent mix of the two accumulators inside one chunked pass.
-
-impl From<Mamba3SingleSsdCache> for Mamba3DoubleSsdCache {
-    fn from(cache: Mamba3SingleSsdCache) -> Self {
-        Mamba3DoubleSsdCache { ssm_bhpr: cache.ssm_bhpr, frame: cache.frame }
-    }
-}
-
-impl From<Mamba3DoubleSsdCache> for Mamba3SingleSsdCache {
-    fn from(cache: Mamba3DoubleSsdCache) -> Self {
-        Mamba3SingleSsdCache { ssm_bhpr: cache.ssm_bhpr, frame: cache.frame }
-    }
-}
-
-impl From<Mamba3SingleSsdCaches> for Mamba3DoubleSsdCaches {
-    fn from(caches: Mamba3SingleSsdCaches) -> Self {
-        Mamba3DoubleSsdCaches {
-            caches: caches.caches.into_iter().map(Into::into).collect(),
-        }
-    }
-}
-
-impl From<Mamba3DoubleSsdCaches> for Mamba3SingleSsdCaches {
-    fn from(caches: Mamba3DoubleSsdCaches) -> Self {
-        Mamba3SingleSsdCaches {
-            caches: caches.caches.into_iter().map(Into::into).collect(),
-        }
+        Mamba3Cache { ssm_bhpr, frame }
     }
 }

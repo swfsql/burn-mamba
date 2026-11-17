@@ -1158,10 +1158,10 @@ fn quaternion_split_prefill_matches_full_kind(kind: RotationKind) {
         "{kind:?} split-prefill output mismatch: {d_out:.6}"
     );
 
-    // The final state must also match. A fresh cache selects the single-ssd
-    // pathway for Quaternion4D too (forward_single_ssd supports it).
-    let s_full = cache_full.single_ssd().unwrap().ssm_bhpr;
-    let s_split = cache_split.single_ssd().unwrap().ssm_bhpr;
+    // The final state must also match. The default scan options select the
+    // single-SSD pathway for Quaternion4D too (forward_single_ssd supports it).
+    let s_full = cache_full.ssm_bhpr;
+    let s_split = cache_split.ssm_bhpr;
     let d_state = max_abs_diff(s_full, s_split);
     assert!(
         d_state < dtype_tol(1e-3),
@@ -1271,9 +1271,6 @@ fn assert_cache_parity(
     a: crate::mamba3::cache::Mamba3Cache,
     b: crate::mamba3::cache::Mamba3Cache,
 ) {
-    let missing = "a missing cache defaults to the single-ssd pathway";
-    let (a, b) = (a.single_ssd().expect(missing), b.single_ssd().expect(missing));
-
     let d = max_abs_diff(a.ssm_bhpr, b.ssm_bhpr);
     assert!(d < dtype_tol(VAL_TOL), "{label}: state: {d:.3e}");
 

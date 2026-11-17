@@ -189,9 +189,6 @@ fn none_forward_matches_step() {
                 max_abs_diff(out_single, out_step) < dtype_tol(1e-4),
                 "{label}: forward vs unrolled step"
             );
-            let cache_step = cache_step
-                .single_ssd()
-                .expect("a missing cache defaults to the single-ssd pathway");
             assert!(
                 max_abs_diff(cache_single.ssm_bhpr, cache_step.ssm_bhpr.clone()) < dtype_tol(1e-4),
                 "{label}: final state"
@@ -346,9 +343,6 @@ fn vertical_forward_matches_step() {
             let x = input(&config, 5);
             let label = format!("{kind:?} u={micro_steps}");
             let (out_step, cache_step) = unrolled(&model, &x);
-            let cache_step = cache_step
-                .single_ssd()
-                .expect("a missing cache defaults to the single-ssd pathway");
 
             let (out_single, cache_single) =
                 model.forward_single_ssd(x.clone(), None, &Mamba3ScanOptions::default(), None);
@@ -411,7 +405,6 @@ fn vertical_matches_step_with_mimo() {
         let x = input(&config, 4);
         let label = format!("m={mimo_rank}");
         let (out_step, cache_step) = unrolled(&model, &x);
-        let cache_step = cache_step.single_ssd().expect("single-ssd");
         let scan_options = Mamba3ScanOptions::default();
 
         for (pathway, (out, cache_ssm)) in [
@@ -452,7 +445,7 @@ fn vertical_forward_continues_a_stepped_cache() {
                 let (_, c) = model.step(x.clone().narrow(1, t, 1).squeeze_dim(1), cache);
                 cache = Some(c);
             }
-            let stepped = cache.expect("two tokens").single_ssd().expect("single-ssd");
+            let stepped = cache.expect("two tokens");
             let (out_tail, cache_fwd) = model.forward_single_ssd(
                 x.clone().narrow(1, 2, 3),
                 Some(stepped),
@@ -461,7 +454,6 @@ fn vertical_forward_continues_a_stepped_cache() {
             );
 
             let (out_all, cache_all) = unrolled(&model, &x);
-            let cache_all = cache_all.single_ssd().expect("single-ssd");
             let d = max_abs_diff(out_tail, out_all.narrow(1, 2, 3));
             assert!(d < dtype_tol(1e-4), "{label}: forward after step: {d:.3e}");
             let d = max_abs_diff(cache_fwd.ssm_bhpr, cache_all.ssm_bhpr);
@@ -594,7 +586,6 @@ fn lattice_forward_matches_step() {
                 let x = input(&config, 5);
                 let label = format!("{pattern:?} {kind:?} u={micro_steps}");
                 let (out_step, cache_step) = unrolled(&model, &x);
-                let cache_step = cache_step.single_ssd().expect("single-ssd by default");
 
                 let (out_single, cache_single) =
                     model.forward_single_ssd(x.clone(), None, &Mamba3ScanOptions::default(), None);
@@ -632,7 +623,6 @@ fn lattice_matches_step_with_mimo() {
             let x = input(&config, 4);
             let label = format!("{pattern:?} m={mimo_rank}");
             let (out_step, cache_step) = unrolled(&model, &x);
-            let cache_step = cache_step.single_ssd().expect("single-ssd");
             let scan_options = Mamba3ScanOptions::default();
 
             for (pathway, (out, ssm)) in [
@@ -700,7 +690,7 @@ fn lattice_forward_continues_a_stepped_cache() {
                 let (_, c) = model.step(x.clone().narrow(1, t, 1).squeeze_dim(1), cache);
                 cache = Some(c);
             }
-            let stepped = cache.expect("two tokens").single_ssd().expect("single-ssd");
+            let stepped = cache.expect("two tokens");
             let (out_tail, cache_fwd) = model.forward_single_ssd(
                 x.clone().narrow(1, 2, 3),
                 Some(stepped),
@@ -709,7 +699,6 @@ fn lattice_forward_continues_a_stepped_cache() {
             );
 
             let (out_all, cache_all) = unrolled(&model, &x);
-            let cache_all = cache_all.single_ssd().expect("single-ssd");
             let d = max_abs_diff(out_tail, out_all.narrow(1, 2, 3));
             assert!(d < dtype_tol(1e-4), "{label}: forward after step: {d:.3e}");
             let d = max_abs_diff(cache_fwd.ssm_bhpr, cache_all.ssm_bhpr);
@@ -941,7 +930,6 @@ fn lattice_multi_chunk_matches_step() {
         let model: Mamba3 = config.init(&device);
         let x = input(&config, 5);
         let (out_step, cache_step) = unrolled(&model, &x);
-        let cache_step = cache_step.single_ssd().expect("single-ssd");
 
         for scan_options in [
             Mamba3ScanOptions::new(SsdPath::Minimal).with_chunk_len(Some(4)),

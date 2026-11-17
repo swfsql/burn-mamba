@@ -219,12 +219,14 @@ They differ only in their memory/compute trade-off:
 | `Serial` | a serial loop over chunks (mirrors the reference Triton kernels) | autodiff |
 | `SerialRecalculated` *(default)* | a serial loop with a recompute backward | custom: ~⅓ less training memory |
 
-The scan options of a block hold its SSD path and its chunk length. See
+The scan options of a block hold its SSD path and its chunk length, and in
+Mamba-3 its pathway. See
 [`Mamba2ScanOptions`](https://swfsql.github.io/burn-mamba/doc/burn_mamba/mamba2/scan_options/struct.Mamba2ScanOptions.html)
 and
 [`Mamba3ScanOptions`](https://swfsql.github.io/burn-mamba/doc/burn_mamba/mamba3/scan_options/struct.Mamba3ScanOptions.html).
 In Mamba-3 the SSD path is independent of the *pathway* (double- or
-single-SSD). The cache variant selects the pathway.
+single-SSD). The scan options select the pathway, and the default is
+single-SSD.
 
 ## Examples
 

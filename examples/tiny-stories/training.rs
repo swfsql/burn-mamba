@@ -159,7 +159,7 @@ pub fn train(
 #[derive(Clone, Debug)]
 pub struct Run {
     /// The scan options of every chunkwise `forward` (`--ssd-path`,
-    /// `--ssd-chunk-len`).
+    /// `--ssd-chunk-len`, `--pathway`).
     pub scan_options: MambaScanOptions,
     /// `--pack-align`, in tokens: each story of a packed row starts at a
     /// multiple of it. It must be a multiple of the chunk length, because a

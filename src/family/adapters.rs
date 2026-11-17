@@ -160,62 +160,20 @@ mod impl_mamba2 {
 #[cfg(feature = "mamba3")]
 mod impl_mamba3 {
     use super::*;
-    use crate::mamba3::double_ssd::prelude::Mamba3DoubleSsdCaches;
     use crate::mamba3::prelude::{Mamba3, Mamba3Cache, Mamba3Caches, Mamba3Config, Mamba3ScanOptions};
-    use crate::mamba3::single_ssd::prelude::Mamba3SingleSsdCaches;
     use crate::ssd_path::SsdPath;
 
     impl CacheStack for Mamba3Caches {
         type Cache = Mamba3Cache;
-        /// The number of slots, for both pathways.
         fn slot_count(&self) -> usize {
-            match self {
-                Self::DoubleSsd(caches) => caches.caches.len(),
-                Self::SingleSsd(caches) => caches.caches.len(),
-            }
+            self.caches.len()
         }
         fn into_slots(self) -> Vec<Option<Mamba3Cache>> {
-            match self {
-                Self::DoubleSsd(caches) => caches
-                    .caches
-                    .into_iter()
-                    .map(Mamba3Cache::from)
-                    .map(Some)
-                    .collect(),
-                Self::SingleSsd(caches) => caches
-                    .caches
-                    .into_iter()
-                    .map(Mamba3Cache::from)
-                    .map(Some)
-                    .collect(),
-            }
+            self.caches.into_iter().map(Some).collect()
         }
-        /// The first slot gives the pathway. An empty list gives single-SSD
-        /// caches.
-        ///
-        /// # Panics
-        ///
-        /// If a slot is empty, or if the slots mix the two pathways.
         fn from_slots(slots: Vec<Option<Mamba3Cache>>) -> Self {
-            let caches: Vec<Mamba3Cache> = slots.into_iter().map(Option::unwrap).collect();
-            if matches!(caches.first(), Some(Mamba3Cache::DoubleSsd(_))) {
-                Mamba3DoubleSsdCaches {
-                    caches: caches
-                        .into_iter()
-                        .map(Mamba3Cache::double_ssd)
-                        .map(Option::unwrap)
-                        .collect(),
-                }
-                .into()
-            } else {
-                Mamba3SingleSsdCaches {
-                    caches: caches
-                        .into_iter()
-                        .map(Mamba3Cache::single_ssd)
-                        .map(Option::unwrap)
-                        .collect(),
-                }
-                .into()
+            Self {
+                caches: slots.into_iter().map(Option::unwrap).collect(),
             }
         }
     }
@@ -257,11 +215,8 @@ mod impl_mamba3 {
         fn block_step(&self, x: Tensor<2>, cache: Option<Mamba3Cache>) -> (Tensor<2>, Mamba3Cache) {
             self.step(x, cache)
         }
-        /// A single-SSD cache, because a missing cache selects that pathway.
-        /// It holds about half the SSD memory of a double-SSD cache, for every
-        /// rotation kind.
         fn zero_cache(&self, batch: usize, device: &Device) -> Mamba3Cache {
-            Mamba3::zero_cache(self, batch, device).into()
+            Mamba3::zero_cache(self, batch, device)
         }
         fn untied_params(&self) -> Vec<UntiedParam> {
             Mamba3::untied_params(self)

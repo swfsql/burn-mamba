@@ -66,11 +66,9 @@ mod impl_mamba2 {
 #[cfg(feature = "mamba3")]
 mod impl_mamba3 {
     use super::*;
-    use crate::mamba3::double_ssd::prelude::{Mamba3DoubleSsdCache, Mamba3DoubleSsdCaches};
     use crate::mamba3::prelude::{
         Mamba3Cache, Mamba3Caches, Mamba3FrameCache, RotationState, TapFifo,
     };
-    use crate::mamba3::single_ssd::prelude::{Mamba3SingleSsdCache, Mamba3SingleSsdCaches};
 
     /// An optional field: both present or both absent.
     fn zip_option<T: CacheTensors>(a: Option<T>, b: Option<T>, z: &mut impl TensorZip) -> Option<T> {
@@ -113,56 +111,19 @@ mod impl_mamba3 {
         }
     }
 
-    impl CacheTensors for Mamba3DoubleSsdCache {
-        fn zip_tensors(self, other: Self, z: &mut impl TensorZip) -> Self {
-            Self {
-                ssm_bhpr: z.zip(self.ssm_bhpr, other.ssm_bhpr),
-                frame: self.frame.zip_tensors(other.frame, z),
-            }
-        }
-    }
-
-    impl CacheTensors for Mamba3SingleSsdCache {
-        fn zip_tensors(self, other: Self, z: &mut impl TensorZip) -> Self {
-            Self {
-                ssm_bhpr: z.zip(self.ssm_bhpr, other.ssm_bhpr),
-                frame: self.frame.zip_tensors(other.frame, z),
-            }
-        }
-    }
-
     impl CacheTensors for Mamba3Cache {
         fn zip_tensors(self, other: Self, z: &mut impl TensorZip) -> Self {
-            match (self, other) {
-                (Self::DoubleSsd(a), Self::DoubleSsd(b)) => Self::DoubleSsd(a.zip_tensors(b, z)),
-                (Self::SingleSsd(a), Self::SingleSsd(b)) => Self::SingleSsd(a.zip_tensors(b, z)),
-                _ => panic!("the two caches differ in SSD pathway"),
-            }
-        }
-    }
-
-    impl CacheTensors for Mamba3DoubleSsdCaches {
-        fn zip_tensors(self, other: Self, z: &mut impl TensorZip) -> Self {
             Self {
-                caches: self.caches.zip_tensors(other.caches, z),
-            }
-        }
-    }
-
-    impl CacheTensors for Mamba3SingleSsdCaches {
-        fn zip_tensors(self, other: Self, z: &mut impl TensorZip) -> Self {
-            Self {
-                caches: self.caches.zip_tensors(other.caches, z),
+                ssm_bhpr: z.zip(self.ssm_bhpr, other.ssm_bhpr),
+                frame: self.frame.zip_tensors(other.frame, z),
             }
         }
     }
 
     impl CacheTensors for Mamba3Caches {
         fn zip_tensors(self, other: Self, z: &mut impl TensorZip) -> Self {
-            match (self, other) {
-                (Self::DoubleSsd(a), Self::DoubleSsd(b)) => Self::DoubleSsd(a.zip_tensors(b, z)),
-                (Self::SingleSsd(a), Self::SingleSsd(b)) => Self::SingleSsd(a.zip_tensors(b, z)),
-                _ => panic!("the two caches differ in SSD pathway"),
+            Self {
+                caches: self.caches.zip_tensors(other.caches, z),
             }
         }
     }

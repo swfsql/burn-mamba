@@ -22,7 +22,6 @@ use super::kalman::{self, GainInput, LogMasses};
 use super::scan::{self, Affine, Mobius};
 use super::{Gain, LOG_ZERO, Tropical};
 use crate::mamba3::cache::Mamba3Cache;
-use crate::mamba3::double_ssd::cache::Mamba3DoubleSsdCache;
 use crate::mamba3::in_proj_layout::GroupKey;
 use crate::mamba3::mamba3::{Mamba3, Mamba3Config};
 use crate::mamba3::rotation::RotationKind;
@@ -560,7 +559,7 @@ fn assert_field(label: &str, name: &str, a: &Option<Tensor<2>>, b: &Option<Tenso
     }
 }
 
-fn assert_caches_match(label: &str, a: &Mamba3DoubleSsdCache, b: &Mamba3DoubleSsdCache) {
+fn assert_caches_match(label: &str, a: &Mamba3Cache, b: &Mamba3Cache) {
     let d = max_abs_diff(a.ssm_bhpr.clone(), b.ssm_bhpr.clone());
     assert!(d < dtype_tol(1e-4), "{label}: state differs by {d}");
     let (a, b) = (&a.frame, &b.frame);
@@ -603,14 +602,14 @@ fn forward_step_pathways_and_prefill_agree_across_the_lattice() {
         let (out_single, cache_single) = model.forward_single_ssd(input.clone(), None, &scan_options, None);
         let d = max_rel_diff(out_single, out.clone());
         assert!(d < dtype_tol(1e-4), "{label}: double vs single outputs {d}");
-        assert_caches_match(&format!("{label} double/single"), &cache, &cache_single.into());
+        assert_caches_match(&format!("{label} double/single"), &cache, &cache_single);
 
         let (head, mid) = model.forward_single_ssd(input.clone().narrow(1, 0, split), None, &scan_options, None);
         let (tail, last) =
             model.forward_single_ssd(input.clone().narrow(1, split, tokens - split), Some(mid), &scan_options, None);
         let d = max_rel_diff(Tensor::cat(vec![head, tail], 1), out.clone());
         assert!(d < dtype_tol(1e-4), "{label}: split prefill outputs {d}");
-        assert_caches_match(&format!("{label} split prefill"), &cache, &last.into());
+        assert_caches_match(&format!("{label} split prefill"), &cache, &last);
 
         let (out_minimal, _) =
             model.forward_double_ssd(
@@ -860,10 +859,7 @@ fn the_fields_survive_a_no_grad_round_trip() {
     let input = Tensor::<3>::from_inner(uniform([2, 3, 16], -1.5, 1.5, &device)).to_device(&ad);
     let (_, cache) = model.forward(input, None, Mamba3ScanOptions::default(), None);
     let back = cache_from_inner(cache_to_inner(cache.clone()), &ad);
-    let (Mamba3Cache::SingleSsd(before), Mamba3Cache::SingleSsd(after)) = (cache, back) else {
-        panic!("a missing cache is a single-SSD one");
-    };
-    let (before, after) = (before.frame, after.frame);
+    let (before, after) = (cache.frame, back.frame);
     assert_field("no-grad trip", "ln Λ", &before.log_precision_bh, &after.log_precision_bh, 0.0);
     assert_field("no-grad trip", "tropical c", &before.tropical_bh, &after.tropical_bh, 0.0);
     assert!(after.log_precision_bh.is_some() && after.tropical_bh.is_some());

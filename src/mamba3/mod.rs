@@ -20,7 +20,8 @@
 //! ## Two SSD pathways
 //!
 //! Two interchangeable pathways compute the trapezoidal recurrence. The
-//! **cache variant** that the caller supplies selects one at runtime:
+//! [`Pathway`](crate::mamba3::scan_options::Pathway) of the scan options
+//! selects one at runtime:
 //!
 //! - [`double_ssd`](crate::mamba3::double_ssd) — one standard SSD call per
 //!   trapezoid term: one for the current sample, plus one per `β` tap
@@ -31,13 +32,12 @@
 //!   official-kernel form, for every tap pattern. It uses ≈ half the training
 //!   memory of the double pathway at the default, and less when there are more
 //!   taps. It carries the accumulator, which differs from the state
-//!   mid-sequence.
+//!   mid-sequence. It is the default.
 //!
-//! [`cache`](crate::mamba3::cache) holds the enum that selects the pathway,
-//! and the frame cache that both cache types keep.
-//! [`scan_options`](crate::mamba3::scan_options) holds the scan options of
-//! both pathways: the [SSD path](crate::ssd_path::SsdPath) (Minimal / Serial /
-//! SerialRecalculated) and the chunk length.
+//! [`cache`](crate::mamba3::cache) holds the one cache type of both pathways,
+//! with its frame cache. [`scan_options`](crate::mamba3::scan_options) holds
+//! the scan options: the [SSD path](crate::ssd_path::SsdPath) (Minimal /
+//! Serial / SerialRecalculated), the chunk length and the pathway.
 //!
 //! ## The tap pattern of the trapezoid
 //!
@@ -95,6 +95,6 @@ pub mod prelude {
     pub use positive::{Gain, Tropical};
     pub use quat_scan::Mamba3QuatScanBackendExt;
     pub use rotation::{RotationKind, RotationState};
-    pub use scan_options::Mamba3ScanOptions;
+    pub use scan_options::{Mamba3ScanOptions, Pathway};
     pub use tap_pattern::TapPattern;
 }

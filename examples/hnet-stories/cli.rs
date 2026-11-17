@@ -6,7 +6,7 @@
 
 use crate::common::cli::{AppArgs, TrainingStepFlags, finish_extra};
 use crate::common::context::BATCH;
-use crate::common::{parse_ssd_chunk_len, parse_ssd_path};
+use crate::common::{parse_pathway, parse_ssd_chunk_len, parse_ssd_path};
 use crate::common::tiny_stories::lm::Overrides;
 use crate::inference::{PROMPT_TEMPERATURE, Prompting};
 use burn_mamba::prelude::{Mamba3ScanOptions, MambaScanOptions};
@@ -16,8 +16,10 @@ use burn_stack::modules::hnet::StepMode;
 const HELP: &str = concat!(
     "    --ssd-path <P>         The SSD path of every chunkwise forward of the stages: recalc (default), serial or minimal\n",
     "    --ssd-chunk-len <L>    The chunk length of every chunkwise forward of the stages, in write positions (default: from the block shape)\n",
+    "    --pathway <P>          The pathway of every chunkwise forward of the stages: single (default) or double\n",
     "    --main-ssd-path <P>    The SSD path of the main stack (default: that of --ssd-path)\n",
     "    --main-ssd-chunk-len <L>  The chunk length of the main stack, in write positions (default: that of --ssd-chunk-len)\n",
+    "    --main-pathway <P>     The pathway of the main stack (default: that of --pathway)\n",
     "    --stages <N>           A new model: the number of stages, 1 or 2 (default 1)\n",
     "    --step-mode <M>        How a decode step runs the inner H-Net of a stage: masked (default, capturable) or gathered (only the rows that start a chunk, read on the host)\n",
     "    --show-chunks          Mark the chunk starts in each sample: | where stage 0 starts a chunk, ‖ where stage 1 also does\n",
@@ -44,9 +46,9 @@ pub struct Cli {
     pub overrides: Overrides,
     /// `--profile`, `--max-vram`, `--grad-checkpointing`.
     pub training_step_flags: TrainingStepFlags,
-    /// `--ssd-path`, `--ssd-chunk-len`, `--main-ssd-path` and
-    /// `--main-ssd-chunk-len`: the scan options of the stages and of the main
-    /// stack.
+    /// `--ssd-path`, `--ssd-chunk-len`, `--pathway`, `--main-ssd-path`,
+    /// `--main-ssd-chunk-len` and `--main-pathway`: the scan options of the
+    /// stages and of the main stack.
     pub scan_options: (MambaScanOptions, MambaScanOptions),
     /// The shape of a new model.
     pub model: ModelFlags,
@@ -85,12 +87,18 @@ impl Cli {
         let training_step_flags = TrainingStepFlags::parse(&mut pargs);
         let stage_ssd_path = pargs.opt_value_from_fn("--ssd-path", parse_ssd_path).unwrap().unwrap_or_default();
         let stage_chunk_len = pargs.opt_value_from_fn("--ssd-chunk-len", parse_ssd_chunk_len).unwrap();
+        let stage_pathway = pargs.opt_value_from_fn("--pathway", parse_pathway).unwrap().unwrap_or_default();
         let main_ssd_path =
             pargs.opt_value_from_fn("--main-ssd-path", parse_ssd_path).unwrap().unwrap_or(stage_ssd_path);
         let main_chunk_len =
             pargs.opt_value_from_fn("--main-ssd-chunk-len", parse_ssd_chunk_len).unwrap().or(stage_chunk_len);
-        let stage_scan_options = Mamba3ScanOptions::new(stage_ssd_path).with_chunk_len(stage_chunk_len);
-        let main_scan_options = Mamba3ScanOptions::new(main_ssd_path).with_chunk_len(main_chunk_len);
+        let main_pathway =
+            pargs.opt_value_from_fn("--main-pathway", parse_pathway).unwrap().unwrap_or(stage_pathway);
+        let stage_scan_options = Mamba3ScanOptions::new(stage_ssd_path)
+            .with_chunk_len(stage_chunk_len)
+            .with_pathway(stage_pathway);
+        let main_scan_options =
+            Mamba3ScanOptions::new(main_ssd_path).with_chunk_len(main_chunk_len).with_pathway(main_pathway);
         let scan_options =
             (MambaScanOptions::Mamba3(stage_scan_options), MambaScanOptions::Mamba3(main_scan_options));
         let model = ModelFlags { stages: pargs.opt_value_from_str("--stages").unwrap().unwrap_or(1) };

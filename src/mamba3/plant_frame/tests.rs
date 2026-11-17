@@ -365,7 +365,7 @@ fn assert_tail(mimo_rank: usize, out_norm: bool, u: usize) {
             new_rotation: RotationState::Angle(angle_bha.clone()),
             new_tap_fifo: Some(TapFifo { b_bumhr: b_last_bumhr.clone(), x_buhp: x_last_buhp.clone() }),
         },
-        Mamba3DoubleSsdCache {
+        Mamba3Cache {
             ssm_bhpr: ssm_bhpr.clone(),
             frame: Mamba3FrameCache {
                 tap_fifo: None,

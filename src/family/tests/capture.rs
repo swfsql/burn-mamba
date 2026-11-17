@@ -4,17 +4,15 @@
 //! The backend decides whether the write lands in the same buffer (the
 //! in-place `slice_assign` of cubecl). The examples capture their decoding,
 //! and a backend that can record the calls (for example, CUDA) replays it.
-//! These tests check the traversal of the Mamba-3 cache on both pathways,
-//! with each optional field present. They compare each field directly, not
-//! through the traversal. The values move exactly, and a mismatch of
-//! pathways panics.
+//! These tests check the traversal of the Mamba-3 cache, with each optional
+//! field present. They compare each field directly, not through the
+//! traversal. The values move exactly.
 //!
 //! The contracts of `block_contract.rs` compare no field directly.
 //! `cache_traversal_moves_every_field` reads the outputs from a moved cache.
 //! `cache_stack_moves_every_slot` compares each pair of slots through the
-//! traversal. Neither contract reaches a double-SSD cache.
+//! traversal.
 
-use crate::mamba3::double_ssd::prelude::Mamba3DoubleSsdCache;
 use crate::prelude::*;
 use burn::prelude::*;
 use burn::tensor::Distribution;
@@ -58,18 +56,11 @@ fn block(device: &Device) -> Mamba3 {
 }
 
 fn assert_fields(label: &str, a: &Mamba3Cache, b: &Mamba3Cache) {
-    let fields = |c: &Mamba3Cache| -> Mamba3DoubleSsdCache {
-        match c.clone() {
-            Mamba3Cache::DoubleSsd(c) => c,
-            Mamba3Cache::SingleSsd(c) => c.into(),
-        }
-    };
-    let (a, b) = (fields(a), fields(b));
     assert_same(&format!("{label} ssm"), &a.ssm_bhpr, &b.ssm_bhpr);
-    let (a, b) = (a.frame, b.frame);
+    let (a, b) = (&a.frame, &b.frame);
     assert!(a.tap_fifo.is_some() && a.log_precision_bh.is_some() && a.tropical_bh.is_some());
     let fifo = |c: &Mamba3FrameCache| c.tap_fifo.clone().map(|f| (f.b_bumhr, f.x_buhp)).unzip();
-    let ((a_b, a_x), (b_b, b_x)) = (fifo(&a), fifo(&b));
+    let ((a_b, a_x), (b_b, b_x)) = (fifo(a), fifo(b));
     assert_same_option(&format!("{label} tap FIFO B"), &a_b, &b_b);
     assert_same_option(&format!("{label} tap FIFO x"), &a_x, &b_x);
     assert_same_option(&format!("{label} ln Λ"), &a.log_precision_bh, &b.log_precision_bh);
@@ -82,15 +73,10 @@ fn assert_fields(label: &str, a: &Mamba3Cache, b: &Mamba3Cache) {
     }
 }
 
-/// Two consecutive step caches, on the single- (`step`'s default) and the
-/// double-ssd pathway.
-fn two_caches(double: bool, device: &Device) -> (Mamba3Cache, Mamba3Cache) {
+/// Two consecutive step caches.
+fn two_caches(device: &Device) -> (Mamba3Cache, Mamba3Cache) {
     let model = block(device);
     let (_, first) = model.step(input(2, 16, device), None);
-    let first = match (double, first) {
-        (true, Mamba3Cache::SingleSsd(c)) => Mamba3Cache::DoubleSsd(c.into()),
-        (_, c) => c,
-    };
     let (_, second) = model.step(input(2, 16, device), Some(first.clone()));
     (first, second)
 }
@@ -98,37 +84,25 @@ fn two_caches(double: bool, device: &Device) -> (Mamba3Cache, Mamba3Cache) {
 #[test]
 fn owned_buffers_keep_values_and_assign_moves_them() {
     let device = test_device();
-    for double in [false, true] {
-        let label = if double { "double" } else { "single" };
-        let (first, second) = two_caches(double, &device);
-        let owned = first.clone().into_owned_buffers();
-        assert_fields(&format!("{label} owned"), &owned, &first);
-        let assigned = owned.assign_in_place(second.clone());
-        assert_fields(&format!("{label} assigned"), &assigned, &second);
-        // The slotted form: the same through `Mamba3Caches`.
-        let stack = |c: Mamba3Cache| Mamba3Caches::from_slots(vec![Some(c)]);
-        let assigned = stack(first.clone())
-            .into_owned_buffers()
-            .assign_in_place(stack(second.clone()));
-        let assigned = assigned.into_slots().pop().flatten().unwrap();
-        assert_fields(&format!("{label} stacked"), &assigned, &second);
-        // The same through the flat caches of the enum.
-        let flat = |c: Mamba3Cache| MambaCaches::from_slots(vec![Some(MambaCache::Mamba3(c))]);
-        let assigned = flat(first.clone())
-            .into_owned_buffers()
-            .assign_in_place(flat(second.clone()));
-        let [Some(MambaCache::Mamba3(assigned))] = assigned.slots.as_slice() else {
-            panic!("the flat caches must hold one slot of the Mamba-3 family");
-        };
-        assert_fields(&format!("{label} flat"), assigned, &second);
-    }
-}
-
-#[test]
-#[should_panic(expected = "SSD pathway")]
-fn pathway_mismatch_panics() {
-    let device = test_device();
-    let (single, _) = two_caches(false, &device);
-    let (double, _) = two_caches(true, &device);
-    let _ = single.assign_in_place(double);
+    let (first, second) = two_caches(&device);
+    let owned = first.clone().into_owned_buffers();
+    assert_fields("owned", &owned, &first);
+    let assigned = owned.assign_in_place(second.clone());
+    assert_fields("assigned", &assigned, &second);
+    // The slotted form: the same through `Mamba3Caches`.
+    let stack = |c: Mamba3Cache| Mamba3Caches::from_slots(vec![Some(c)]);
+    let assigned = stack(first.clone())
+        .into_owned_buffers()
+        .assign_in_place(stack(second.clone()));
+    let assigned = assigned.into_slots().pop().flatten().unwrap();
+    assert_fields("stacked", &assigned, &second);
+    // The same through the flat caches of the enum.
+    let flat = |c: Mamba3Cache| MambaCaches::from_slots(vec![Some(MambaCache::Mamba3(c))]);
+    let assigned = flat(first.clone())
+        .into_owned_buffers()
+        .assign_in_place(flat(second.clone()));
+    let [Some(MambaCache::Mamba3(assigned))] = assigned.slots.as_slice() else {
+        panic!("the flat caches must hold one slot of the Mamba-3 family");
+    };
+    assert_fields("flat", assigned, &second);
 }

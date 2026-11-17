@@ -64,7 +64,7 @@ struct Heads {
 /// with `random = true` every field (state, previous-token B/x, and
 /// cumulative rotation angle) holds random values, exercising parity from an
 /// arbitrary initial state.
-fn build_init_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3DoubleSsdCache {
+fn build_init_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3Cache {
     let device = test_device();
     let nheads = cfg.nheads();
     let per_head_dim = cfg.per_head_dim;
@@ -105,7 +105,7 @@ fn build_init_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3Dou
     // The tap FIFO is as deep as the pattern's lag.
     let slots = cfg.tap_pattern.tap_slots(cfg.micro_steps);
     let tap = slots > 0;
-    Mamba3DoubleSsdCache {
+    Mamba3Cache {
         ssm_bhpr: mk4([batch, nheads, per_head_dim, state_rank]),
         frame: Mamba3FrameCache {
             tap_fifo: tap.then(|| TapFifo {
@@ -166,7 +166,7 @@ fn run_with_grads(
     model: &Mamba3,
     input: &Param<Tensor<3>>,
     heads: &Heads,
-    forward: impl FnOnce(&Mamba3, Tensor<3>) -> (Tensor<3>, Mamba3DoubleSsdCache),
+    forward: impl FnOnce(&Mamba3, Tensor<3>) -> (Tensor<3>, Mamba3Cache),
 ) -> RunGrads {
     let (out, cache) = forward(model, input.val());
     let out_inner = out.clone().inner();
@@ -361,7 +361,7 @@ fn run_step_matches_forward_tol(cfg: Mamba3Config, random_init: bool, grad_tol: 
     let input_step = param_input(&input);
     let cache_step = init_cache;
     let r_step = run_with_grads(&model, &input_step, &heads, |m, x| {
-        let mut cache: Option<Mamba3DoubleSsdCache> = Some(cache_step);
+        let mut cache: Option<Mamba3Cache> = Some(cache_step);
         let mut outs: Vec<Tensor<2>> = Vec::with_capacity(seq_len);
         for t in 0..seq_len {
             let token = x.clone().narrow(1, t, 1).squeeze_dim(1);
@@ -712,7 +712,7 @@ fn run_siso_specialization_step_parity(cfg: Mamba3Config, random_init: bool) {
             .then(|| Tensor::<3>::random([batch, nheads, num_rotation_angles], normal, &device)),
     };
 
-    let unroll = |m: &Mamba3, x: Tensor<3>, init: Mamba3DoubleSsdCache| {
+    let unroll = |m: &Mamba3, x: Tensor<3>, init: Mamba3Cache| {
         let mut cache = Some(init);
         let mut outs: Vec<Tensor<2>> = Vec::with_capacity(seq_len);
         for t in 0..seq_len {

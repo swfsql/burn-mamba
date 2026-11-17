@@ -15,15 +15,15 @@
 //!
 //! It uses ≈ half the training memory of the two-call
 //! [`double_ssd`](crate::mamba3::double_ssd) pathway, and less than a third of
-//! a three-call one. Its cache holds the accumulator `h'`, which has
-//! **different mid-sequence semantics** from the state (so the cache type is
-//! distinct). The two are equal at call boundaries and convert with
-//! field-identity `From` impls.
+//! a three-call one. In the middle of a sequence, it carries the accumulator
+//! `h'`, which is different from the state. At a call boundary, the two are
+//! equal, so both pathways share one cache type
+//! ([`Mamba3Cache`](crate::mamba3::cache::Mamba3Cache)).
+//!
+//! [`Pathway::SingleSsd`](crate::mamba3::scan_options::Pathway::SingleSsd),
+//! the default, in the scan options selects this pathway.
 
-/// The single-SSD cache (same fields as double-SSD, but `ssm_bhpr` holds the
-/// accumulator).
-pub mod cache;
-/// `forward_single_ssd` (scale + boundary-β seed) and `step_single_ssd`.
+/// The forward of this pathway: the scale and the boundary-β seed.
 pub mod single_ssd;
 /// The standard SSD kernels specialised to the single-pass scale/mask.
 pub mod ssd;
@@ -33,7 +33,6 @@ pub mod token_band;
 /// Public re-exports for the single-SSD pathway.
 pub mod prelude {
     use super::*;
-    pub use cache::{Mamba3SingleSsdCache, Mamba3SingleSsdCaches};
     pub use ssd::Mamba3SingleSsdBackendExt;
     pub use ssd::Mamba3SingleSsdInput;
 }

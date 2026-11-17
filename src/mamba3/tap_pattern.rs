@@ -101,10 +101,9 @@ pub enum TapPattern {
     ///
     /// The two SSD pathways are the same here. With no second pass to fuse, the
     /// composite key scale of single-SSD is `γ`, and its γ-correction is the
-    /// whole diagonal. So
-    /// [`forward_single_ssd`](crate::mamba3::mamba3::Mamba3::forward_single_ssd)
-    /// runs the double-SSD code, and the caches convert by field identity at
-    /// *every* position, not only at boundaries.
+    /// whole diagonal. So the single-SSD pathway runs the double-SSD code, and
+    /// its accumulator equals the state at *every* position, not only at
+    /// boundaries.
     None,
 
     /// **Lag `u`, always**: the tap reads the *same* micro-step of the previous

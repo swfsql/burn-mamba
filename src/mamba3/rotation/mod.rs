@@ -341,7 +341,7 @@ impl RotationState {
     }
 
     /// The identity accumulator for `kind` — the one place a fresh cache's
-    /// rotation state is built, for every pathway and both cache types.
+    /// rotation state is built, for every pathway.
     pub fn identity(
         kind: RotationKind,
         batch: usize,

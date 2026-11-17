@@ -18,6 +18,10 @@
 //!   the tap pattern, `mimo_rank` or `micro_steps` of the base. The base has
 //!   the `SerialRecalculated` path, the `Complex2D` rotation, the default tap
 //!   pattern, `mimo_rank` 1 and `micro_steps` 1.
+//! - A double-SSD twin of each Mamba-3 setting above. A twin has the config
+//!   and the scan options of its setting, with [`Pathway::DoubleSsd`]. The
+//!   untied settings and the [`MambaBlock`] settings below run the default
+//!   pathway, single-SSD.
 //! - [`MambaBlock`] over each enabled family, with the `SerialRecalculated`
 //!   path for Mamba-2 and Mamba-3.
 //! - One untied setting of each family, and of [`MambaBlock`] over
@@ -45,12 +49,9 @@
 //!
 //! ## The limits
 //!
-//! - No contract starts from a double-SSD cache, and the cache variant of
-//!   Mamba-3 selects the pathway. So no setting reaches the double-SSD
-//!   pathway.
 //! - `cache_traversal_moves_every_field` reads outputs, not fields. A field
 //!   that one more step does not change stays unseen. `capture.rs` compares
-//!   each field of the Mamba-3 cache directly, on both pathways.
+//!   each field of the Mamba-3 cache directly.
 
 #[cfg(feature = "mamba1")]
 use super::m1;
@@ -257,6 +258,11 @@ fn mamba3_settings() -> Vec<Setting<Mamba3Config>> {
         let scan_options = m3_scan_options(ssd_path, &config);
         (config, scan_options)
     }));
+    let double_ssd_twins: Vec<_> = settings
+        .iter()
+        .map(|(config, scan_options)| (config.clone(), scan_options.clone().with_pathway(Pathway::DoubleSsd)))
+        .collect();
+    settings.extend(double_ssd_twins);
     let mut settings: Vec<_> = settings
         .into_iter()
         .map(|(config, scan_options)| Setting {

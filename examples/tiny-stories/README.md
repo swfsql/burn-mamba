@@ -182,6 +182,7 @@ shared CLI, before the `--`, sets:
 | `--valid-stories <n>` | 256 | stories taken from the validation split |
 | `--ssd-path <p>` | `recalc` | the SSD path of every chunkwise `forward`: `recalc`, `serial` or `minimal`. Not persisted |
 | `--ssd-chunk-len <l>` | from the block shape | the chunk length of every chunkwise `forward`, in write positions. Not persisted |
+| `--pathway <p>` | `single` | the pathway of every chunkwise `forward`: `single` or `double`. Not persisted |
 | `--pack-align <n>` | the chunk length | with `--pack`, start each story of a packed row at a multiple of `n` tokens. `n` must be a multiple of the chunk length (a reset must be at a chunk start), so a shorter chunk can train on the rows of a longer one. Not persisted |
 | `--prompt <text>` | the built-in prompts | at inference, continue `text` instead of the built-in prompts. Give the flag again for each prompt |
 | `--continuations <n>` | 1 | at inference, the number of continuations of each prompt, each with its own seed |

@@ -1,6 +1,6 @@
 //! # Mamba-3 — Single-Pass SSD Forward
 //!
-//! `forward_single_ssd` and `step_single_ssd` on
+//! `forward_single_ssd_packed` on
 //! [`Mamba3`](crate::mamba3::mamba3::Mamba3): the pathway of the **official
 //! Mamba-3 kernels**, Triton (SISO) and Tilelang (MIMO):
 //!
@@ -29,7 +29,6 @@
 //!
 //! See also: [`crate::mamba3::mamba3`] and [`crate::mamba3::double_ssd::double_ssd`].
 
-use crate::mamba3::double_ssd::prelude::Mamba3DoubleSsdCache;
 use crate::mamba3::helpers;
 use crate::mamba3::plant_frame::{PlantEntry, PlantResets, PlantTail};
 use crate::mamba3::prelude::*;
@@ -39,13 +38,27 @@ use burn_stack::modules::sanity as san;
 use burn::prelude::*;
 
 impl Mamba3 {
-    /// Process a full input sequence with the **single-ssd (single-pass)**
-    /// pathway.
+    /// [`Self::forward_single_ssd_packed`] with no resets. Only the tests call
+    /// it.
+    #[cfg(all(test, feature = "_dev-test"))]
+    pub(crate) fn forward_single_ssd(
+        &self,
+        input_bsm: Tensor<3>,
+        cache: Option<Mamba3Cache>,
+        scan_options: &Mamba3ScanOptions,
+        pad_bt: Option<Tensor<2, Bool>>,
+    ) -> (Tensor<3>, Mamba3Cache) {
+        self.forward_single_ssd_packed(input_bsm, cache, None, scan_options, pad_bt, None)
+    }
+
+    /// Process a full input sequence with the **single-SSD (single-pass)**
+    /// pathway. [`Self::forward_packed`] calls it for
+    /// [`Pathway::SingleSsd`].
     ///
-    /// Functionally equivalent to [`Self::forward_double_ssd`], with about half
-    /// the SSD memory in training. The cache is a separate type
-    /// ([`Mamba3SingleSsdCache`]), because this pathway carries the
-    /// accumulator, which differs from the state mid-sequence.
+    /// Functionally equivalent to the double-SSD pathway, with about half the
+    /// SSD memory in training. In the middle of a sequence, this pathway
+    /// carries the accumulator, which differs from the state. At a call
+    /// boundary the two are equal, so both pathways return a [`Mamba3Cache`].
     ///
     /// "Equivalent" covers **everything that a caller can observe**: the
     /// returned output and every field of the returned cache. It does not cover
@@ -60,57 +73,46 @@ impl Mamba3 {
     /// Under [`TapPattern::None`] there is no second pass to fuse. The composite
     /// key scale is `γ`, and the γ-correction is the whole diagonal. So
     /// this *is* the double-SSD form (`h' ≡ h` at every position, not only at
-    /// boundaries), and the call delegates to `forward_double_ssd`. It does not
-    /// run a strict-mask kernel plus a correction that puts back what the mask
-    /// removed.
+    /// boundaries), and the call delegates to
+    /// [`Self::forward_double_ssd_packed`]. It does not run a strict-mask
+    /// kernel plus a correction that puts back what the mask removed.
     ///
     /// `pad_bt` marks a right-padded batch of tokens, as in [`Self::forward`].
     /// The last tap installment of a real position, which a padded position
     /// would pay, then stays in the tap FIFO, exactly as at a call boundary.
     /// So the accumulator `h'` equals the state from the end of each row on.
     ///
+    /// `reset_bt` marks the first token of each segment of a packed batch,
+    /// which starts from `origin`, as in [`Self::forward_packed`]. A reset is a
+    /// call boundary inside the row: the positions before it pay no `ν` forward
+    /// (the taps of the segment start read the slots of the origin). The start
+    /// state of the chunk is the `h'` of the origin plus its own boundary seed.
+    /// A call from the origin starts the same way.
+    ///
     /// # Shapes
     /// - `input_bsm`: `[batch, sequence, d_model]`
     /// - `pad_bt`: `[batch, sequence]`
+    /// - `reset_bt`: `[batch, sequence]`
     /// - output: `[batch, sequence, d_model]`
-    pub fn forward_single_ssd(
-        &self,
-        input_bsm: Tensor<3>,
-        cache: Option<Mamba3SingleSsdCache>,
-        scan_options: &Mamba3ScanOptions,
-        pad_bt: Option<Tensor<2, Bool>>,
-    ) -> (Tensor<3>, Mamba3SingleSsdCache) {
-        self.forward_single_ssd_packed(input_bsm, cache, None, scan_options, pad_bt, None)
-    }
-
-    /// [`Self::forward_single_ssd`] over a packed batch: `reset_bt` marks the
-    /// first token of each segment, which starts from `origin`, as in
-    /// [`Self::forward_packed`].
-    ///
-    /// A reset is a call boundary inside the row: the positions before it pay
-    /// no `ν` forward (the taps of the segment start read the slots of the
-    /// origin). The start state of the chunk is the `h'` of the origin plus
-    /// its own boundary seed. A call from the origin starts the same way.
     #[allow(non_snake_case)]
-    pub fn forward_single_ssd_packed(
+    pub(crate) fn forward_single_ssd_packed(
         &self,
         input_bsm: Tensor<3>,
-        cache: Option<Mamba3SingleSsdCache>,
-        origin: Option<Mamba3SingleSsdCache>,
+        cache: Option<Mamba3Cache>,
+        origin: Option<Mamba3Cache>,
         scan_options: &Mamba3ScanOptions,
         pad_bt: Option<Tensor<2, Bool>>,
         reset_bt: Option<Tensor<2, Bool>>,
-    ) -> (Tensor<3>, Mamba3SingleSsdCache) {
+    ) -> (Tensor<3>, Mamba3Cache) {
         if !self.tap_pattern.has_beta_tap() {
-            let (out_bsm, cache) = self.forward_double_ssd_packed(
+            return self.forward_double_ssd_packed(
                 input_bsm,
-                cache.map(Into::into),
-                origin.map(Into::into),
+                cache,
+                origin,
                 scan_options,
                 pad_bt,
                 reset_bt,
             );
-            return (out_bsm, cache.into());
         }
         let [batch, tokens, _d_model] = input_bsm.dims();
         let nheads = self.nheads();
@@ -122,8 +124,6 @@ impl Mamba3 {
         let sequence = tokens * u;
 
         // ── The entry of the plant frame ──────────────────────────────────────
-        // At a call boundary, the accumulator `h'` equals the state, so the
-        // caches convert field by field.
         let chunk_len = scan_options.chunk_len_or_optimal(self);
         let PlantEntry {
             mut cache,
@@ -144,13 +144,9 @@ impl Mamba3 {
             new_tap_fifo,
         } = self.plant_entry(
             input_bsm,
-            cache.map(Into::into),
+            cache,
             pad_bt,
-            reset_bt.map(|reset_bt| PlantResets {
-                reset_bt,
-                origin: origin.map(Into::into),
-                chunk_len,
-            }),
+            reset_bt.map(|reset_bt| PlantResets { reset_bt, origin, chunk_len }),
         );
         let nu_bsh = nu_bsh.expect("a β tap has a mass");
 
@@ -159,7 +155,7 @@ impl Mamba3 {
         // Each shifted term is zero for the last positions that its own lag
         // reaches past: the taps that pay them belong to the *next* call, from
         // the tap FIFO. This also makes the accumulator `h'` equal to the
-        // state at a cache boundary, hence the field-identity `From` impls.
+        // state at a cache boundary, so both pathways share one cache type.
         //
         // `t+lag` is a later *write* position: lag 1 is
         // [`TapPattern::HorizontalCarryOver`], lag `u` is [`TapPattern::Vertical`].
@@ -415,42 +411,7 @@ impl Mamba3 {
             },
             cache,
         );
-        (out_btd, cache.into())
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Mamba3::step  (recurrent SSM — token-by-token decoding)
-// ---------------------------------------------------------------------------
-
-mod step {
-    use super::*;
-
-    impl Mamba3 {
-        /// Process a **single token** with the pure recurrent form (the
-        /// formulas are in [`Mamba3::step`]). It converts the cache to the
-        /// double-ssd form, runs [`Mamba3::step_double_ssd`], and converts back.
-        ///
-        /// # Shapes
-        /// - `input_bd` : `[batch, d_model]`
-        /// - output     : `[batch, d_model]`
-        #[allow(non_snake_case)]
-        pub fn step_single_ssd(
-            &self,
-            input_bd: Tensor<2>,
-            cache: Option<Mamba3SingleSsdCache>,
-        ) -> (Tensor<2>, Mamba3SingleSsdCache) {
-            // Token-by-token decoding always uses the recurrent (double-ssd)
-            // form. A single-ssd cache holds the accumulator at a call
-            // boundary, where the accumulator equals the state (see the `From`
-            // impls in `crate::mamba3::cache`). So the
-            // conversion in and back out is lossless. One `step` call is
-            // itself a boundary-to-boundary transition, so the round trip stays
-            // exact.
-            let cache = cache.map(Mamba3DoubleSsdCache::from);
-            let (out_bd, cache) = self.step_double_ssd(input_bd, cache);
-            (out_bd, cache.into())
-        }
+        (out_btd, cache)
     }
 }
 
