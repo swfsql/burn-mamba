@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba2/mamba2.rs`."><title>mamba2.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-1f5a765c.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.102.0-nightly (5f4effd57 2026-11-13)" data-channel="nightly" data-search-js="search-69faa2c4.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-9b351432.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-419f3a3f.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-101b5a15.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba2/</div>mamba2.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! # Mamba-2 SSM Block — Structured State Space Duality (SSD)
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/mamba2/mamba2.rs`."><title>mamba2.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-1f5a765c.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.102.0-nightly (5df8c02af 2026-11-16)" data-channel="nightly" data-search-js="search-69faa2c4.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-9b351432.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-419f3a3f.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-101b5a15.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/mamba2/</div>mamba2.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! # Mamba-2 SSM Block — Structured State Space Duality (SSD)
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! This module implements the **Mamba-2 block** from the paper
 <a href=#4 id=4 data-nosnippet>4</a>//! *"Transformers are SSMs: Generalized Models and Efficient Algorithms
@@ -189,7 +189,7 @@
 <a href=#189 id=189 data-nosnippet>189</a>    ///
 <a href=#190 id=190 data-nosnippet>190</a>    /// `None` ⇒ the initial state is zero (the standard default). `Some` ⇒
 <a href=#191 id=191 data-nosnippet>191</a>    /// each `forward` call adds this tensor, broadcast over the batch, to the
-<a href=#192 id=192 data-nosnippet>192</a>    /// incoming cache state. Only [`Mamba2SsdPath::Minimal`] supports it: the
+<a href=#192 id=192 data-nosnippet>192</a>    /// incoming cache state. Only [`SsdPath::Minimal`] supports it: the
 <a href=#193 id=193 data-nosnippet>193</a>    /// two serial paths panic. [`Self::step`] does not read it.
 <a href=#194 id=194 data-nosnippet>194</a>    </span><span class="kw">pub </span>init_state_hpr: <span class="prelude-ty">Option</span>&lt;Param&lt;Tensor&lt;<span class="number">3</span>&gt;&gt;&gt;,
 <a href=#195 id=195 data-nosnippet>195</a>
@@ -408,7 +408,7 @@
 <a href=#408 id=408 data-nosnippet>408</a>    /// `false` (default) ⇒ the state starts at zero for every sequence.
 <a href=#409 id=409 data-nosnippet>409</a>    /// `true` ⇒ the block has a trainable `init_state_hpr` of shape
 <a href=#410 id=410 data-nosnippet>410</a>    /// `[nheads, per_head_dim, state_rank]`. Only
-<a href=#411 id=411 data-nosnippet>411</a>    /// [`Mamba2SsdPath::Minimal`] supports it (see [`Mamba2::init_state_hpr`]).
+<a href=#411 id=411 data-nosnippet>411</a>    /// [`SsdPath::Minimal`] supports it (see [`Mamba2::init_state_hpr`]).
 <a href=#412 id=412 data-nosnippet>412</a>    </span><span class="attr">#[config(default = <span class="bool-val">false</span>)]
 <a href=#413 id=413 data-nosnippet>413</a>    </span><span class="kw">pub </span>has_learnable_init_state: bool,
 <a href=#414 id=414 data-nosnippet>414</a>
@@ -662,8 +662,8 @@
 <a href=#662 id=662 data-nosnippet>662</a>    /// 4. **Discretise**: `Δ = softplus(dt_raw + dt_bias)`,
 <a href=#663 id=663 data-nosnippet>663</a>    ///    `Ā = exp(Δ · A)`, `B̄ = Δ · B`.
 <a href=#664 id=664 data-nosnippet>664</a>    /// 5. **Padding**: pad the sequence to a multiple of `chunk_len`.
-<a href=#665 id=665 data-nosnippet>665</a>    /// 6. **SSD path**: the chunkwise scan that `ssd_path` selects (see
-<a href=#666 id=666 data-nosnippet>666</a>    ///    [`Mamba2SsdPath`]).
+<a href=#665 id=665 data-nosnippet>665</a>    /// 6. **SSD scan**: the chunkwise scan that `scan_options` selects (see
+<a href=#666 id=666 data-nosnippet>666</a>    ///    [`Mamba2ScanOptions`]).
 <a href=#667 id=667 data-nosnippet>667</a>    /// 7. **Gated RMSNorm**: `y = RMSNorm(y · SiLU(z))`, or
 <a href=#668 id=668 data-nosnippet>668</a>    ///    `RMSNorm(y) · SiLU(z)` under `is_norm_before_gate`.
 <a href=#669 id=669 data-nosnippet>669</a>    /// 8. **Out-projection**: `y → output`.
@@ -692,10 +692,10 @@
 <a href=#692 id=692 data-nosnippet>692</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
 <a href=#693 id=693 data-nosnippet>693</a>        input_bsm: Tensor&lt;<span class="number">3</span>&gt;,
 <a href=#694 id=694 data-nosnippet>694</a>        cache: <span class="prelude-ty">Option</span>&lt;Mamba2Cache&gt;,
-<a href=#695 id=695 data-nosnippet>695</a>        ssd_path: Mamba2SsdPath,
+<a href=#695 id=695 data-nosnippet>695</a>        scan_options: Mamba2ScanOptions,
 <a href=#696 id=696 data-nosnippet>696</a>        pad_bs: <span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">2</span>, Bool&gt;&gt;,
 <a href=#697 id=697 data-nosnippet>697</a>    ) -&gt; (Tensor&lt;<span class="number">3</span>&gt;, Mamba2Cache) {
-<a href=#698 id=698 data-nosnippet>698</a>        <span class="self">self</span>.forward_packed(input_bsm, cache, <span class="prelude-val">None</span>, ssd_path, pad_bs, <span class="prelude-val">None</span>)
+<a href=#698 id=698 data-nosnippet>698</a>        <span class="self">self</span>.forward_packed(input_bsm, cache, <span class="prelude-val">None</span>, scan_options, pad_bs, <span class="prelude-val">None</span>)
 <a href=#699 id=699 data-nosnippet>699</a>    }
 <a href=#700 id=700 data-nosnippet>700</a>
 <a href=#701 id=701 data-nosnippet>701</a>    <span class="doccomment">/// [`Self::forward`] over a **packed** batch: each row holds several
@@ -715,15 +715,15 @@
 <a href=#715 id=715 data-nosnippet>715</a>    ///
 <a href=#716 id=716 data-nosnippet>716</a>    /// At a start, the conv reads the window of `origin` in place of the
 <a href=#717 id=717 data-nosnippet>717</a>    /// positions before it, and the SSD carry between chunks starts again from the state of
-<a href=#718 id=718 data-nosnippet>718</a>    /// `origin`. Only [`Mamba2SsdPath::Serial`] and
-<a href=#719 id=719 data-nosnippet>719</a>    /// [`Mamba2SsdPath::SerialRecalculated`] take resets.
+<a href=#718 id=718 data-nosnippet>718</a>    /// `origin`. Only [`SsdPath::Serial`] and
+<a href=#719 id=719 data-nosnippet>719</a>    /// [`SsdPath::SerialRecalculated`] take resets.
 <a href=#720 id=720 data-nosnippet>720</a>    </span><span class="attr">#[allow(non_snake_case)]
 <a href=#721 id=721 data-nosnippet>721</a>    </span><span class="kw">pub fn </span>forward_packed(
 <a href=#722 id=722 data-nosnippet>722</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
 <a href=#723 id=723 data-nosnippet>723</a>        input_bsm: Tensor&lt;<span class="number">3</span>&gt;,
 <a href=#724 id=724 data-nosnippet>724</a>        cache: <span class="prelude-ty">Option</span>&lt;Mamba2Cache&gt;,
 <a href=#725 id=725 data-nosnippet>725</a>        origin: <span class="prelude-ty">Option</span>&lt;Mamba2Cache&gt;,
-<a href=#726 id=726 data-nosnippet>726</a>        ssd_path: Mamba2SsdPath,
+<a href=#726 id=726 data-nosnippet>726</a>        scan_options: Mamba2ScanOptions,
 <a href=#727 id=727 data-nosnippet>727</a>        pad_bs: <span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">2</span>, Bool&gt;&gt;,
 <a href=#728 id=728 data-nosnippet>728</a>        reset_bs: <span class="prelude-ty">Option</span>&lt;Tensor&lt;<span class="number">2</span>, Bool&gt;&gt;,
 <a href=#729 id=729 data-nosnippet>729</a>    ) -&gt; (Tensor&lt;<span class="number">3</span>&gt;, Mamba2Cache) {
@@ -746,7 +746,7 @@
 <a href=#746 id=746 data-nosnippet>746</a>
 <a href=#747 id=747 data-nosnippet>747</a>        <span class="comment">// The chunk length is known before the conv, because a reset (at a
 <a href=#748 id=748 data-nosnippet>748</a>        // chunk start) also changes the conv.
-<a href=#749 id=749 data-nosnippet>749</a>        </span><span class="kw">let </span>chunk_len = ssd_path.chunk_len_or_optimal(state_rank, per_head_dim);
+<a href=#749 id=749 data-nosnippet>749</a>        </span><span class="kw">let </span>chunk_len = scan_options.chunk_len_or_optimal(state_rank, per_head_dim);
 <a href=#750 id=750 data-nosnippet>750</a>        <span class="macro">assert!</span>(chunk_len &gt; <span class="number">0</span>);
 <a href=#751 id=751 data-nosnippet>751</a>        <span class="kw">let </span>reset_bn = reset_bs.map(|reset_bs| <span class="kw">crate</span>::packing::chunk_resets(reset_bs, chunk_len));
 <a href=#752 id=752 data-nosnippet>752</a>        <span class="comment">// A conv tap reads `conv_kernel − 1` positions back, and only the first
@@ -959,7 +959,7 @@
 <a href=#959 id=959 data-nosnippet>959</a>            }),
 <a href=#960 id=960 data-nosnippet>960</a>        };
 <a href=#961 id=961 data-nosnippet>961</a>        ssd_input.sanity();
-<a href=#962 id=962 data-nosnippet>962</a>        <span class="kw">let </span>(y_bnlhp, final_state_bhpr) = ssd_input.run(<span class="kw-2">&amp;</span>ssd_path);
+<a href=#962 id=962 data-nosnippet>962</a>        <span class="kw">let </span>(y_bnlhp, final_state_bhpr) = ssd_input.run(scan_options.ssd_path);
 <a href=#963 id=963 data-nosnippet>963</a>        <span class="macro">assert_eq!</span>(
 <a href=#964 id=964 data-nosnippet>964</a>            [batch, nchunks, chunk_len, nheads, per_head_dim],
 <a href=#965 id=965 data-nosnippet>965</a>            y_bnlhp.dims()

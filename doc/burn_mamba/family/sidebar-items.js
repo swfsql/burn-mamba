@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["MambaSsdPath"],"mod":["adapters","block","cache_traversal","config"]};
+window.SIDEBAR_ITEMS = {"enum":["MambaScanOptions","MambaScanOptionsSerde"],"mod":["adapters","block","cache_traversal","config"]};
