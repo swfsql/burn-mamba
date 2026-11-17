@@ -71,9 +71,9 @@ fn default_is_the_carry_over() {
     let _ = cfg().init(&device);
 }
 
-/// The lattice is closed: every member builds, and each pays for exactly the
-/// masses its taps need — `λ` unless the tap is absent, `μ` only for the
-/// two-tap members, and neither at a `u` where they would be inert.
+/// The lattice is closed: every member builds. Each member pays for exactly the
+/// masses that its taps need. It has `λ` unless the tap is absent, and `μ` only
+/// as a two-tap member. It has neither at a `u` where they would be inert.
 #[test]
 fn every_pattern_builds_and_pays_for_its_own_masses() {
     let device = test_device();
@@ -148,9 +148,9 @@ fn none_drops_the_lambda_channels() {
     }
 }
 
-/// `forward` and an unrolled `step` must still agree with the tap removed —
-/// on both pathways, every rotation kind, and `u > 1` (where the removed tap
-/// would have straddled micro-steps).
+/// `forward` and an unrolled `step` must still agree with the tap removed. The
+/// test covers both pathways, every rotation kind, and `u > 1`, where the
+/// removed tap would have straddled micro-steps.
 #[test]
 fn none_forward_matches_step() {
     let device = test_device();
@@ -242,9 +242,9 @@ fn none_grads_match_step() {
 
 /// The semantic claim: `TapPattern::None` **is** `λ ≡ 1`.
 ///
-/// `σ(30)` rounds to exactly `1.0` in f32, so a carry-over block whose `λ`
-/// columns are zeroed and whose `λ` bias is `30` has `β = 0` and `γ = Δ`
-/// exactly. Built by appending that dead sub-projection to a `None` block's
+/// `σ(30)` rounds to exactly `1.0` in f32. So a carry-over block with zero `λ`
+/// columns and a `λ` bias of `30` has `β = 0` and `γ = Δ` exactly. Built by
+/// appending that dead sub-projection to a `None` block's
 /// own in-projection, so the two blocks agree on every other weight.
 #[test]
 fn none_equals_lambda_saturated_at_one() {
@@ -328,8 +328,8 @@ fn vertical_is_lag_u() {
 }
 
 /// The whole point of the design: `forward` from a cache equals `step`
-/// unrolled from that same cache — on both pathways, every rotation kind,
-/// and both `u`s.
+/// unrolled from that same cache. The test covers both pathways, every
+/// rotation kind, and both `u`s.
 #[test]
 fn vertical_forward_matches_step() {
     let device = test_device();
@@ -372,9 +372,9 @@ fn vertical_forward_matches_step() {
     }
 }
 
-/// A split prefill must reach the same place as one call — the case the
-/// cached slots' decay pre-scaling exists for, since a lag-`u` tap's gap
-/// then straddles the boundary.
+/// A split prefill must reach the same place as one call. The decay
+/// pre-scaling of the cached slots exists for this case, because the gap of a
+/// lag-`u` tap then straddles the boundary.
 #[test]
 fn vertical_split_prefill_matches() {
     let device = test_device();
@@ -399,8 +399,8 @@ fn vertical_split_prefill_matches() {
 }
 
 /// MIMO end to end: the boundary seed fuses the `lag` slots with the
-/// `mimo_rank` ranks into one contraction, and the correction band fuses
-/// them the same way — both need `m > 1` to be more than a reshape.
+/// `mimo_rank` ranks into one contraction. The correction band fuses them the
+/// same way. Both need `m > 1` to be more than a reshape.
 #[test]
 fn vertical_matches_step_with_mimo() {
     let device = test_device();
@@ -432,9 +432,9 @@ fn vertical_matches_step_with_mimo() {
 }
 
 /// `forward` continued from a cache **`step` wrote** must equal `step` all
-/// the way — the one check that pins the two down to the *same* FIFO
-/// convention (slot order and the decay each slot carries) rather than
-/// merely to two self-consistent ones.
+/// the way. This is the one check that pins the two to the *same* FIFO
+/// convention, not merely to two self-consistent ones. The convention is the
+/// slot order and the decay that each slot carries.
 #[test]
 fn vertical_forward_continues_a_stepped_cache() {
     let device = test_device();
@@ -515,11 +515,11 @@ fn vertical_grads_match_step() {
 }
 
 /// At `u = 1` "the same micro-step of the previous token" *is* "the previous
-/// position", so every lag-`u` pattern must run identically to the carry-over
-/// — the same weights, and bit for bit. For the two-tap members that is the
-/// **fold**: with both taps on one sample there is no mix to make, so they
-/// spend no `μ` channels and the pair is one tap
-/// ([`TapPattern::has_two_taps`]).
+/// position". So every lag-`u` pattern must run identically to the carry-over,
+/// with the same weights and bit for bit. For the two-tap members, that is the
+/// **fold** ([`TapPattern::has_two_taps`]). Both taps are on one sample, so
+/// there is no mix to make. Thus the two-tap members spend no `μ` channels, and
+/// the pair is one tap.
 #[test]
 fn the_lag_u_patterns_are_the_carry_over_at_one_micro_step() {
     let device = test_device();
@@ -564,9 +564,9 @@ fn the_lag_u_patterns_are_the_carry_over_at_one_micro_step() {
 //
 // `HorizontalInToken` (lag 1, closed at each token's first micro-step) and the
 // two members that add a lag-1 tap beside the lag-`u` one. The invariants
-// are the same for all three — `forward` on either pathway equals an
-// unrolled `step`, from a fresh cache and from a continued one — and the
-// degeneracy tests below are what pin their *semantics*.
+// are the same for all three. In each, `forward` on either pathway equals an
+// unrolled `step`, from a fresh cache and from a continued one. The
+// degeneracy tests below pin their *semantics*.
 
 const IN_TOKEN_AND_TWO_TAP: [TapPattern; 3] = [
     TapPattern::HorizontalInToken,
@@ -574,9 +574,9 @@ const IN_TOKEN_AND_TWO_TAP: [TapPattern; 3] = [
     TapPattern::VerticalPlusHorizontalCarryOver,
 ];
 
-/// `forward` from a cache equals `step` unrolled from that same cache — both
-/// pathways, every rotation kind, both `u`s, and the tap FIFO as deep as the
-/// pattern says.
+/// `forward` from a cache equals `step` unrolled from that same cache. The test
+/// covers both pathways, every rotation kind and both `u`s. It also checks that
+/// the tap FIFO is as deep as the pattern says.
 #[test]
 fn lattice_forward_matches_step() {
     let device = test_device();
@@ -618,9 +618,9 @@ fn lattice_forward_matches_step() {
     }
 }
 
-/// MIMO end to end: the seed fuses `(slots, ranks)` into one contraction and
-/// the band correction fuses `(taps, ranks)` the same way, so `m > 1` is not
-/// a reshape of the SISO case.
+/// MIMO end to end: the seed fuses `(slots, ranks)` into one contraction. The
+/// correction band fuses `(taps, ranks)` the same way. So `m > 1` is not a
+/// reshape of the SISO case.
 #[test]
 fn lattice_matches_step_with_mimo() {
     let device = test_device();
@@ -653,9 +653,9 @@ fn lattice_matches_step_with_mimo() {
     }
 }
 
-/// A split prefill reaches the same place as one call — the case the cached
-/// slots' decay pre-scaling and the boundary seed exist for, and the one
-/// that would notice an installment paid twice or not at all.
+/// A split prefill reaches the same place as one call. The decay pre-scaling of
+/// the cached slots and the boundary seed exist for this case. This test would
+/// also notice an installment paid twice or not at all.
 #[test]
 fn lattice_split_prefill_matches() {
     let device = test_device();
@@ -681,9 +681,9 @@ fn lattice_split_prefill_matches() {
     }
 }
 
-/// `forward` continued from a cache **`step` wrote** — the one check that
-/// pins both to the *same* FIFO convention (slot order, and the decay each
-/// slot carries) rather than to two self-consistent ones.
+/// `forward` continued from a cache **`step` wrote**. This is the one check
+/// that pins both to the *same* FIFO convention, not to two self-consistent
+/// ones. The convention is the slot order and the decay that each slot carries.
 #[test]
 fn lattice_forward_continues_a_stepped_cache() {
     let device = test_device();
@@ -761,8 +761,8 @@ fn lattice_grads_match_step() {
 }
 
 /// Append `width` dead columns (zero weights, constant bias) to a block's
-/// in-projection — how a wider pattern is built from a narrower one's
-/// weights, so the two differ in nothing but the appended sub-projections.
+/// in-projection. This builds a wider pattern from the weights of a narrower
+/// one. The two then differ only in the appended sub-projections.
 fn append_dead_sub_projections(
     block: &Mamba3,
     into: &mut Mamba3,
@@ -796,9 +796,9 @@ fn share_weights_except_in_proj(from: &Mamba3, into: &mut Mamba3) {
     into.c_bias_hmr = from.c_bias_hmr.clone();
 }
 
-/// At `u = 1` every position is a token's first micro-step, so
-/// `HorizontalInToken`'s tap is closed everywhere and its mass returns to `γ`:
-/// the pattern **is** the ablation, whatever `λ` says. Built from a `None`
+/// At `u = 1` every position is a token's first micro-step. So the tap of
+/// `HorizontalInToken` is closed everywhere, and its mass returns to `γ`. The
+/// pattern **is** the ablation, whatever `λ` says. Built from a `None`
 /// block plus a live-but-ignored `λ` sub-projection, so the claim is about
 /// the closed tap and not about the projection.
 #[test]
@@ -818,7 +818,7 @@ fn horizontal_in_token_is_none_at_one_micro_step() {
     let x = input(&config, 6);
     let path = Mamba3SsdPath::default();
     // The double pathway runs the *same* γ pass in both, plus a β pass whose
-    // coefficient is exactly zero — so this one is bit for bit.
+    // coefficient is exactly zero. So this one is bit for bit.
     assert_eq!(
         max_abs_diff(
             none.forward_double_ssd(x.clone(), None, &path, None).0,
@@ -841,11 +841,10 @@ fn horizontal_in_token_is_none_at_one_micro_step() {
     assert!(d < dtype_tol(1e-6), "single: HorizontalInToken is None at u = 1: {d:.3e}");
 }
 
-/// The semantic claim: closing a tap returns its mass to `γ`,
-/// i.e. `λ = 1` there — so `HorizontalInToken` is exactly
-/// `HorizontalCarryOver` with each token's first micro-step saturated, and a
-/// *submodel* of it rather than a lossy version
-/// (`info/mamba-3/trapezoid-as-integration.md` §8).
+/// The semantic claim: a closed tap returns its mass to `γ`, which means
+/// `λ = 1` there. So `HorizontalInToken` is exactly `HorizontalCarryOver` with
+/// each token's first micro-step saturated. It is a *submodel* of that pattern,
+/// not a lossy version (`info/mamba-3/trapezoid-as-integration.md` §8).
 #[test]
 fn horizontal_in_token_is_the_carry_over_with_lambda_saturated() {
     use burn::module::Param;
@@ -896,7 +895,8 @@ fn horizontal_in_token_is_the_carry_over_with_lambda_saturated() {
     )));
 
     // σ(30) is exactly 1 in f32, so the two blocks now form the same
-    // coefficients and run the same code — bit for bit, on every route.
+    // coefficients and run the same code. They agree bit for bit, on every
+    // route.
     for (label, a, b) in [
         (
             "single",
@@ -918,14 +918,15 @@ fn horizontal_in_token_is_the_carry_over_with_lambda_saturated() {
     }
 }
 
-/// Several chunks, with tokens straddling their boundaries — at the default
-/// chunk length the tests above fit in one, so nothing there exercises the
-/// cross-chunk carry the single-SSD `h'` is defined by. This is where a
-/// lag-`u` pattern is most exposed: a sample's installments can be paid in a
-/// later chunk (the scale rides the chunk state) while its correction band
-/// is computed outside the kernel from the raw tensors, so the two have to
-/// agree without ever meeting. `u = 3`, chunks of 4: every token but the
-/// first straddles one.
+/// Several chunks, with tokens straddling their boundaries. At the default
+/// chunk length, the tests above fit in one chunk. So nothing there exercises
+/// the cross-chunk carry that defines the single-SSD `h'`.
+///
+/// This is where a lag-`u` pattern is most exposed. A later chunk can pay the
+/// installments of a sample (the scale rides the chunk state). But the
+/// correction band of that sample comes from the raw tensors, outside the
+/// kernel. So the two have to agree without ever meeting. `u = 3`, chunks of 4:
+/// every token but the first straddles one.
 #[test]
 fn lattice_multi_chunk_matches_step() {
     let device = test_device();
@@ -963,12 +964,14 @@ fn lattice_multi_chunk_matches_step() {
     }
 }
 
-/// Non-vacuity, which the parity tests above cannot give: a second tap that
-/// were quietly dropped would leave both pathways agreeing with each other
-/// and with `step`, and only a comparison against the *one-tap* pattern they
-/// would then be notices. At `μ = σ(0) = ½` each two-tap member must differ
-/// from [`Vertical`](TapPattern::Vertical) — and from the other, since only
-/// one of them closes its lag-1 tap at each token's first micro-step.
+/// Non-vacuity, which the parity tests above cannot give. A quietly dropped
+/// second tap would leave both pathways agreeing with each other and with
+/// `step`. Without that tap, a two-tap member would be the *one-tap* pattern.
+/// Only a comparison against that pattern notices the drop. At `μ = σ(0) = ½`,
+/// each two-tap member must differ from
+/// [`Vertical`](TapPattern::Vertical). The two members must also differ from
+/// each other: only one of them closes its lag-1 tap at each token's first
+/// micro-step.
 #[test]
 fn two_tap_patterns_actually_spend_their_second_tap() {
     let device = test_device();
@@ -1002,9 +1005,9 @@ fn two_tap_patterns_actually_spend_their_second_tap() {
 }
 
 /// The join: `VerticalPlusHorizontalCarryOver` **contains** both implemented
-/// single-tap patterns — `μ ≡ 1` is the carry-over, `μ ≡ 0` is the vertical
-/// — so `μ` is a per-(head, micro-step) interpolation between them rather
-/// than a third model. Built by appending saturated `μ` sub-projections to
+/// single-tap patterns. `μ ≡ 1` is the carry-over, and `μ ≡ 0` is the vertical.
+/// So `μ` is a per-(head, micro-step) interpolation between them, not a third
+/// model. Built by appending saturated `μ` sub-projections to
 /// their shared in-projection.
 #[test]
 fn vertical_plus_carry_over_contains_both_single_tap_patterns() {
@@ -1055,8 +1058,9 @@ fn vertical_plus_carry_over_contains_both_single_tap_patterns() {
     }
 }
 
-/// The tap buffer is what the pattern changes in the cache: none without a
-/// tap, one slot for the lag-1 patterns, `u` for the lag-`u` ones.
+/// The tap FIFO is what the pattern changes in the cache. The cache has no tap
+/// FIFO without a tap, one slot for the lag-1 patterns, and `u` slots for the
+/// lag-`u` ones.
 #[test]
 fn tap_slots_follow_the_lag() {
     assert_eq!(TapPattern::None.tap_slots(3), 0);
