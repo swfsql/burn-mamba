@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["step"]};
+window.SIDEBAR_ITEMS = {};

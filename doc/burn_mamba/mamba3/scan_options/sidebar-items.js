@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["Mamba3ScanOptions"]};
+window.SIDEBAR_ITEMS = {"enum":["Pathway"],"struct":["Mamba3ScanOptions"]};

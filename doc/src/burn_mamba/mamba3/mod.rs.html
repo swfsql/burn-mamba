@@ -20,24 +20,24 @@
 <a href=#20 id=20 data-nosnippet>20</a>//! ## Two SSD pathways
 <a href=#21 id=21 data-nosnippet>21</a>//!
 <a href=#22 id=22 data-nosnippet>22</a>//! Two interchangeable pathways compute the trapezoidal recurrence. The
-<a href=#23 id=23 data-nosnippet>23</a>//! **cache variant** that the caller supplies selects one at runtime:
-<a href=#24 id=24 data-nosnippet>24</a>//!
-<a href=#25 id=25 data-nosnippet>25</a>//! - [`double_ssd`](crate::mamba3::double_ssd) — one standard SSD call per
-<a href=#26 id=26 data-nosnippet>26</a>//!   trapezoid term: one for the current sample, plus one per `β` tap
-<a href=#27 id=27 data-nosnippet>27</a>//!   ([`tap_pattern`](crate::mamba3::tap_pattern)). That is **two** calls at the
-<a href=#28 id=28 data-nosnippet>28</a>//!   default and three under a two-tap pattern. It is simple and easy to
-<a href=#29 id=29 data-nosnippet>29</a>//!   verify, but it uses ~2× the intra-chunk memory (~3× at two taps).
-<a href=#30 id=30 data-nosnippet>30</a>//! - [`single_ssd`](crate::mamba3::single_ssd) — **one** SSD call in the
-<a href=#31 id=31 data-nosnippet>31</a>//!   official-kernel form, for every tap pattern. It uses ≈ half the training
-<a href=#32 id=32 data-nosnippet>32</a>//!   memory of the double pathway at the default, and less when there are more
-<a href=#33 id=33 data-nosnippet>33</a>//!   taps. It carries the accumulator, which differs from the state
-<a href=#34 id=34 data-nosnippet>34</a>//!   mid-sequence.
-<a href=#35 id=35 data-nosnippet>35</a>//!
-<a href=#36 id=36 data-nosnippet>36</a>//! [`cache`](crate::mamba3::cache) holds the enum that selects the pathway,
-<a href=#37 id=37 data-nosnippet>37</a>//! and the frame cache that both cache types keep.
-<a href=#38 id=38 data-nosnippet>38</a>//! [`scan_options`](crate::mamba3::scan_options) holds the scan options of
-<a href=#39 id=39 data-nosnippet>39</a>//! both pathways: the [SSD path](crate::ssd_path::SsdPath) (Minimal / Serial /
-<a href=#40 id=40 data-nosnippet>40</a>//! SerialRecalculated) and the chunk length.
+<a href=#23 id=23 data-nosnippet>23</a>//! [`Pathway`](crate::mamba3::scan_options::Pathway) of the scan options
+<a href=#24 id=24 data-nosnippet>24</a>//! selects one at runtime:
+<a href=#25 id=25 data-nosnippet>25</a>//!
+<a href=#26 id=26 data-nosnippet>26</a>//! - [`double_ssd`](crate::mamba3::double_ssd) — one standard SSD call per
+<a href=#27 id=27 data-nosnippet>27</a>//!   trapezoid term: one for the current sample, plus one per `β` tap
+<a href=#28 id=28 data-nosnippet>28</a>//!   ([`tap_pattern`](crate::mamba3::tap_pattern)). That is **two** calls at the
+<a href=#29 id=29 data-nosnippet>29</a>//!   default and three under a two-tap pattern. It is simple and easy to
+<a href=#30 id=30 data-nosnippet>30</a>//!   verify, but it uses ~2× the intra-chunk memory (~3× at two taps).
+<a href=#31 id=31 data-nosnippet>31</a>//! - [`single_ssd`](crate::mamba3::single_ssd) — **one** SSD call in the
+<a href=#32 id=32 data-nosnippet>32</a>//!   official-kernel form, for every tap pattern. It uses ≈ half the training
+<a href=#33 id=33 data-nosnippet>33</a>//!   memory of the double pathway at the default, and less when there are more
+<a href=#34 id=34 data-nosnippet>34</a>//!   taps. It carries the accumulator, which differs from the state
+<a href=#35 id=35 data-nosnippet>35</a>//!   mid-sequence. It is the default.
+<a href=#36 id=36 data-nosnippet>36</a>//!
+<a href=#37 id=37 data-nosnippet>37</a>//! [`cache`](crate::mamba3::cache) holds the one cache type of both pathways,
+<a href=#38 id=38 data-nosnippet>38</a>//! with its frame cache. [`scan_options`](crate::mamba3::scan_options) holds
+<a href=#39 id=39 data-nosnippet>39</a>//! the scan options: the [SSD path](crate::ssd_path::SsdPath) (Minimal /
+<a href=#40 id=40 data-nosnippet>40</a>//! Serial / SerialRecalculated), the chunk length and the pathway.
 <a href=#41 id=41 data-nosnippet>41</a>//!
 <a href=#42 id=42 data-nosnippet>42</a>//! ## The tap pattern of the trapezoid
 <a href=#43 id=43 data-nosnippet>43</a>//!
@@ -95,7 +95,7 @@
 <a href=#95 id=95 data-nosnippet>95</a>    <span class="kw">pub use </span>positive::{Gain, Tropical};
 <a href=#96 id=96 data-nosnippet>96</a>    <span class="kw">pub use </span>quat_scan::Mamba3QuatScanBackendExt;
 <a href=#97 id=97 data-nosnippet>97</a>    <span class="kw">pub use </span>rotation::{RotationKind, RotationState};
-<a href=#98 id=98 data-nosnippet>98</a>    <span class="kw">pub use </span>scan_options::Mamba3ScanOptions;
+<a href=#98 id=98 data-nosnippet>98</a>    <span class="kw">pub use </span>scan_options::{Mamba3ScanOptions, Pathway};
 <a href=#99 id=99 data-nosnippet>99</a>    <span class="kw">pub use </span>tap_pattern::TapPattern;
 <a href=#100 id=100 data-nosnippet>100</a>}
 </code></pre></div></section></main></body></html>

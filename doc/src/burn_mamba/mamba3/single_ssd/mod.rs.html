@@ -15,15 +15,15 @@
 <a href=#15 id=15 data-nosnippet>15</a>//!
 <a href=#16 id=16 data-nosnippet>16</a>//! It uses ≈ half the training memory of the two-call
 <a href=#17 id=17 data-nosnippet>17</a>//! [`double_ssd`](crate::mamba3::double_ssd) pathway, and less than a third of
-<a href=#18 id=18 data-nosnippet>18</a>//! a three-call one. Its cache holds the accumulator `h'`, which has
-<a href=#19 id=19 data-nosnippet>19</a>//! **different mid-sequence semantics** from the state (so the cache type is
-<a href=#20 id=20 data-nosnippet>20</a>//! distinct). The two are equal at call boundaries and convert with
-<a href=#21 id=21 data-nosnippet>21</a>//! field-identity `From` impls.
-<a href=#22 id=22 data-nosnippet>22</a>
-<a href=#23 id=23 data-nosnippet>23</a>/// The single-SSD cache (same fields as double-SSD, but `ssm_bhpr` holds the
-<a href=#24 id=24 data-nosnippet>24</a>/// accumulator).
-<a href=#25 id=25 data-nosnippet>25</a></span><span class="kw">pub mod </span>cache;
-<a href=#26 id=26 data-nosnippet>26</a><span class="doccomment">/// `forward_single_ssd` (scale + boundary-β seed) and `step_single_ssd`.
+<a href=#18 id=18 data-nosnippet>18</a>//! a three-call one. In the middle of a sequence, it carries the accumulator
+<a href=#19 id=19 data-nosnippet>19</a>//! `h'`, which is different from the state. At a call boundary, the two are
+<a href=#20 id=20 data-nosnippet>20</a>//! equal, so both pathways share one cache type
+<a href=#21 id=21 data-nosnippet>21</a>//! ([`Mamba3Cache`](crate::mamba3::cache::Mamba3Cache)).
+<a href=#22 id=22 data-nosnippet>22</a>//!
+<a href=#23 id=23 data-nosnippet>23</a>//! [`Pathway::SingleSsd`](crate::mamba3::scan_options::Pathway::SingleSsd),
+<a href=#24 id=24 data-nosnippet>24</a>//! the default, in the scan options selects this pathway.
+<a href=#25 id=25 data-nosnippet>25</a>
+<a href=#26 id=26 data-nosnippet>26</a>/// The forward of this pathway: the scale and the boundary-β seed.
 <a href=#27 id=27 data-nosnippet>27</a></span><span class="kw">pub mod </span>single_ssd;
 <a href=#28 id=28 data-nosnippet>28</a><span class="doccomment">/// The standard SSD kernels specialised to the single-pass scale/mask.
 <a href=#29 id=29 data-nosnippet>29</a></span><span class="kw">pub mod </span>ssd;
@@ -33,8 +33,7 @@
 <a href=#33 id=33 data-nosnippet>33</a><span class="doccomment">/// Public re-exports for the single-SSD pathway.
 <a href=#34 id=34 data-nosnippet>34</a></span><span class="kw">pub mod </span>prelude {
 <a href=#35 id=35 data-nosnippet>35</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
-<a href=#36 id=36 data-nosnippet>36</a>    <span class="kw">pub use </span>cache::{Mamba3SingleSsdCache, Mamba3SingleSsdCaches};
-<a href=#37 id=37 data-nosnippet>37</a>    <span class="kw">pub use </span>ssd::Mamba3SingleSsdBackendExt;
-<a href=#38 id=38 data-nosnippet>38</a>    <span class="kw">pub use </span>ssd::Mamba3SingleSsdInput;
-<a href=#39 id=39 data-nosnippet>39</a>}
+<a href=#36 id=36 data-nosnippet>36</a>    <span class="kw">pub use </span>ssd::Mamba3SingleSsdBackendExt;
+<a href=#37 id=37 data-nosnippet>37</a>    <span class="kw">pub use </span>ssd::Mamba3SingleSsdInput;
+<a href=#38 id=38 data-nosnippet>38</a>}
 </code></pre></div></section></main></body></html>

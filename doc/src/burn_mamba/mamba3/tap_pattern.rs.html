@@ -101,265 +101,264 @@
 <a href=#101 id=101 data-nosnippet>101</a>    ///
 <a href=#102 id=102 data-nosnippet>102</a>    /// The two SSD pathways are the same here. With no second pass to fuse, the
 <a href=#103 id=103 data-nosnippet>103</a>    /// composite key scale of single-SSD is `γ`, and its γ-correction is the
-<a href=#104 id=104 data-nosnippet>104</a>    /// whole diagonal. So
-<a href=#105 id=105 data-nosnippet>105</a>    /// [`forward_single_ssd`](crate::mamba3::mamba3::Mamba3::forward_single_ssd)
-<a href=#106 id=106 data-nosnippet>106</a>    /// runs the double-SSD code, and the caches convert by field identity at
-<a href=#107 id=107 data-nosnippet>107</a>    /// *every* position, not only at boundaries.
-<a href=#108 id=108 data-nosnippet>108</a>    </span><span class="prelude-val">None</span>,
-<a href=#109 id=109 data-nosnippet>109</a>
-<a href=#110 id=110 data-nosnippet>110</a>    <span class="doccomment">/// **Lag `u`, always**: the tap reads the *same* micro-step of the previous
-<a href=#111 id=111 data-nosnippet>111</a>    /// **token**. So every tap crosses a token boundary, and the pattern is `u`
-<a href=#112 id=112 data-nosnippet>112</a>    /// parallel token-rate filters, one per micro-step channel. It restores the
-<a href=#113 id=113 data-nosnippet>113</a>    /// `u = 1` tap semantics at every micro-step.
-<a href=#114 id=114 data-nosnippet>114</a>    ///
-<a href=#115 id=115 data-nosnippet>115</a>    /// The **tap graph** is "vertical", not the scan order. The state still
-<a href=#116 id=116 data-nosnippet>116</a>    /// runs the one flattened chain ([`crate::mamba3::product`]), which keeps
-<a href=#117 id=117 data-nosnippet>117</a>    /// the pattern causal and `forward` equal to an unrolled `step`. A scan
-<a href=#118 id=118 data-nosnippet>118</a>    /// that really took every token at micro-step `0` before micro-step `1`
-<a href=#119 id=119 data-nosnippet>119</a>    /// would have to read token `t+1` before it finished token `t`. The
-<a href=#120 id=120 data-nosnippet>120</a>    /// alternative, `u` separate states, is a layer stack (`burn_stack::Layers`),
-<a href=#121 id=121 data-nosnippet>121</a>    /// not a tap pattern.
-<a href=#122 id=122 data-nosnippet>122</a>    ///
-<a href=#123 id=123 data-nosnippet>123</a>    /// At token resolution the pattern has a closed form. Let `Aᵗ` be the
-<a href=#124 id=124 data-nosnippet>124</a>    /// token transition and `ṽᵗⱼ` the write of micro-step `j`, transported to
-<a href=#125 id=125 data-nosnippet>125</a>    /// the end of its own token. The transport of the tap,
-<a href=#126 id=126 data-nosnippet>126</a>    /// `M₍ₜ₋₁,ⱼ₊₁₎:₍ₜ,ⱼ₎`, factors through that of the state, and the whole
-<a href=#127 id=127 data-nosnippet>127</a>    /// `β` side lands **at the token boundary**:
-<a href=#128 id=128 data-nosnippet>128</a>    ///
-<a href=#129 id=129 data-nosnippet>129</a>    /// ```text
-<a href=#130 id=130 data-nosnippet>130</a>    ///   hₜ = Aₜ · ( hₜ₋₁ + Σⱼ νₜ,ⱼ ṽₜ₋₁,ⱼ ) + Σⱼ γₜ,ⱼ ṽₜ,ⱼ ,     ν = (1−λ)Δ
-<a href=#131 id=131 data-nosnippet>131</a>    /// ```
-<a href=#132 id=132 data-nosnippet>132</a>    ///
-<a href=#133 id=133 data-nosnippet>133</a>    /// This is **the `u = 1` trapezoid at token resolution, with its left
-<a href=#134 id=134 data-nosnippet>134</a>    /// endpoint promoted from rank 1 to rank `u`**.
-<a href=#135 id=135 data-nosnippet>135</a>    /// [`HorizontalCarryOver`](Self::HorizontalCarryOver) taps only the *last*
-<a href=#136 id=136 data-nosnippet>136</a>    /// micro-step of the previous token. `A` is unchanged, so it is still
-<a href=#137 id=137 data-nosnippet>137</a>    /// `λ`-free (`info/mamba-3/trapezoid-as-integration.md` §7).
-<a href=#138 id=138 data-nosnippet>138</a>    ///
-<a href=#139 id=139 data-nosnippet>139</a>    /// Costs (§9):
-<a href=#140 id=140 data-nosnippet>140</a>    ///
-<a href=#141 id=141 data-nosnippet>141</a>    /// - the key scale is `γₛ + (1−λₛ₊ᵤ)Δₛ₊ᵤ`,
-<a href=#142 id=142 data-nosnippet>142</a>    /// - the tap is transported across its own `u`-position gap,
-<a href=#143 id=143 data-nosnippet>143</a>    /// - the tap buffer of the cache becomes a `u`-deep FIFO (exactly the
-<a href=#144 id=144 data-nosnippet>144</a>    ///   previous token),
-<a href=#145 id=145 data-nosnippet>145</a>    /// - the single-SSD γ-correction widens from the diagonal to a
-<a href=#146 id=146 data-nosnippet>146</a>    ///   `u`-wide band. At the only positions whose output survives
-<a href=#147 id=147 data-nosnippet>147</a>    ///   (`j = u−1`), that band is **exactly the token**. So it is one small
-<a href=#148 id=148 data-nosnippet>148</a>    ///   intra-token contraction outside the chunked kernel, not a wider mask
-<a href=#149 id=149 data-nosnippet>149</a>    ///   (`crate::mamba3::single_ssd::token_band`).
-<a href=#150 id=150 data-nosnippet>150</a>    ///
-<a href=#151 id=151 data-nosnippet>151</a>    /// **Under a Kalman [`Gain`](crate::mamba3::positive::Gain) at `u &gt; 1`**,
-<a href=#152 id=152 data-nosnippet>152</a>    /// this tap has no exact filter form. Its installment arrives `u`
-<a href=#153 id=153 data-nosnippet>153</a>    /// micro-steps late, after `u − 1` predicts that a filter would have made
-<a href=#154 id=154 data-nosnippet>154</a>    /// with it. The gain counts it as a lag-1 installment, so `Λ`
-<a href=#155 id=155 data-nosnippet>155</a>    /// over-estimates the weight that the plant wrote, and `η/Λ` is only
-<a href=#156 id=156 data-nosnippet>156</a>    /// approximately its weighted mean.
-<a href=#157 id=157 data-nosnippet>157</a>    /// The block still runs, and its pathways still agree. The lag-1 patterns
-<a href=#158 id=158 data-nosnippet>158</a>    /// are exact ([`crate::mamba3::positive::kalman`]).
-<a href=#159 id=159 data-nosnippet>159</a>    </span>Vertical,
-<a href=#160 id=160 data-nosnippet>160</a>
-<a href=#161 id=161 data-nosnippet>161</a>    <span class="doccomment">/// **Lag 1, closed at the first micro-step of each token**: taps pair
-<a href=#162 id=162 data-nosnippet>162</a>    /// micro-steps *within* a token and never cross a token boundary. With no
-<a href=#163 id=163 data-nosnippet>163</a>    /// cross-token path, it cannot do the job that the trapezoid exists for. It
-<a href=#164 id=164 data-nosnippet>164</a>    /// is a component of a pattern, not an alternative to one.
-<a href=#165 id=165 data-nosnippet>165</a>    ///
-<a href=#166 id=166 data-nosnippet>166</a>    /// The closed micro-step has no admissible earlier sample, so all its mass
-<a href=#167 id=167 data-nosnippet>167</a>    /// returns to `γ` (`λ = 1` there, module header). Each token **starts** on
-<a href=#168 id=168 data-nosnippet>168</a>    /// plain exponential-Euler and is trapezoidal inside. This is exactly the
-<a href=#169 id=169 data-nosnippet>169</a>    /// limit that `info/mamba-3/trapezoid-as-integration.md` §8 shows learning
-<a href=#170 id=170 data-nosnippet>170</a>    /// can reach under [`HorizontalCarryOver`](Self::HorizontalCarryOver). So
-<a href=#171 id=171 data-nosnippet>171</a>    /// this member is a constrained **submodel** of that pattern, not a rival.
-<a href=#172 id=172 data-nosnippet>172</a>    /// That is also why the mass goes back instead of being dropped.
-<a href=#173 id=173 data-nosnippet>173</a>    ///
-<a href=#174 id=174 data-nosnippet>174</a>    /// Caches like [`HorizontalCarryOver`](Self::HorizontalCarryOver): the same
-<a href=#175 id=175 data-nosnippet>175</a>    /// one-slot lag-1 buffer, ignored at the first micro-step of each token.
-<a href=#176 id=176 data-nosnippet>176</a>    /// So the carried value has no effect across a call boundary: the slot is
-<a href=#177 id=177 data-nosnippet>177</a>    /// layout, not information.
-<a href=#178 id=178 data-nosnippet>178</a>    </span>HorizontalInToken,
-<a href=#179 id=179 data-nosnippet>179</a>
-<a href=#180 id=180 data-nosnippet>180</a>    <span class="doccomment">/// **Lag 1, always** (the default): one tap per position of the write
-<a href=#181 id=181 data-nosnippet>181</a>    /// axis. So `1/u` of the taps cross a token boundary, and `(u−1)/u`
-<a href=#182 id=182 data-nosnippet>182</a>    /// pair two projections of the same token (§8). The cache holds one
-<a href=#183 id=183 data-nosnippet>183</a>    /// `(B, x)` slot: the last micro-step of the last token.
-<a href=#184 id=184 data-nosnippet>184</a>    </span><span class="attr">#[default]
-<a href=#185 id=185 data-nosnippet>185</a>    </span>HorizontalCarryOver,
-<a href=#186 id=186 data-nosnippet>186</a>
-<a href=#187 id=187 data-nosnippet>187</a>    <span class="doccomment">/// [`Vertical`](Self::Vertical) **and**
-<a href=#188 id=188 data-nosnippet>188</a>    /// [`HorizontalInToken`](Self::HorizontalInToken) at once. `μ` shares the
-<a href=#189 id=189 data-nosnippet>189</a>    /// left-endpoint mass between them, so the two jobs do not share one `λ`.
-<a href=#190 id=190 data-nosnippet>190</a>    /// Its tap graph is not a single lag on the write axis. On the
-<a href=#191 id=191 data-nosnippet>191</a>    /// `token × micro-step` grid, *two* taps write cell `(t, j)`: `(t−1, j)`
-<a href=#192 id=192 data-nosnippet>192</a>    /// above it, and `(t, j−1)` beside it (for `j ≥ 1` only).
-<a href=#193 id=193 data-nosnippet>193</a>    ///
-<a href=#194 id=194 data-nosnippet>194</a>    /// Only the graph is 2-D, not the algorithm. Each tap is transported
-<a href=#195 id=195 data-nosnippet>195</a>    /// across its own gap (`1` and `u` positions of the same write axis), so
-<a href=#196 id=196 data-nosnippet>196</a>    /// the collapse of §9 still applies term by term. The state stays one
-<a href=#197 id=197 data-nosnippet>197</a>    /// matrix, and sample `s` still carries **one** scalar,
-<a href=#198 id=198 data-nosnippet>198</a>    /// `γₛ + νⁱⁿᵗₛ₊₁ + νᶠᵃʳₛ₊ᵤ`, into every later micro-step. So single-SSD still
-<a href=#199 id=199 data-nosnippet>199</a>    /// needs one pass.
-<a href=#200 id=200 data-nosnippet>200</a>    ///
-<a href=#201 id=201 data-nosnippet>201</a>    /// Costs over [`Vertical`](Self::Vertical):
-<a href=#202 id=202 data-nosnippet>202</a>    ///
-<a href=#203 id=203 data-nosnippet>203</a>    /// - one more per-micro-step scalar channel (`μ`),
-<a href=#204 id=204 data-nosnippet>204</a>    /// - a third nonzero per row of the banded factor of the mask.
-<a href=#205 id=205 data-nosnippet>205</a>    ///
-<a href=#206 id=206 data-nosnippet>206</a>    /// The band is already `u` wide, and the within-token tap never crosses a
-<a href=#207 id=207 data-nosnippet>207</a>    /// token boundary. So the cache and the boundary seed are those of
-<a href=#208 id=208 data-nosnippet>208</a>    /// [`Vertical`](Self::Vertical). On the double-SSD pathway, the two taps
-<a href=#209 id=209 data-nosnippet>209</a>    /// have different shifts and cannot share a pass, so that pathway runs
-<a href=#210 id=210 data-nosnippet>210</a>    /// **three** SSD calls. The single pathway suits this pattern better.
-<a href=#211 id=211 data-nosnippet>211</a>    ///
-<a href=#212 id=212 data-nosnippet>212</a>    /// Under a Kalman [`Gain`](crate::mamba3::positive::Gain) at `u &gt; 1`, it is
-<a href=#213 id=213 data-nosnippet>213</a>    /// inexact through its lag-`u` tap, as [`Vertical`](Self::Vertical) is.
-<a href=#214 id=214 data-nosnippet>214</a>    </span>VerticalPlusHorizontalInToken,
-<a href=#215 id=215 data-nosnippet>215</a>
-<a href=#216 id=216 data-nosnippet>216</a>    <span class="doccomment">/// [`Vertical`](Self::Vertical) **and**
-<a href=#217 id=217 data-nosnippet>217</a>    /// [`HorizontalCarryOver`](Self::HorizontalCarryOver) at once. It has the
-<a href=#218 id=218 data-nosnippet>218</a>    /// same two taps as
-<a href=#219 id=219 data-nosnippet>219</a>    /// [`VerticalPlusHorizontalInToken`](Self::VerticalPlusHorizontalInToken), with
-<a href=#220 id=220 data-nosnippet>220</a>    /// the lag-1 tap unrestricted. So at `j = 0`, the lag-1 tap reads the
-<a href=#221 id=221 data-nosnippet>221</a>    /// *last* micro-step of the previous token, and the lag-`u` tap reads its
-<a href=#222 id=222 data-nosnippet>222</a>    /// *first*. Both candidates for the left endpoint of the micro-step are always
-<a href=#223 id=223 data-nosnippet>223</a>    /// available, and `μ` interpolates between them everywhere.
-<a href=#224 id=224 data-nosnippet>224</a>    ///
-<a href=#225 id=225 data-nosnippet>225</a>    /// So this member **contains** the two single-tap patterns: `μ ≡ 1` is
-<a href=#226 id=226 data-nosnippet>226</a>    /// [`HorizontalCarryOver`](Self::HorizontalCarryOver) and `μ ≡ 0` is
-<a href=#227 id=227 data-nosnippet>227</a>    /// [`Vertical`](Self::Vertical), both exactly. `μ` is per (head,
-<a href=#228 id=228 data-nosnippet>228</a>    /// micro-step), so descent makes here the choice that the rest of this enum
-<a href=#229 id=229 data-nosnippet>229</a>    /// makes at configuration time.
-<a href=#230 id=230 data-nosnippet>230</a>    ///
-<a href=#231 id=231 data-nosnippet>231</a>    /// Costs over [`VerticalPlusHorizontalInToken`](Self::VerticalPlusHorizontalInToken):
-<a href=#232 id=232 data-nosnippet>232</a>    ///
-<a href=#233 id=233 data-nosnippet>233</a>    /// - nothing in the cache: the **newest** slot of the `u`-deep FIFO *is*
-<a href=#234 id=234 data-nosnippet>234</a>    ///   the lag-1 slot, with the empty decay product,
-<a href=#235 id=235 data-nosnippet>235</a>    /// - one extra term in the single-SSD boundary seed: here the lag-1 tap
-<a href=#236 id=236 data-nosnippet>236</a>    ///   crosses a call boundary. Under
-<a href=#237 id=237 data-nosnippet>237</a>    ///   [`VerticalPlusHorizontalInToken`](Self::VerticalPlusHorizontalInToken),
-<a href=#238 id=238 data-nosnippet>238</a>    ///   it never crosses one.
-<a href=#239 id=239 data-nosnippet>239</a>    ///
-<a href=#240 id=240 data-nosnippet>240</a>    /// Under a Kalman [`Gain`](crate::mamba3::positive::Gain) at `u &gt; 1`, it is
-<a href=#241 id=241 data-nosnippet>241</a>    /// inexact through its lag-`u` tap, as [`Vertical`](Self::Vertical) is.
-<a href=#242 id=242 data-nosnippet>242</a>    </span>VerticalPlusHorizontalCarryOver,
-<a href=#243 id=243 data-nosnippet>243</a>}
-<a href=#244 id=244 data-nosnippet>244</a>
-<a href=#245 id=245 data-nosnippet>245</a><span class="kw">impl </span>TapPattern {
-<a href=#246 id=246 data-nosnippet>246</a>    <span class="doccomment">/// Whether the pattern has a second (`β`) tap. `false` only for
-<a href=#247 id=247 data-nosnippet>247</a>    /// [`None`](Self::None). Every site branches on this predicate: no tap
-<a href=#248 id=248 data-nosnippet>248</a>    /// means no `λ` channels, no `β` coefficient, no tap FIFO in the cache,
-<a href=#249 id=249 data-nosnippet>249</a>    /// and no previous-sample term in the recurrence.
-<a href=#250 id=250 data-nosnippet>250</a>    </span><span class="kw">pub fn </span>has_beta_tap(<span class="self">self</span>) -&gt; bool {
-<a href=#251 id=251 data-nosnippet>251</a>        <span class="self">self </span>!= TapPattern::None
-<a href=#252 id=252 data-nosnippet>252</a>    }
-<a href=#253 id=253 data-nosnippet>253</a>
-<a href=#254 id=254 data-nosnippet>254</a>    <span class="doccomment">/// How far back the `β` tap reaches, in **write** positions
-<a href=#255 id=255 data-nosnippet>255</a>    /// ([`crate::mamba3::product`]): `0` with no tap, `1` for the lag-1
-<a href=#256 id=256 data-nosnippet>256</a>    /// patterns, `u` for the lag-`u` ones.
-<a href=#257 id=257 data-nosnippet>257</a>    ///
-<a href=#258 id=258 data-nosnippet>258</a>    /// This is the one knob for the single-tap patterns:
-<a href=#259 id=259 data-nosnippet>259</a>    /// [`HorizontalCarryOver`](Self::HorizontalCarryOver) is `lag = 1` and
-<a href=#260 id=260 data-nosnippet>260</a>    /// [`Vertical`](Self::Vertical) is `lag = u`. Every site that touches the
-<a href=#261 id=261 data-nosnippet>261</a>    /// tap (the double-SSD shift, the single-SSD key scale, the FIFO depth of
-<a href=#262 id=262 data-nosnippet>262</a>    /// `step`, the cache) reads it instead of branching on the pattern. At
-<a href=#263 id=263 data-nosnippet>263</a>    /// `u = 1` both return `1`, which is why the two are equal there.
-<a href=#264 id=264 data-nosnippet>264</a>    ///
-<a href=#265 id=265 data-nosnippet>265</a>    /// The tap must be transported across *its own* gap, so a lag-`L` tap
-<a href=#266 id=266 data-nosnippet>266</a>    /// carries `Πᵈ⁼⁰..ᴸ⁻¹ αₚ₋ᵈ`, not `αₚ`.
-<a href=#267 id=267 data-nosnippet>267</a>    /// `info/mamba-3/trapezoid-as-integration.md` §9 shows that this condition
-<a href=#268 id=268 data-nosnippet>268</a>    /// keeps the `Δ̃` collapse, and thus the single-SSD pathway.
-<a href=#269 id=269 data-nosnippet>269</a>    </span><span class="kw">pub fn </span>tap_lag(<span class="self">self</span>, micro_steps: usize) -&gt; usize {
-<a href=#270 id=270 data-nosnippet>270</a>        <span class="kw">match </span><span class="self">self </span>{
-<a href=#271 id=271 data-nosnippet>271</a>            TapPattern::None =&gt; <span class="number">0</span>,
-<a href=#272 id=272 data-nosnippet>272</a>            TapPattern::HorizontalCarryOver | TapPattern::HorizontalInToken =&gt; <span class="number">1</span>,
-<a href=#273 id=273 data-nosnippet>273</a>            TapPattern::Vertical
-<a href=#274 id=274 data-nosnippet>274</a>            | TapPattern::VerticalPlusHorizontalInToken
-<a href=#275 id=275 data-nosnippet>275</a>            | TapPattern::VerticalPlusHorizontalCarryOver =&gt; micro_steps,
-<a href=#276 id=276 data-nosnippet>276</a>        }
-<a href=#277 id=277 data-nosnippet>277</a>    }
-<a href=#278 id=278 data-nosnippet>278</a>
-<a href=#279 id=279 data-nosnippet>279</a>    <span class="doccomment">/// Whether the pattern has **two** taps at `micro_steps`: a lag-1 tap beside
-<a href=#280 id=280 data-nosnippet>280</a>    /// the lag-`u` tap at [`tap_lag`](Self::tap_lag). True for the two-tap
-<a href=#281 id=281 data-nosnippet>281</a>    /// members, and only when the two lags are different.
-<a href=#282 id=282 data-nosnippet>282</a>    ///
-<a href=#283 id=283 data-nosnippet>283</a>    /// At `u = 1` the lags are equal: both taps read the same sample, so the
-<a href=#284 id=284 data-nosnippet>284</a>    /// split is a decomposition of one coefficient, and the pair **folds** back
-<a href=#285 id=285 data-nosnippet>285</a>    /// into one tap. The fold is structural, as the missing `λ` of
-<a href=#286 id=286 data-nosnippet>286</a>    /// [`None`](Self::None) is: no `μ` channels in the in-projection, no `μ`
-<a href=#287 id=287 data-nosnippet>287</a>    /// sub-projection for Muon, one shift, one SSD pass. Thus a two-tap member
-<a href=#288 id=288 data-nosnippet>288</a>    /// at `u = 1` *is* [`HorizontalCarryOver`](Self::HorizontalCarryOver), not
-<a href=#289 id=289 data-nosnippet>289</a>    /// an expensive form of it.
-<a href=#290 id=290 data-nosnippet>290</a>    </span><span class="kw">pub fn </span>has_two_taps(<span class="self">self</span>, micro_steps: usize) -&gt; bool {
-<a href=#291 id=291 data-nosnippet>291</a>        micro_steps &gt; <span class="number">1
-<a href=#292 id=292 data-nosnippet>292</a>            </span>&amp;&amp; <span class="macro">matches!</span>(
-<a href=#293 id=293 data-nosnippet>293</a>                <span class="self">self</span>,
-<a href=#294 id=294 data-nosnippet>294</a>                TapPattern::VerticalPlusHorizontalInToken
-<a href=#295 id=295 data-nosnippet>295</a>                    | TapPattern::VerticalPlusHorizontalCarryOver
-<a href=#296 id=296 data-nosnippet>296</a>            )
-<a href=#297 id=297 data-nosnippet>297</a>    }
-<a href=#298 id=298 data-nosnippet>298</a>
-<a href=#299 id=299 data-nosnippet>299</a>    <span class="doccomment">/// Whether the tap at [`tap_lag`](Self::tap_lag) is admissible at the
-<a href=#300 id=300 data-nosnippet>300</a>    /// **first** micro-step of a token, where it would cross a token boundary.
-<a href=#301 id=301 data-nosnippet>301</a>    /// `false` only for
-<a href=#302 id=302 data-nosnippet>302</a>    /// [`HorizontalInToken`](Self::HorizontalInToken), whose left-endpoint mass
-<a href=#303 id=303 data-nosnippet>303</a>    /// then returns to `γ` (module header).
-<a href=#304 id=304 data-nosnippet>304</a>    </span><span class="kw">pub fn </span>tap_crosses_tokens(<span class="self">self</span>) -&gt; bool {
-<a href=#305 id=305 data-nosnippet>305</a>        <span class="self">self </span>!= TapPattern::HorizontalInToken
-<a href=#306 id=306 data-nosnippet>306</a>    }
-<a href=#307 id=307 data-nosnippet>307</a>
-<a href=#308 id=308 data-nosnippet>308</a>    <span class="doccomment">/// Whether the lag-1 tap of a two-tap member is admissible at the first
-<a href=#309 id=309 data-nosnippet>309</a>    /// micro-step of a token, where it would cross a token boundary. This is the
-<a href=#310 id=310 data-nosnippet>310</a>    /// only difference between
-<a href=#311 id=311 data-nosnippet>311</a>    /// [`VerticalPlusHorizontalCarryOver`](Self::VerticalPlusHorizontalCarryOver)
-<a href=#312 id=312 data-nosnippet>312</a>    /// (`true`) and
-<a href=#313 id=313 data-nosnippet>313</a>    /// [`VerticalPlusHorizontalInToken`](Self::VerticalPlusHorizontalInToken)
-<a href=#314 id=314 data-nosnippet>314</a>    /// (`false`). Where it is closed, the share of `μ` returns to the lag-`u`
-<a href=#315 id=315 data-nosnippet>315</a>    /// tap.
-<a href=#316 id=316 data-nosnippet>316</a>    ///
-<a href=#317 id=317 data-nosnippet>317</a>    /// Read only when [`has_two_taps`](Self::has_two_taps).
-<a href=#318 id=318 data-nosnippet>318</a>    </span><span class="kw">pub fn </span>two_tap_lag1_crosses_tokens(<span class="self">self</span>) -&gt; bool {
-<a href=#319 id=319 data-nosnippet>319</a>        <span class="self">self </span>== TapPattern::VerticalPlusHorizontalCarryOver
-<a href=#320 id=320 data-nosnippet>320</a>    }
-<a href=#321 id=321 data-nosnippet>321</a>
-<a href=#322 id=322 data-nosnippet>322</a>    <span class="doccomment">/// The number of slots in the tap FIFO of a cache, for this pattern at
-<a href=#323 id=323 data-nosnippet>323</a>    /// `micro_steps`. It is the depth of the FIFO that the tap reads, so
-<a href=#324 id=324 data-nosnippet>324</a>    /// exactly [`tap_lag`](Self::tap_lag). A lag-`L` tap needs the last `L`
-<a href=#325 id=325 data-nosnippet>325</a>    /// positions.
-<a href=#326 id=326 data-nosnippet>326</a>    /// The state is always one matrix. Only the tap FIFO changes.
-<a href=#327 id=327 data-nosnippet>327</a>    ///
-<a href=#328 id=328 data-nosnippet>328</a>    /// A slot is a *layout*. It does not mean that something crosses the call
-<a href=#329 id=329 data-nosnippet>329</a>    /// boundary through it: [`HorizontalInToken`](Self::HorizontalInToken) shares
-<a href=#330 id=330 data-nosnippet>330</a>    /// the slot of the carry-over and ignores it per token. Also, a second tap
-<a href=#331 id=331 data-nosnippet>331</a>    /// needs no second buffer. The **newest** slot of the `u`-deep FIFO *is*
-<a href=#332 id=332 data-nosnippet>332</a>    /// the lag-1 slot, with the empty decay product, so the two-tap members
-<a href=#333 id=333 data-nosnippet>333</a>    /// read one FIFO twice.
-<a href=#334 id=334 data-nosnippet>334</a>    </span><span class="kw">pub fn </span>tap_slots(<span class="self">self</span>, micro_steps: usize) -&gt; usize {
-<a href=#335 id=335 data-nosnippet>335</a>        <span class="self">self</span>.tap_lag(micro_steps)
-<a href=#336 id=336 data-nosnippet>336</a>    }
-<a href=#337 id=337 data-nosnippet>337</a>}
-<a href=#338 id=338 data-nosnippet>338</a>
-<a href=#339 id=339 data-nosnippet>339</a><span class="doccomment">/// Everything the discretisation needs from the block: the tap pattern, the
-<a href=#340 id=340 data-nosnippet>340</a>/// micro-steps (the period of the token boundaries, where a tap can close), and
-<a href=#341 id=341 data-nosnippet>341</a>/// the two clamps on the coefficients.
-<a href=#342 id=342 data-nosnippet>342</a>///
-<a href=#343 id=343 data-nosnippet>343</a>/// [`Mamba3::tap_pattern_spec`](crate::mamba3::mamba3::Mamba3::tap_pattern_spec)
-<a href=#344 id=344 data-nosnippet>344</a>/// makes it, and `helpers::trapezoidal_coefficients` takes it. So `forward`
-<a href=#345 id=345 data-nosnippet>345</a>/// and `step` compute the masses from **one** definition. The same reason
-<a href=#346 id=346 data-nosnippet>346</a>/// makes [`RotationSpec`](crate::mamba3::rotation::RotationSpec) exist.
-<a href=#347 id=347 data-nosnippet>347</a></span><span class="attr">#[derive(Debug, Clone, Copy, PartialEq)]
-<a href=#348 id=348 data-nosnippet>348</a></span><span class="kw">pub struct </span>TapPatternSpec {
-<a href=#349 id=349 data-nosnippet>349</a>    <span class="doccomment">/// Which earlier sample(s) the `β` tap reads ([`TapPattern`]).
-<a href=#350 id=350 data-nosnippet>350</a>    </span><span class="kw">pub </span>pattern: TapPattern,
-<a href=#351 id=351 data-nosnippet>351</a>    <span class="doccomment">/// Recurrence micro-steps per token (`u`). A tap that closes at token
-<a href=#352 id=352 data-nosnippet>352</a>    /// boundaries closes with this period. At `u = 1`, a two-tap pattern folds
-<a href=#353 id=353 data-nosnippet>353</a>    /// ([`TapPattern::has_two_taps`]).
-<a href=#354 id=354 data-nosnippet>354</a>    </span><span class="kw">pub </span>micro_steps: usize,
-<a href=#355 id=355 data-nosnippet>355</a>    <span class="doccomment">/// `Δ`'s clamp
-<a href=#356 id=356 data-nosnippet>356</a>    /// ([`Mamba3Config::dt_limit`](crate::mamba3::mamba3::Mamba3Config::dt_limit)).
-<a href=#357 id=357 data-nosnippet>357</a>    </span><span class="kw">pub </span>dt_limit: (f64, f64),
-<a href=#358 id=358 data-nosnippet>358</a>    <span class="doccomment">/// `A`'s floor
-<a href=#359 id=359 data-nosnippet>359</a>    /// ([`Mamba3Config::a_floor`](crate::mamba3::mamba3::Mamba3Config::a_floor)).
-<a href=#360 id=360 data-nosnippet>360</a>    </span><span class="kw">pub </span>a_floor: f64,
-<a href=#361 id=361 data-nosnippet>361</a>}
-<a href=#362 id=362 data-nosnippet>362</a>
-<a href=#363 id=363 data-nosnippet>363</a><span class="attr">#[cfg(all(test, feature = <span class="string">"_dev-test"</span>))]
-<a href=#364 id=364 data-nosnippet>364</a></span><span class="kw">mod </span>tests;
+<a href=#104 id=104 data-nosnippet>104</a>    /// whole diagonal. So the single-SSD pathway runs the double-SSD code, and
+<a href=#105 id=105 data-nosnippet>105</a>    /// its accumulator equals the state at *every* position, not only at
+<a href=#106 id=106 data-nosnippet>106</a>    /// boundaries.
+<a href=#107 id=107 data-nosnippet>107</a>    </span><span class="prelude-val">None</span>,
+<a href=#108 id=108 data-nosnippet>108</a>
+<a href=#109 id=109 data-nosnippet>109</a>    <span class="doccomment">/// **Lag `u`, always**: the tap reads the *same* micro-step of the previous
+<a href=#110 id=110 data-nosnippet>110</a>    /// **token**. So every tap crosses a token boundary, and the pattern is `u`
+<a href=#111 id=111 data-nosnippet>111</a>    /// parallel token-rate filters, one per micro-step channel. It restores the
+<a href=#112 id=112 data-nosnippet>112</a>    /// `u = 1` tap semantics at every micro-step.
+<a href=#113 id=113 data-nosnippet>113</a>    ///
+<a href=#114 id=114 data-nosnippet>114</a>    /// The **tap graph** is "vertical", not the scan order. The state still
+<a href=#115 id=115 data-nosnippet>115</a>    /// runs the one flattened chain ([`crate::mamba3::product`]), which keeps
+<a href=#116 id=116 data-nosnippet>116</a>    /// the pattern causal and `forward` equal to an unrolled `step`. A scan
+<a href=#117 id=117 data-nosnippet>117</a>    /// that really took every token at micro-step `0` before micro-step `1`
+<a href=#118 id=118 data-nosnippet>118</a>    /// would have to read token `t+1` before it finished token `t`. The
+<a href=#119 id=119 data-nosnippet>119</a>    /// alternative, `u` separate states, is a layer stack (`burn_stack::Layers`),
+<a href=#120 id=120 data-nosnippet>120</a>    /// not a tap pattern.
+<a href=#121 id=121 data-nosnippet>121</a>    ///
+<a href=#122 id=122 data-nosnippet>122</a>    /// At token resolution the pattern has a closed form. Let `Aᵗ` be the
+<a href=#123 id=123 data-nosnippet>123</a>    /// token transition and `ṽᵗⱼ` the write of micro-step `j`, transported to
+<a href=#124 id=124 data-nosnippet>124</a>    /// the end of its own token. The transport of the tap,
+<a href=#125 id=125 data-nosnippet>125</a>    /// `M₍ₜ₋₁,ⱼ₊₁₎:₍ₜ,ⱼ₎`, factors through that of the state, and the whole
+<a href=#126 id=126 data-nosnippet>126</a>    /// `β` side lands **at the token boundary**:
+<a href=#127 id=127 data-nosnippet>127</a>    ///
+<a href=#128 id=128 data-nosnippet>128</a>    /// ```text
+<a href=#129 id=129 data-nosnippet>129</a>    ///   hₜ = Aₜ · ( hₜ₋₁ + Σⱼ νₜ,ⱼ ṽₜ₋₁,ⱼ ) + Σⱼ γₜ,ⱼ ṽₜ,ⱼ ,     ν = (1−λ)Δ
+<a href=#130 id=130 data-nosnippet>130</a>    /// ```
+<a href=#131 id=131 data-nosnippet>131</a>    ///
+<a href=#132 id=132 data-nosnippet>132</a>    /// This is **the `u = 1` trapezoid at token resolution, with its left
+<a href=#133 id=133 data-nosnippet>133</a>    /// endpoint promoted from rank 1 to rank `u`**.
+<a href=#134 id=134 data-nosnippet>134</a>    /// [`HorizontalCarryOver`](Self::HorizontalCarryOver) taps only the *last*
+<a href=#135 id=135 data-nosnippet>135</a>    /// micro-step of the previous token. `A` is unchanged, so it is still
+<a href=#136 id=136 data-nosnippet>136</a>    /// `λ`-free (`info/mamba-3/trapezoid-as-integration.md` §7).
+<a href=#137 id=137 data-nosnippet>137</a>    ///
+<a href=#138 id=138 data-nosnippet>138</a>    /// Costs (§9):
+<a href=#139 id=139 data-nosnippet>139</a>    ///
+<a href=#140 id=140 data-nosnippet>140</a>    /// - the key scale is `γₛ + (1−λₛ₊ᵤ)Δₛ₊ᵤ`,
+<a href=#141 id=141 data-nosnippet>141</a>    /// - the tap is transported across its own `u`-position gap,
+<a href=#142 id=142 data-nosnippet>142</a>    /// - the tap buffer of the cache becomes a `u`-deep FIFO (exactly the
+<a href=#143 id=143 data-nosnippet>143</a>    ///   previous token),
+<a href=#144 id=144 data-nosnippet>144</a>    /// - the single-SSD γ-correction widens from the diagonal to a
+<a href=#145 id=145 data-nosnippet>145</a>    ///   `u`-wide band. At the only positions whose output survives
+<a href=#146 id=146 data-nosnippet>146</a>    ///   (`j = u−1`), that band is **exactly the token**. So it is one small
+<a href=#147 id=147 data-nosnippet>147</a>    ///   intra-token contraction outside the chunked kernel, not a wider mask
+<a href=#148 id=148 data-nosnippet>148</a>    ///   (`crate::mamba3::single_ssd::token_band`).
+<a href=#149 id=149 data-nosnippet>149</a>    ///
+<a href=#150 id=150 data-nosnippet>150</a>    /// **Under a Kalman [`Gain`](crate::mamba3::positive::Gain) at `u &gt; 1`**,
+<a href=#151 id=151 data-nosnippet>151</a>    /// this tap has no exact filter form. Its installment arrives `u`
+<a href=#152 id=152 data-nosnippet>152</a>    /// micro-steps late, after `u − 1` predicts that a filter would have made
+<a href=#153 id=153 data-nosnippet>153</a>    /// with it. The gain counts it as a lag-1 installment, so `Λ`
+<a href=#154 id=154 data-nosnippet>154</a>    /// over-estimates the weight that the plant wrote, and `η/Λ` is only
+<a href=#155 id=155 data-nosnippet>155</a>    /// approximately its weighted mean.
+<a href=#156 id=156 data-nosnippet>156</a>    /// The block still runs, and its pathways still agree. The lag-1 patterns
+<a href=#157 id=157 data-nosnippet>157</a>    /// are exact ([`crate::mamba3::positive::kalman`]).
+<a href=#158 id=158 data-nosnippet>158</a>    </span>Vertical,
+<a href=#159 id=159 data-nosnippet>159</a>
+<a href=#160 id=160 data-nosnippet>160</a>    <span class="doccomment">/// **Lag 1, closed at the first micro-step of each token**: taps pair
+<a href=#161 id=161 data-nosnippet>161</a>    /// micro-steps *within* a token and never cross a token boundary. With no
+<a href=#162 id=162 data-nosnippet>162</a>    /// cross-token path, it cannot do the job that the trapezoid exists for. It
+<a href=#163 id=163 data-nosnippet>163</a>    /// is a component of a pattern, not an alternative to one.
+<a href=#164 id=164 data-nosnippet>164</a>    ///
+<a href=#165 id=165 data-nosnippet>165</a>    /// The closed micro-step has no admissible earlier sample, so all its mass
+<a href=#166 id=166 data-nosnippet>166</a>    /// returns to `γ` (`λ = 1` there, module header). Each token **starts** on
+<a href=#167 id=167 data-nosnippet>167</a>    /// plain exponential-Euler and is trapezoidal inside. This is exactly the
+<a href=#168 id=168 data-nosnippet>168</a>    /// limit that `info/mamba-3/trapezoid-as-integration.md` §8 shows learning
+<a href=#169 id=169 data-nosnippet>169</a>    /// can reach under [`HorizontalCarryOver`](Self::HorizontalCarryOver). So
+<a href=#170 id=170 data-nosnippet>170</a>    /// this member is a constrained **submodel** of that pattern, not a rival.
+<a href=#171 id=171 data-nosnippet>171</a>    /// That is also why the mass goes back instead of being dropped.
+<a href=#172 id=172 data-nosnippet>172</a>    ///
+<a href=#173 id=173 data-nosnippet>173</a>    /// Caches like [`HorizontalCarryOver`](Self::HorizontalCarryOver): the same
+<a href=#174 id=174 data-nosnippet>174</a>    /// one-slot lag-1 buffer, ignored at the first micro-step of each token.
+<a href=#175 id=175 data-nosnippet>175</a>    /// So the carried value has no effect across a call boundary: the slot is
+<a href=#176 id=176 data-nosnippet>176</a>    /// layout, not information.
+<a href=#177 id=177 data-nosnippet>177</a>    </span>HorizontalInToken,
+<a href=#178 id=178 data-nosnippet>178</a>
+<a href=#179 id=179 data-nosnippet>179</a>    <span class="doccomment">/// **Lag 1, always** (the default): one tap per position of the write
+<a href=#180 id=180 data-nosnippet>180</a>    /// axis. So `1/u` of the taps cross a token boundary, and `(u−1)/u`
+<a href=#181 id=181 data-nosnippet>181</a>    /// pair two projections of the same token (§8). The cache holds one
+<a href=#182 id=182 data-nosnippet>182</a>    /// `(B, x)` slot: the last micro-step of the last token.
+<a href=#183 id=183 data-nosnippet>183</a>    </span><span class="attr">#[default]
+<a href=#184 id=184 data-nosnippet>184</a>    </span>HorizontalCarryOver,
+<a href=#185 id=185 data-nosnippet>185</a>
+<a href=#186 id=186 data-nosnippet>186</a>    <span class="doccomment">/// [`Vertical`](Self::Vertical) **and**
+<a href=#187 id=187 data-nosnippet>187</a>    /// [`HorizontalInToken`](Self::HorizontalInToken) at once. `μ` shares the
+<a href=#188 id=188 data-nosnippet>188</a>    /// left-endpoint mass between them, so the two jobs do not share one `λ`.
+<a href=#189 id=189 data-nosnippet>189</a>    /// Its tap graph is not a single lag on the write axis. On the
+<a href=#190 id=190 data-nosnippet>190</a>    /// `token × micro-step` grid, *two* taps write cell `(t, j)`: `(t−1, j)`
+<a href=#191 id=191 data-nosnippet>191</a>    /// above it, and `(t, j−1)` beside it (for `j ≥ 1` only).
+<a href=#192 id=192 data-nosnippet>192</a>    ///
+<a href=#193 id=193 data-nosnippet>193</a>    /// Only the graph is 2-D, not the algorithm. Each tap is transported
+<a href=#194 id=194 data-nosnippet>194</a>    /// across its own gap (`1` and `u` positions of the same write axis), so
+<a href=#195 id=195 data-nosnippet>195</a>    /// the collapse of §9 still applies term by term. The state stays one
+<a href=#196 id=196 data-nosnippet>196</a>    /// matrix, and sample `s` still carries **one** scalar,
+<a href=#197 id=197 data-nosnippet>197</a>    /// `γₛ + νⁱⁿᵗₛ₊₁ + νᶠᵃʳₛ₊ᵤ`, into every later micro-step. So single-SSD still
+<a href=#198 id=198 data-nosnippet>198</a>    /// needs one pass.
+<a href=#199 id=199 data-nosnippet>199</a>    ///
+<a href=#200 id=200 data-nosnippet>200</a>    /// Costs over [`Vertical`](Self::Vertical):
+<a href=#201 id=201 data-nosnippet>201</a>    ///
+<a href=#202 id=202 data-nosnippet>202</a>    /// - one more per-micro-step scalar channel (`μ`),
+<a href=#203 id=203 data-nosnippet>203</a>    /// - a third nonzero per row of the banded factor of the mask.
+<a href=#204 id=204 data-nosnippet>204</a>    ///
+<a href=#205 id=205 data-nosnippet>205</a>    /// The band is already `u` wide, and the within-token tap never crosses a
+<a href=#206 id=206 data-nosnippet>206</a>    /// token boundary. So the cache and the boundary seed are those of
+<a href=#207 id=207 data-nosnippet>207</a>    /// [`Vertical`](Self::Vertical). On the double-SSD pathway, the two taps
+<a href=#208 id=208 data-nosnippet>208</a>    /// have different shifts and cannot share a pass, so that pathway runs
+<a href=#209 id=209 data-nosnippet>209</a>    /// **three** SSD calls. The single pathway suits this pattern better.
+<a href=#210 id=210 data-nosnippet>210</a>    ///
+<a href=#211 id=211 data-nosnippet>211</a>    /// Under a Kalman [`Gain`](crate::mamba3::positive::Gain) at `u &gt; 1`, it is
+<a href=#212 id=212 data-nosnippet>212</a>    /// inexact through its lag-`u` tap, as [`Vertical`](Self::Vertical) is.
+<a href=#213 id=213 data-nosnippet>213</a>    </span>VerticalPlusHorizontalInToken,
+<a href=#214 id=214 data-nosnippet>214</a>
+<a href=#215 id=215 data-nosnippet>215</a>    <span class="doccomment">/// [`Vertical`](Self::Vertical) **and**
+<a href=#216 id=216 data-nosnippet>216</a>    /// [`HorizontalCarryOver`](Self::HorizontalCarryOver) at once. It has the
+<a href=#217 id=217 data-nosnippet>217</a>    /// same two taps as
+<a href=#218 id=218 data-nosnippet>218</a>    /// [`VerticalPlusHorizontalInToken`](Self::VerticalPlusHorizontalInToken), with
+<a href=#219 id=219 data-nosnippet>219</a>    /// the lag-1 tap unrestricted. So at `j = 0`, the lag-1 tap reads the
+<a href=#220 id=220 data-nosnippet>220</a>    /// *last* micro-step of the previous token, and the lag-`u` tap reads its
+<a href=#221 id=221 data-nosnippet>221</a>    /// *first*. Both candidates for the left endpoint of the micro-step are always
+<a href=#222 id=222 data-nosnippet>222</a>    /// available, and `μ` interpolates between them everywhere.
+<a href=#223 id=223 data-nosnippet>223</a>    ///
+<a href=#224 id=224 data-nosnippet>224</a>    /// So this member **contains** the two single-tap patterns: `μ ≡ 1` is
+<a href=#225 id=225 data-nosnippet>225</a>    /// [`HorizontalCarryOver`](Self::HorizontalCarryOver) and `μ ≡ 0` is
+<a href=#226 id=226 data-nosnippet>226</a>    /// [`Vertical`](Self::Vertical), both exactly. `μ` is per (head,
+<a href=#227 id=227 data-nosnippet>227</a>    /// micro-step), so descent makes here the choice that the rest of this enum
+<a href=#228 id=228 data-nosnippet>228</a>    /// makes at configuration time.
+<a href=#229 id=229 data-nosnippet>229</a>    ///
+<a href=#230 id=230 data-nosnippet>230</a>    /// Costs over [`VerticalPlusHorizontalInToken`](Self::VerticalPlusHorizontalInToken):
+<a href=#231 id=231 data-nosnippet>231</a>    ///
+<a href=#232 id=232 data-nosnippet>232</a>    /// - nothing in the cache: the **newest** slot of the `u`-deep FIFO *is*
+<a href=#233 id=233 data-nosnippet>233</a>    ///   the lag-1 slot, with the empty decay product,
+<a href=#234 id=234 data-nosnippet>234</a>    /// - one extra term in the single-SSD boundary seed: here the lag-1 tap
+<a href=#235 id=235 data-nosnippet>235</a>    ///   crosses a call boundary. Under
+<a href=#236 id=236 data-nosnippet>236</a>    ///   [`VerticalPlusHorizontalInToken`](Self::VerticalPlusHorizontalInToken),
+<a href=#237 id=237 data-nosnippet>237</a>    ///   it never crosses one.
+<a href=#238 id=238 data-nosnippet>238</a>    ///
+<a href=#239 id=239 data-nosnippet>239</a>    /// Under a Kalman [`Gain`](crate::mamba3::positive::Gain) at `u &gt; 1`, it is
+<a href=#240 id=240 data-nosnippet>240</a>    /// inexact through its lag-`u` tap, as [`Vertical`](Self::Vertical) is.
+<a href=#241 id=241 data-nosnippet>241</a>    </span>VerticalPlusHorizontalCarryOver,
+<a href=#242 id=242 data-nosnippet>242</a>}
+<a href=#243 id=243 data-nosnippet>243</a>
+<a href=#244 id=244 data-nosnippet>244</a><span class="kw">impl </span>TapPattern {
+<a href=#245 id=245 data-nosnippet>245</a>    <span class="doccomment">/// Whether the pattern has a second (`β`) tap. `false` only for
+<a href=#246 id=246 data-nosnippet>246</a>    /// [`None`](Self::None). Every site branches on this predicate: no tap
+<a href=#247 id=247 data-nosnippet>247</a>    /// means no `λ` channels, no `β` coefficient, no tap FIFO in the cache,
+<a href=#248 id=248 data-nosnippet>248</a>    /// and no previous-sample term in the recurrence.
+<a href=#249 id=249 data-nosnippet>249</a>    </span><span class="kw">pub fn </span>has_beta_tap(<span class="self">self</span>) -&gt; bool {
+<a href=#250 id=250 data-nosnippet>250</a>        <span class="self">self </span>!= TapPattern::None
+<a href=#251 id=251 data-nosnippet>251</a>    }
+<a href=#252 id=252 data-nosnippet>252</a>
+<a href=#253 id=253 data-nosnippet>253</a>    <span class="doccomment">/// How far back the `β` tap reaches, in **write** positions
+<a href=#254 id=254 data-nosnippet>254</a>    /// ([`crate::mamba3::product`]): `0` with no tap, `1` for the lag-1
+<a href=#255 id=255 data-nosnippet>255</a>    /// patterns, `u` for the lag-`u` ones.
+<a href=#256 id=256 data-nosnippet>256</a>    ///
+<a href=#257 id=257 data-nosnippet>257</a>    /// This is the one knob for the single-tap patterns:
+<a href=#258 id=258 data-nosnippet>258</a>    /// [`HorizontalCarryOver`](Self::HorizontalCarryOver) is `lag = 1` and
+<a href=#259 id=259 data-nosnippet>259</a>    /// [`Vertical`](Self::Vertical) is `lag = u`. Every site that touches the
+<a href=#260 id=260 data-nosnippet>260</a>    /// tap (the double-SSD shift, the single-SSD key scale, the FIFO depth of
+<a href=#261 id=261 data-nosnippet>261</a>    /// `step`, the cache) reads it instead of branching on the pattern. At
+<a href=#262 id=262 data-nosnippet>262</a>    /// `u = 1` both return `1`, which is why the two are equal there.
+<a href=#263 id=263 data-nosnippet>263</a>    ///
+<a href=#264 id=264 data-nosnippet>264</a>    /// The tap must be transported across *its own* gap, so a lag-`L` tap
+<a href=#265 id=265 data-nosnippet>265</a>    /// carries `Πᵈ⁼⁰..ᴸ⁻¹ αₚ₋ᵈ`, not `αₚ`.
+<a href=#266 id=266 data-nosnippet>266</a>    /// `info/mamba-3/trapezoid-as-integration.md` §9 shows that this condition
+<a href=#267 id=267 data-nosnippet>267</a>    /// keeps the `Δ̃` collapse, and thus the single-SSD pathway.
+<a href=#268 id=268 data-nosnippet>268</a>    </span><span class="kw">pub fn </span>tap_lag(<span class="self">self</span>, micro_steps: usize) -&gt; usize {
+<a href=#269 id=269 data-nosnippet>269</a>        <span class="kw">match </span><span class="self">self </span>{
+<a href=#270 id=270 data-nosnippet>270</a>            TapPattern::None =&gt; <span class="number">0</span>,
+<a href=#271 id=271 data-nosnippet>271</a>            TapPattern::HorizontalCarryOver | TapPattern::HorizontalInToken =&gt; <span class="number">1</span>,
+<a href=#272 id=272 data-nosnippet>272</a>            TapPattern::Vertical
+<a href=#273 id=273 data-nosnippet>273</a>            | TapPattern::VerticalPlusHorizontalInToken
+<a href=#274 id=274 data-nosnippet>274</a>            | TapPattern::VerticalPlusHorizontalCarryOver =&gt; micro_steps,
+<a href=#275 id=275 data-nosnippet>275</a>        }
+<a href=#276 id=276 data-nosnippet>276</a>    }
+<a href=#277 id=277 data-nosnippet>277</a>
+<a href=#278 id=278 data-nosnippet>278</a>    <span class="doccomment">/// Whether the pattern has **two** taps at `micro_steps`: a lag-1 tap beside
+<a href=#279 id=279 data-nosnippet>279</a>    /// the lag-`u` tap at [`tap_lag`](Self::tap_lag). True for the two-tap
+<a href=#280 id=280 data-nosnippet>280</a>    /// members, and only when the two lags are different.
+<a href=#281 id=281 data-nosnippet>281</a>    ///
+<a href=#282 id=282 data-nosnippet>282</a>    /// At `u = 1` the lags are equal: both taps read the same sample, so the
+<a href=#283 id=283 data-nosnippet>283</a>    /// split is a decomposition of one coefficient, and the pair **folds** back
+<a href=#284 id=284 data-nosnippet>284</a>    /// into one tap. The fold is structural, as the missing `λ` of
+<a href=#285 id=285 data-nosnippet>285</a>    /// [`None`](Self::None) is: no `μ` channels in the in-projection, no `μ`
+<a href=#286 id=286 data-nosnippet>286</a>    /// sub-projection for Muon, one shift, one SSD pass. Thus a two-tap member
+<a href=#287 id=287 data-nosnippet>287</a>    /// at `u = 1` *is* [`HorizontalCarryOver`](Self::HorizontalCarryOver), not
+<a href=#288 id=288 data-nosnippet>288</a>    /// an expensive form of it.
+<a href=#289 id=289 data-nosnippet>289</a>    </span><span class="kw">pub fn </span>has_two_taps(<span class="self">self</span>, micro_steps: usize) -&gt; bool {
+<a href=#290 id=290 data-nosnippet>290</a>        micro_steps &gt; <span class="number">1
+<a href=#291 id=291 data-nosnippet>291</a>            </span>&amp;&amp; <span class="macro">matches!</span>(
+<a href=#292 id=292 data-nosnippet>292</a>                <span class="self">self</span>,
+<a href=#293 id=293 data-nosnippet>293</a>                TapPattern::VerticalPlusHorizontalInToken
+<a href=#294 id=294 data-nosnippet>294</a>                    | TapPattern::VerticalPlusHorizontalCarryOver
+<a href=#295 id=295 data-nosnippet>295</a>            )
+<a href=#296 id=296 data-nosnippet>296</a>    }
+<a href=#297 id=297 data-nosnippet>297</a>
+<a href=#298 id=298 data-nosnippet>298</a>    <span class="doccomment">/// Whether the tap at [`tap_lag`](Self::tap_lag) is admissible at the
+<a href=#299 id=299 data-nosnippet>299</a>    /// **first** micro-step of a token, where it would cross a token boundary.
+<a href=#300 id=300 data-nosnippet>300</a>    /// `false` only for
+<a href=#301 id=301 data-nosnippet>301</a>    /// [`HorizontalInToken`](Self::HorizontalInToken), whose left-endpoint mass
+<a href=#302 id=302 data-nosnippet>302</a>    /// then returns to `γ` (module header).
+<a href=#303 id=303 data-nosnippet>303</a>    </span><span class="kw">pub fn </span>tap_crosses_tokens(<span class="self">self</span>) -&gt; bool {
+<a href=#304 id=304 data-nosnippet>304</a>        <span class="self">self </span>!= TapPattern::HorizontalInToken
+<a href=#305 id=305 data-nosnippet>305</a>    }
+<a href=#306 id=306 data-nosnippet>306</a>
+<a href=#307 id=307 data-nosnippet>307</a>    <span class="doccomment">/// Whether the lag-1 tap of a two-tap member is admissible at the first
+<a href=#308 id=308 data-nosnippet>308</a>    /// micro-step of a token, where it would cross a token boundary. This is the
+<a href=#309 id=309 data-nosnippet>309</a>    /// only difference between
+<a href=#310 id=310 data-nosnippet>310</a>    /// [`VerticalPlusHorizontalCarryOver`](Self::VerticalPlusHorizontalCarryOver)
+<a href=#311 id=311 data-nosnippet>311</a>    /// (`true`) and
+<a href=#312 id=312 data-nosnippet>312</a>    /// [`VerticalPlusHorizontalInToken`](Self::VerticalPlusHorizontalInToken)
+<a href=#313 id=313 data-nosnippet>313</a>    /// (`false`). Where it is closed, the share of `μ` returns to the lag-`u`
+<a href=#314 id=314 data-nosnippet>314</a>    /// tap.
+<a href=#315 id=315 data-nosnippet>315</a>    ///
+<a href=#316 id=316 data-nosnippet>316</a>    /// Read only when [`has_two_taps`](Self::has_two_taps).
+<a href=#317 id=317 data-nosnippet>317</a>    </span><span class="kw">pub fn </span>two_tap_lag1_crosses_tokens(<span class="self">self</span>) -&gt; bool {
+<a href=#318 id=318 data-nosnippet>318</a>        <span class="self">self </span>== TapPattern::VerticalPlusHorizontalCarryOver
+<a href=#319 id=319 data-nosnippet>319</a>    }
+<a href=#320 id=320 data-nosnippet>320</a>
+<a href=#321 id=321 data-nosnippet>321</a>    <span class="doccomment">/// The number of slots in the tap FIFO of a cache, for this pattern at
+<a href=#322 id=322 data-nosnippet>322</a>    /// `micro_steps`. It is the depth of the FIFO that the tap reads, so
+<a href=#323 id=323 data-nosnippet>323</a>    /// exactly [`tap_lag`](Self::tap_lag). A lag-`L` tap needs the last `L`
+<a href=#324 id=324 data-nosnippet>324</a>    /// positions.
+<a href=#325 id=325 data-nosnippet>325</a>    /// The state is always one matrix. Only the tap FIFO changes.
+<a href=#326 id=326 data-nosnippet>326</a>    ///
+<a href=#327 id=327 data-nosnippet>327</a>    /// A slot is a *layout*. It does not mean that something crosses the call
+<a href=#328 id=328 data-nosnippet>328</a>    /// boundary through it: [`HorizontalInToken`](Self::HorizontalInToken) shares
+<a href=#329 id=329 data-nosnippet>329</a>    /// the slot of the carry-over and ignores it per token. Also, a second tap
+<a href=#330 id=330 data-nosnippet>330</a>    /// needs no second buffer. The **newest** slot of the `u`-deep FIFO *is*
+<a href=#331 id=331 data-nosnippet>331</a>    /// the lag-1 slot, with the empty decay product, so the two-tap members
+<a href=#332 id=332 data-nosnippet>332</a>    /// read one FIFO twice.
+<a href=#333 id=333 data-nosnippet>333</a>    </span><span class="kw">pub fn </span>tap_slots(<span class="self">self</span>, micro_steps: usize) -&gt; usize {
+<a href=#334 id=334 data-nosnippet>334</a>        <span class="self">self</span>.tap_lag(micro_steps)
+<a href=#335 id=335 data-nosnippet>335</a>    }
+<a href=#336 id=336 data-nosnippet>336</a>}
+<a href=#337 id=337 data-nosnippet>337</a>
+<a href=#338 id=338 data-nosnippet>338</a><span class="doccomment">/// Everything the discretisation needs from the block: the tap pattern, the
+<a href=#339 id=339 data-nosnippet>339</a>/// micro-steps (the period of the token boundaries, where a tap can close), and
+<a href=#340 id=340 data-nosnippet>340</a>/// the two clamps on the coefficients.
+<a href=#341 id=341 data-nosnippet>341</a>///
+<a href=#342 id=342 data-nosnippet>342</a>/// [`Mamba3::tap_pattern_spec`](crate::mamba3::mamba3::Mamba3::tap_pattern_spec)
+<a href=#343 id=343 data-nosnippet>343</a>/// makes it, and `helpers::trapezoidal_coefficients` takes it. So `forward`
+<a href=#344 id=344 data-nosnippet>344</a>/// and `step` compute the masses from **one** definition. The same reason
+<a href=#345 id=345 data-nosnippet>345</a>/// makes [`RotationSpec`](crate::mamba3::rotation::RotationSpec) exist.
+<a href=#346 id=346 data-nosnippet>346</a></span><span class="attr">#[derive(Debug, Clone, Copy, PartialEq)]
+<a href=#347 id=347 data-nosnippet>347</a></span><span class="kw">pub struct </span>TapPatternSpec {
+<a href=#348 id=348 data-nosnippet>348</a>    <span class="doccomment">/// Which earlier sample(s) the `β` tap reads ([`TapPattern`]).
+<a href=#349 id=349 data-nosnippet>349</a>    </span><span class="kw">pub </span>pattern: TapPattern,
+<a href=#350 id=350 data-nosnippet>350</a>    <span class="doccomment">/// Recurrence micro-steps per token (`u`). A tap that closes at token
+<a href=#351 id=351 data-nosnippet>351</a>    /// boundaries closes with this period. At `u = 1`, a two-tap pattern folds
+<a href=#352 id=352 data-nosnippet>352</a>    /// ([`TapPattern::has_two_taps`]).
+<a href=#353 id=353 data-nosnippet>353</a>    </span><span class="kw">pub </span>micro_steps: usize,
+<a href=#354 id=354 data-nosnippet>354</a>    <span class="doccomment">/// `Δ`'s clamp
+<a href=#355 id=355 data-nosnippet>355</a>    /// ([`Mamba3Config::dt_limit`](crate::mamba3::mamba3::Mamba3Config::dt_limit)).
+<a href=#356 id=356 data-nosnippet>356</a>    </span><span class="kw">pub </span>dt_limit: (f64, f64),
+<a href=#357 id=357 data-nosnippet>357</a>    <span class="doccomment">/// `A`'s floor
+<a href=#358 id=358 data-nosnippet>358</a>    /// ([`Mamba3Config::a_floor`](crate::mamba3::mamba3::Mamba3Config::a_floor)).
+<a href=#359 id=359 data-nosnippet>359</a>    </span><span class="kw">pub </span>a_floor: f64,
+<a href=#360 id=360 data-nosnippet>360</a>}
+<a href=#361 id=361 data-nosnippet>361</a>
+<a href=#362 id=362 data-nosnippet>362</a><span class="attr">#[cfg(all(test, feature = <span class="string">"_dev-test"</span>))]
+<a href=#363 id=363 data-nosnippet>363</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>
