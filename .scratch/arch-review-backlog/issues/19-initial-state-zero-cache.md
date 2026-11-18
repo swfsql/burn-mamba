@@ -186,6 +186,23 @@ at the start of each row and at the start of each segment.
   - Its doc gives the recipe. The caller holds `h₀` as a `Param` of its own module,
     calls `cache_with_state`, and gives the result as `cache`, as `origin`, or as both.
     The doc says that the tensor decides whether `h₀` trains.
+  - The recipe also gives these rules of Burn. Each one cites
+    `../burn-stack/docs/burn/autodiff-semantics.md`:
+    - Hold `h₀` as a `Param<Tensor<3>>`, not as a plain `Tensor` field. A plain field
+      is a constant: no mapper, optimizer or record sees it (§9.3, trap 4).
+    - In training, build the cache from `h0.val()` in each step. Burn runs one
+      backward for each graph (rule 7, trap 11).
+    - For a decode or an evaluation, use a plain device or `model.valid()`. If not,
+      each step depends on a trainable leaf, and the graph grows with no limit
+      (rule 6, trap 13).
+    - A constant start is a plain tensor, or `x.without_autodiff()` (§10, "A constant
+      inside a tracked op"). A plain input of an op acts as a constant (rule 2).
+    - A trainable `h₀` has the checkpointing strategy of the block. If not, the first
+      op that mixes them panics (rule 2, trap 2). A `Param` of the same model module
+      gets the same `train`, `valid` and `fork` as the block.
+  - It builds the other fields on `state_hpr.device()`. That device reports the
+    autodiff context of `state_hpr`, so the new fields take that context (rule 1,
+    §2).
 - **The `Block` adapters**: `block_forward_packed` gives its origin as `Some(origin)` to
   the family `forward_packed`. `MambaBlock` gives each family the origin of its own
   cache type.
@@ -206,6 +223,8 @@ at the start of each row and at the start of each segment.
     Its consequences:
     - The caller owns the tensor, its trainability and its optimizer settings. The
       official code sets no weight decay on `init_states`.
+    - The rules of Burn for a trainable tensor apply to `h₀`. The ADR cites
+      `../burn-stack/docs/burn/autodiff-semantics.md`, and it does not repeat it.
     - Every SSD path, `step`, a split into windows and packed rows give `h₀` one
       meaning.
     - Each packed segment starts from the origin. The official code starts only the
@@ -225,8 +244,9 @@ at the start of each row and at the start of each segment.
 
 **Steps, in this order:**
 
-1. **The check of the move, before you delete anything.** For Mamba-2 and for both
-   Mamba-3 pathways, on `Minimal`:
+1. **The check of the move, before you delete anything.** Run it on
+   `test_device().autodiff()`. For Mamba-2 and for both Mamba-3 pathways, on
+   `Minimal`:
    - The old way: a block with `has_learnable_init_state` and a random
      `init_state_hpr`, run with no cache.
    - The new way: the same weights with `init_state_hpr` set to `None`, run from a cache
@@ -245,6 +265,14 @@ at the start of each row and at the start of each segment.
 
 **Constraints:**
 
+- Read `../burn-stack/docs/burn/autodiff-semantics.md` before you write the recipe and
+  the gradient tests: §1, §3, §9, §10 and §11.
+  - `test_device()` gives a plain device. Each gradient test runs on
+    `test_device().autodiff()`.
+  - A leaf `h₀` is `t.detach().require_grad()` on that device. `require_grad` panics
+    on a tensor with no autodiff (trap 10).
+  - A test reads the gradient of a leaf with `grad`. It asks whether a gradient
+    reaches a derived tensor with `is_tracked()` (§3).
 - Do not change an expected value or a tolerance. A test changes only when it names a
   deleted item.
 - The `Cargo.toml` version goes to 0.88.0 in the first commit that breaks the public
@@ -273,6 +301,9 @@ at the start of each row and at the start of each segment.
       between the two paths, and it is not zero.
 - [ ] A test of `cache_with_state`: each row of `ssm_bhpr` equals `h₀`, and each other
       field equals that of the zero cache.
+- [ ] A test of a constant start: a plain `h₀` (no autodiff) goes into the `cache` of a
+      block on `test_device().autodiff()`. The forward runs, and it gives the outputs of
+      the same values as a trainable leaf. The weights of the block get a gradient.
 - [ ] The block contracts pass on each block setting. With the new pin,
       `packed_segments_equal_each_segment_alone` uses a warm origin, so it checks the
       adapters.
