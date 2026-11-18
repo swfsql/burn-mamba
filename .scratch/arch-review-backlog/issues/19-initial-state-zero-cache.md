@@ -66,11 +66,17 @@ build ran.
 - A packed call with the option on panics on every path. `Minimal` takes no resets
   (`packed_minimal_panics`), and the serial paths refuse the field. The review did not
   see this.
-- The official code holds `init_states` as a module parameter (`mamba2_simple.py`).
-  That module has no inference cache, so each forward starts from `init_states`. With
-  `seq_idx`, the state passing sets the state to zero at a new sequence
-  (`ssd_state_passing.py`). So only the first sequence of a packed row starts from
-  `init_states`.
+- The official code holds `init_states` as a module parameter. Read
+  `docs/source-terms.md` (the row of `init_states`) before you read the source.
+  - `../py/state-spaces/mamba/mamba_ssm/modules/mamba2_simple.py`: the option
+    `learnable_init_states` builds `init_states`, at zeros and with
+    `_no_weight_decay`. The forward gives it as `initial_states`, broadcast over the
+    batch. That module has no inference cache, so each forward starts from
+    `init_states`.
+  - `../py/state-spaces/mamba/mamba_ssm/ops/triton/ssd_state_passing.py`: with
+    `seq_idx`, the state passing sets the carry to zero at a new sequence. It does not
+    load `initial_states` again. So only the first sequence of a packed row starts from
+    `init_states`.
 - The family API already takes a start state from the caller:
   `forward_packed(x, cache, origin, …)`. Each row starts from `cache`, and each segment
   starts from `origin`. Autodiff is a property of each tensor, so a trainable tensor in
@@ -113,6 +119,34 @@ build ran.
 7. Each block contract adds noise to the weights first: burn-stack ticket 19. It waits
    for this ticket, because it runs the block contracts of burn-mamba.
 
+**The options that the grilling rejected**, with the reasons. The ADR of this ticket
+gives them as its considered options.
+
+- **Each forward adds `h₀` to its incoming cache** (the behaviour of `Minimal` before
+  this ticket):
+  - `step` has no consistent meaning. A `step` is a call of one token. If it adds
+    `h₀`, the state gets `h₀` at each token, which is an input and not a start. If it
+    does not add `h₀`, the forward is not equal to the step unrolled.
+  - It breaks three block contracts of burn-stack. These are
+    `forward_equals_step_unrolled` and `forward_splits_into_windows_through_the_cache`.
+    The third is the empty row of `padded_rows_equal_each_row_alone`: its final cache
+    becomes the incoming cache plus `h₀`.
+  - A training run that carries the cache from one window to the next adds `h₀` at
+    each window.
+- **A block parameter that the zero cache holds** (the direction of the review):
+  - After training, the zero cache is not all zeros. The name `zero_cache` then needs a
+    rename in both repos.
+  - Each slot of a stack needs the zero cache of its own application, because the
+    parameter can be untied. `zero_caches_for` of burn-stack builds each slot from
+    application 0.
+  - The block contracts build each block from a config, and the parameter starts at
+    zero. So most contracts never see it.
+- **The option that the maintainer chose: a cache from the caller.**
+  - The family API already takes `cache` and `origin`, and the gradient of each one
+    already works on every SSD path.
+  - Autodiff is a property of each tensor, so the tensor itself decides whether `h₀`
+    trains. No config option is necessary.
+
 ## Agent brief
 
 **Category:** enhancement
@@ -120,6 +154,19 @@ build ran.
 **Summary:** The learnable initial state `h₀` of Mamba-2 and Mamba-3 moves from a
 parameter of the block to a cache that the caller gives. Every SSD path then takes it,
 at the start of each row and at the start of each segment.
+
+**Context: the order of three tickets.** One session works on each ticket, one after
+the other:
+
+1. burn-stack ticket 18
+   (`../burn-stack/.scratch/arch-review-backlog/issues/18-packed-origin.md`). It is
+   complete and pushed before this ticket starts. So `Block::block_forward_packed` of
+   the pushed burn-stack already takes an `origin`, and burn-stack is at 0.46.0.
+2. This ticket.
+3. burn-stack ticket 19
+   (`../burn-stack/.scratch/arch-review-backlog/issues/19-contract-jitter.md`). It adds
+   noise to the weights in each block contract, after this ticket. So this ticket adds
+   no noise to the contracts.
 
 **Read this before you start: this ticket moves a capability. It does not delete it.**
 
@@ -132,6 +179,22 @@ at the start of each row and at the start of each segment.
   cache as `cache`, as `origin`, or as both.
 - An implementation that deletes `init_state_hpr` but adds no `cache_with_state`, no
   test of a trainable start state, or no recipe in the docs fails this ticket.
+
+**Names that stay.** Some names look like the deleted name, but they carry the
+capability after this ticket. Do not delete or rename them:
+
+| Name | What it is |
+|---|---|
+| `initial_state_bhpr` (about 83 uses) | The state of the incoming cache: the field of each SSD input bundle, and the new route of `h₀` |
+| `initial_state_b1hpr` | The same state with a chunk axis, in `Minimal`. Only the add of `init_state_hpr` next to it goes. |
+| `d_init_state`, `d_initial_state`, `d_initial_state_bhpr` | The gradient of that state, in the form-agreement tests and in the custom backward |
+| `origin`, `origin_bhpr`, `d_origin_bhpr`, `SsdResets` | The origin of a packed call and its gradient |
+| `Leaf`, `Broadcast`, `check_streams` in `src/packing/tests.rs` | The tests that make the origin a leaf, and that check its gradient |
+| `init_state_bhr` in `src/mamba3/rotation/tests.rs` | An unrelated test variable |
+
+Only these items go: `init_state_hpr`, `has_learnable_init_state` (and its builder
+`with_has_learnable_init_state`), the two `InitState` variants, and the code and the
+docs that read them.
 
 **Current behaviour:**
 
@@ -215,12 +278,14 @@ at the start of each row and at the start of each segment.
   - `GLOSSARY.md`, **Origin**: delete the entry. burn-stack ticket 18 moves it to the
     glossary of burn-stack.
   - A new ADR, `docs/adr/0011-…`: the learnable initial state is a cache that the
-    caller gives. It states three options:
+    caller gives. Use the form of `docs/adr/0010-one-standard-ssd-scan.md`. It states
+    three options, with the reasons of **The options that the grilling rejected** in
+    the **Triage notes**:
     - A block parameter that each forward adds.
     - A block parameter in the zero cache.
     - A cache from the caller: the decision.
 
-    Its consequences:
+    It cites the two source files of the **Triage notes**. Its consequences:
     - The caller owns the tensor, its trainability and its optimizer settings. The
       official code sets no weight decay on `init_states`.
     - The rules of Burn for a trainable tensor apply to `h₀`. The ADR cites
@@ -256,12 +321,35 @@ at the start of each row and at the start of each segment.
      this is the gradient of the parameter. For the new way, it is the gradient of the
      leaf before the broadcast.
    - Write the largest differences under `## Comments`. Use a throwaway test, and
-     delete it in step 4. If a difference is over the tolerance of the form-agreement
-     tests, stop and report.
+     delete it in step 4.
+   - The tolerance is that of the form-agreement test of the same family and pathway,
+     in the `ssd_path/tests.rs` of its SSD directory. For Mamba-2, it is
+     `dtype_tol(1e-4)`. If a difference is over the tolerance, stop and report.
 2. Move the pin to the pushed commit of burn-stack ticket 18 (see
    `docs/agents/issue-tracker.md`). Change the adapters.
 3. Add `cache_with_state` and its tests.
 4. Delete the old way, and update the docs.
+
+**References:**
+
+- The module header of `src/packing.rs`: the cache, the origin and the resets of a
+  packed call.
+- The doc of `Mamba2::forward_packed` and of `Mamba3::forward_packed`: the contract of
+  `cache` and `origin`.
+- `src/packing/tests.rs`: its field maps `Leaf` and `Broadcast`, and `check_streams`,
+  already build a leaf origin broadcast over the rows and compare the gradients. Use
+  them for the origin test. `Broadcast` is close to `cache_with_state`. If
+  `cache_with_state` makes it redundant, replace it.
+- `docs/agents/testing.md`: the seams. Put each new test in the seam that its table
+  gives:
+  - The agreement of the SSD paths is a form agreement.
+  - A test of the family API is one of the tests that only Mamba needs, in
+    `src/family/tests/`.
+  - A test of `cache_with_state` goes in the `tests.rs` of its file. The file map of
+    `CLAUDE.md` gives the rule for a `tests.rs`.
+- `docs/source-terms.md`: read it before you read the official code.
+- The skills of `CLAUDE.md`: `asd-ste100` for each doc and comment, and
+  `/domain-modeling` for the glossary and the ADR.
 
 **Constraints:**
 
