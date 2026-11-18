@@ -56,14 +56,14 @@ impl BlockConfig for MambaBlockConfig {
         }
     }
 
-    fn init_block(&self, n_applications: usize, device: &Device) -> MambaBlock {
+    fn init_block(&self, device: &Device) -> MambaBlock {
         match self {
             #[cfg(feature = "mamba1")]
-            Self::Mamba1(c) => MambaBlock::Mamba1(c.init_block(n_applications, device)),
+            Self::Mamba1(c) => MambaBlock::Mamba1(c.init_block(device)),
             #[cfg(feature = "mamba2")]
-            Self::Mamba2(c) => MambaBlock::Mamba2(c.init_block(n_applications, device)),
+            Self::Mamba2(c) => MambaBlock::Mamba2(c.init_block(device)),
             #[cfg(feature = "mamba3")]
-            Self::Mamba3(c) => MambaBlock::Mamba3(c.init_block(n_applications, device)),
+            Self::Mamba3(c) => MambaBlock::Mamba3(c.init_block(device)),
         }
     }
 

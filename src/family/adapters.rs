@@ -51,8 +51,8 @@ mod impl_mamba1 {
         fn d_model(&self) -> usize {
             self.d_model
         }
-        fn init_block(&self, n_applications: usize, device: &Device) -> Mamba1 {
-            self.init_applications(n_applications, device)
+        fn init_block(&self, device: &Device) -> Mamba1 {
+            self.init(device)
         }
         #[cfg(feature = "optim")]
         fn muon_projections(&self) -> Vec<burn_stack::optim::ProjSpec> {
@@ -115,8 +115,8 @@ mod impl_mamba2 {
         fn d_model(&self) -> usize {
             self.d_model
         }
-        fn init_block(&self, n_applications: usize, device: &Device) -> Mamba2 {
-            self.init_applications(n_applications, device)
+        fn init_block(&self, device: &Device) -> Mamba2 {
+            self.init(device)
         }
         #[cfg(feature = "optim")]
         fn muon_projections(&self) -> Vec<burn_stack::optim::ProjSpec> {
@@ -180,8 +180,8 @@ mod impl_mamba3 {
         fn d_model(&self) -> usize {
             self.d_model
         }
-        fn init_block(&self, n_applications: usize, device: &Device) -> Mamba3 {
-            self.init_applications(n_applications, device)
+        fn init_block(&self, device: &Device) -> Mamba3 {
+            self.init(device)
         }
         #[cfg(feature = "optim")]
         fn muon_projections(&self) -> Vec<burn_stack::optim::ProjSpec> {

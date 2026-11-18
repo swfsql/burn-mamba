@@ -234,7 +234,7 @@ use burn::{
     module::{Module, Param},
     nn::{Initializer, Linear, LinearConfig},
 };
-use burn_stack::utils::{UntiedParam, untied};
+use burn_stack::utils::UntiedParam;
 
 // ---------------------------------------------------------------------------
 // Mamba3  (the SSM block)
@@ -1243,16 +1243,11 @@ impl Mamba3Config {
             .collect()
     }
 
-    /// Allocate and initialise all Mamba-3 block parameters on `device`, for a
-    /// single application.
+    /// Allocate and initialise all Mamba-3 block parameters on `device`. The
+    /// block holds one copy of each parameter. A layer built for several
+    /// applications tiles each parameter of [`Mamba3::untied_params`] (see
+    /// [`burn_stack::utils::untied`]).
     pub fn init(&self, device: &Device) -> Mamba3 {
-        self.init_applications(1, device)
-    }
-
-    /// Allocate and initialise all Mamba-3 block parameters on `device`, for a
-    /// real layer applied `n_applications` times: every [`Self::untied`]
-    /// parameter holds that many copies of one initialisation.
-    pub fn init_applications(&self, n_applications: usize, device: &Device) -> Mamba3 {
         let d_inner = self.d_inner();
         let nheads = self.nheads();
         let ngroups = self.ngroups;
@@ -1347,8 +1342,6 @@ impl Mamba3Config {
             !self.gain.is_kalman() || self.kalman_kappa_init > 0.0,
             "kalman_kappa_init must be positive (κ = 0 is Gain::Projected)"
         );
-        // How many copies `part` holds: one per application if untied.
-        let copies = |part| if unties(part) { n_applications } else { 1 };
 
         let uniform_init = |fan_in: usize| {
             let bound = 1.0 / (fan_in as f64).sqrt();
@@ -1364,14 +1357,10 @@ impl Mamba3Config {
             .with_initializer(uniform_init(self.d_model))
             .init(device);
         let in_proj_tail = d_in_proj_tail.map(|width| {
-            let Linear { weight, bias } = LinearConfig::new(self.d_model, width)
+            LinearConfig::new(self.d_model, width)
                 .with_bias(self.has_proj_bias)
                 .with_initializer(uniform_init(self.d_model))
-                .init(device);
-            Linear {
-                weight: untied::tile(weight, 1, n_applications),
-                bias: bias.map(|b| untied::tile(b, 0, n_applications)),
-            }
+                .init(device)
         });
 
         // dt_bias: inverse-softplus initialisation
@@ -1384,25 +1373,16 @@ impl Mamba3Config {
         .exp();
         let dt_h = dt_h.clamp(self.dt_init_floor, f64::INFINITY);
         let inv_dt_h = dt_h.clone() + (-expm1(-dt_h)).log();
-        let dt_bias_h = untied::tile(
-            Param::from_tensor(inv_dt_h),
-            0,
-            copies(Mamba3Untied::DtBias),
-        );
+        let dt_bias_h = Param::from_tensor(inv_dt_h);
 
         let d_h = Initializer::Ones.init::<1, _>([nheads], device);
-        let d_h = untied::tile(d_h, 0, copies(Mamba3Untied::D));
 
-        let mut b_norm = RmsNormConfig::new(state_rank).init(device);
-        b_norm.gamma = untied::tile(b_norm.gamma, 0, copies(Mamba3Untied::BNorm));
-        let mut c_norm = RmsNormConfig::new(state_rank).init(device);
-        c_norm.gamma = untied::tile(c_norm.gamma, 0, copies(Mamba3Untied::CNorm));
+        let b_norm = RmsNormConfig::new(state_rank).init(device);
+        let c_norm = RmsNormConfig::new(state_rank).init(device);
 
         // B/C biases: [nheads, mimo_rank, state_rank], init to ones
         let b_bias_hmr = Initializer::Ones.init::<3, _>([nheads, mimo_rank, state_rank], device);
-        let b_bias_hmr = untied::tile(b_bias_hmr, 0, copies(Mamba3Untied::BBias));
         let c_bias_hmr = Initializer::Ones.init::<3, _>([nheads, mimo_rank, state_rank], device);
-        let c_bias_hmr = untied::tile(c_bias_hmr, 0, copies(Mamba3Untied::CBias));
 
         // MIMO projections (only for mimo_rank > 1)
         let (mimo_x_hmp, mimo_z_hmp, mimo_o_hmp) = if mimo_rank > 1 {
@@ -1419,22 +1399,16 @@ impl Mamba3Config {
                 1.0 / mimo_rank as f64,
                 device,
             ));
-            (
-                Some(untied::tile(mx, 0, copies(Mamba3Untied::MimoX))),
-                Some(untied::tile(mz, 0, copies(Mamba3Untied::MimoZ))),
-                Some(untied::tile(mo, 0, copies(Mamba3Untied::MimoO))),
-            )
+            (Some(mx), Some(mz), Some(mo))
         } else {
             (None, None, None)
         };
 
         // Gated RMSNorm applied per-head (group size = per_head_dim).
         let out_norm = self.has_outproj_norm.then(|| {
-            let mut norm = RmsNormGatedConfig::new(self.per_head_dim)
+            RmsNormGatedConfig::new(self.per_head_dim)
                 .with_norm_before_gate(true)
-                .init(device);
-            norm.gamma = untied::tile(norm.gamma, 0, copies(Mamba3Untied::OutNorm));
-            norm
+                .init(device)
         });
 
         let out_proj = LinearConfig::new(d_inner, self.d_model)
@@ -1442,23 +1416,22 @@ impl Mamba3Config {
             .with_initializer(uniform_init(d_inner))
             .init(device);
 
-        let init_state_hpr = self.has_learnable_init_state.then(|| {
-            let init = Initializer::Zeros.init::<3, _>([nheads, self.per_head_dim, state_rank], device);
-            untied::tile(init, 0, copies(Mamba3Untied::InitState))
-        });
+        let init_state_hpr = self
+            .has_learnable_init_state
+            .then(|| Initializer::Zeros.init::<3, _>([nheads, self.per_head_dim, state_rank], device));
 
-        let kalman_log_kappa_h = self.gain.is_kalman().then(|| {
-            let init = Param::from_tensor(Tensor::full([nheads], self.kalman_kappa_init.ln(), device));
-            untied::tile(init, 0, copies(Mamba3Untied::KalmanKappa))
-        });
-        let kalman_read_h = self.gain.is_kalman().then(|| {
-            let init = Initializer::Zeros.init::<1, _>([nheads], device);
-            untied::tile(init, 0, copies(Mamba3Untied::KalmanRead))
-        });
-        let tropical_readout_hp = self.tropical.is_on().then(|| {
-            let init = Initializer::Zeros.init::<2, _>([nheads, self.per_head_dim], device);
-            untied::tile(init, 0, copies(Mamba3Untied::TropicalReadout))
-        });
+        let kalman_log_kappa_h = self
+            .gain
+            .is_kalman()
+            .then(|| Param::from_tensor(Tensor::full([nheads], self.kalman_kappa_init.ln(), device)));
+        let kalman_read_h = self
+            .gain
+            .is_kalman()
+            .then(|| Initializer::Zeros.init::<1, _>([nheads], device));
+        let tropical_readout_hp = self
+            .tropical
+            .is_on()
+            .then(|| Initializer::Zeros.init::<2, _>([nheads, self.per_head_dim], device));
 
         Mamba3 {
             in_proj,

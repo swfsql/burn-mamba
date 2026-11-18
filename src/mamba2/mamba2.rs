@@ -86,7 +86,7 @@
 use crate::mamba2::prelude::*;
 use burn_stack::modules::sanity as san;
 use burn_stack::modules::{RmsNormGated, RmsNormGatedConfig, Silu, softplus};
-use burn_stack::utils::{UntiedParam, untied};
+use burn_stack::utils::UntiedParam;
 use burn::prelude::*;
 use burn::{
     module::{Module, Param},
@@ -483,16 +483,11 @@ impl Mamba2Config {
     // Initialisation
     // -----------------------------------------------------------------------
 
-    /// Allocate and initialise all Mamba-2 block parameters on `device`, for a
-    /// single application.
+    /// Allocate and initialise all Mamba-2 block parameters on `device`. The
+    /// block holds one copy of each parameter. A layer built for several
+    /// applications tiles each parameter of [`Mamba2::untied_params`] (see
+    /// [`burn_stack::utils::untied`]).
     pub fn init(&self, device: &Device) -> Mamba2 {
-        self.init_applications(1, device)
-    }
-
-    /// Allocate and initialise all Mamba-2 block parameters on `device`, for a
-    /// real layer applied `n_applications` times: every [`Self::untied`]
-    /// parameter holds that many copies of one initialisation.
-    pub fn init_applications(&self, n_applications: usize, device: &Device) -> Mamba2 {
         let d_inner = self.d_inner();
         let nheads = self.nheads();
         let conv_dim = self.conv_dim();
@@ -514,8 +509,6 @@ impl Mamba2Config {
             self.has_learnable_init_state || !unties(Mamba2Untied::InitState),
             "Mamba2Untied::InitState unties the initial state, and has_learnable_init_state is off"
         );
-        // How many copies `part` holds: one per application if untied.
-        let copies = |part| if unties(part) { n_applications } else { 1 };
 
         // Uniform initialiser matching PyTorch's default: U(-1/√fan_in, 1/√fan_in).
         let uniform_init = |fan_in: usize| {
@@ -537,14 +530,10 @@ impl Mamba2Config {
             .with_initializer(uniform_init(self.d_model))
             .init(device);
         let in_proj_tail = split_tail.then(|| {
-            let Linear { weight, bias } = LinearConfig::new(self.d_model, nheads)
+            LinearConfig::new(self.d_model, nheads)
                 .with_bias(self.has_proj_bias)
                 .with_initializer(uniform_init(self.d_model))
-                .init(device);
-            Linear {
-                weight: untied::tile(weight, 1, n_applications),
-                bias: bias.map(|b| untied::tile(b, 0, n_applications)),
-            }
+                .init(device)
         });
 
         // ── conv1d ───────────────────────────────────────────────────────────
@@ -552,16 +541,12 @@ impl Mamba2Config {
         // left padding and `step` slides that window, so the conv itself uses
         // "Valid" (no automatic padding).
         // The initialiser fan_in is `in_channels / groups * kernel_size = 1 * conv_kernel`.
-        let mut conv1d = Conv1dConfig::new(conv_dim, conv_dim, self.conv_kernel)
+        let conv1d = Conv1dConfig::new(conv_dim, conv_dim, self.conv_kernel)
             .with_padding(burn::nn::PaddingConfig1d::Valid)
             .with_groups(conv_dim)
             .with_bias(self.has_conv_bias)
             .with_initializer(uniform_init(self.conv_kernel))
             .init(device);
-        conv1d.weight = untied::tile(conv1d.weight, 0, copies(Mamba2Untied::Conv1d));
-        conv1d.bias = conv1d
-            .bias
-            .map(|b| untied::tile(b, 0, copies(Mamba2Untied::Conv1d)));
 
         // ── dt_bias ──────────────────────────────────────────────────────────
         // The initial Δ values (after softplus) must be log-uniform in
@@ -578,11 +563,7 @@ impl Mamba2Config {
         .exp();
         let dt_h = dt_h.clamp(self.dt_init_floor, f64::INFINITY);
         let inv_dt_h = dt_h.clone() + (-expm1(-dt_h)).log();
-        let dt_bias_h = untied::tile(
-            Param::from_tensor(inv_dt_h),
-            0,
-            copies(Mamba2Untied::DtBias),
-        );
+        let dt_bias_h = Param::from_tensor(inv_dt_h);
 
         // ── a_log ─────────────────────────────────────────────────────────────
         // A must be negative (a decaying system). The block stores
@@ -601,28 +582,25 @@ impl Mamba2Config {
             burn::tensor::Distribution::Uniform(self.a_init_range.0, self.a_init_range.1),
             device,
         );
-        let a_log_h = untied::tile(Param::from_tensor(a_h.log()), 0, copies(Mamba2Untied::ALog));
+        let a_log_h = Param::from_tensor(a_h.log());
 
         // ── D (skip connection) ───────────────────────────────────────────────
         // Ones: a direct residual path from input to output.
         let d_h = Initializer::Ones.init::<1, _>([nheads], device);
-        let d_h = untied::tile(d_h, 0, copies(Mamba2Untied::D));
 
         // ── norm (gated RMSNorm) and out_proj ─────────────────────────────────
-        let mut norm = RmsNormGatedConfig::new(d_inner)
+        let norm = RmsNormGatedConfig::new(d_inner)
             .with_norm_before_gate(self.is_norm_before_gate)
             .init(device);
-        norm.gamma = untied::tile(norm.gamma, 0, copies(Mamba2Untied::Norm));
         let out_proj = LinearConfig::new(d_inner, self.d_model)
             .with_bias(self.has_proj_bias)
             .with_initializer(uniform_init(d_inner))
             .init(device);
 
         // ── learnable initial state (optional) ────────────────────────────────
-        let init_state_hpr = self.has_learnable_init_state.then(|| {
-            let init = Initializer::Zeros.init::<3, _>([nheads, self.per_head_dim, self.state_rank], device);
-            untied::tile(init, 0, copies(Mamba2Untied::InitState))
-        });
+        let init_state_hpr = self
+            .has_learnable_init_state
+            .then(|| Initializer::Zeros.init::<3, _>([nheads, self.per_head_dim, self.state_rank], device));
 
         Mamba2 {
             in_proj,

@@ -183,7 +183,7 @@ fn block_output_is_exact() {
     let x = Tensor::<3>::random([2, 6, D_MODEL], Distribution::Normal(0.0, 1.0), &device);
     #[cfg(feature = "mamba1")]
     {
-        let block = BlockConfig::init_block(&m1(), 1, &device);
+        let block = BlockConfig::init_block(&m1(), &device);
         let tagged = MambaBlock::Mamba1(block.clone());
         let (want, _) = block.block_forward(x.clone(), block.zero_cache(2, &device), (), None);
         let (got, _) = tagged.block_forward(x.clone(), tagged.zero_cache(2, &device), MambaScanOptions::Mamba1, None);
@@ -191,7 +191,7 @@ fn block_output_is_exact() {
     }
     #[cfg(feature = "mamba2")]
     {
-        let block = BlockConfig::init_block(&m2(), 1, &device);
+        let block = BlockConfig::init_block(&m2(), &device);
         let tagged = MambaBlock::Mamba2(block.clone());
         let (want, _) =
             block.block_forward(x.clone(), block.zero_cache(2, &device), Mamba2ScanOptions::default(), None);
@@ -201,7 +201,7 @@ fn block_output_is_exact() {
     }
     #[cfg(feature = "mamba3")]
     {
-        let block = BlockConfig::init_block(&m3(), 1, &device);
+        let block = BlockConfig::init_block(&m3(), &device);
         let tagged = MambaBlock::Mamba3(block.clone());
         let (want, _) =
             block.block_forward(x.clone(), block.zero_cache(2, &device), Mamba3ScanOptions::default(), None);
@@ -248,7 +248,7 @@ fn network_output_and_gradients_are_exact() {
 #[cfg(feature = "mamba3")]
 fn the_zero_cache_of_mamba3_has_the_mamba3_tag() {
     let device = test_device();
-    let block = MambaBlock::Mamba3(BlockConfig::init_block(&m3(), 1, &device));
+    let block = MambaBlock::Mamba3(BlockConfig::init_block(&m3(), &device));
     let zero = block.zero_cache(3, &device);
     assert!(
         matches!(zero, MambaCache::Mamba3(_)),
@@ -376,7 +376,7 @@ fn wrong_cache_panics() {
 fn mixed_stack_rules() {
     let device = test_device();
     let mut net: MambaLatentNet = latent_shape(2).init(MambaBlockConfig::Mamba3(m3()), &device);
-    net.layers.real_layers[0].block = MambaBlock::Mamba2(BlockConfig::init_block(&m2(), 1, &device));
+    net.layers.real_layers[0].block = MambaBlock::Mamba2(BlockConfig::init_block(&m2(), &device));
     let x = input(2, 6, &device);
     let x0 = x.clone().narrow(1, 0, 1).squeeze_dim(1);
 

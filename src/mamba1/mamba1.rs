@@ -45,7 +45,7 @@ use crate::mamba1::prelude::*;
 use burn_stack::modules::Silu;
 use burn_stack::modules::sanity as san;
 use burn_stack::modules::split_into;
-use burn_stack::utils::{UntiedParam, untied};
+use burn_stack::utils::UntiedParam;
 use burn::prelude::*;
 use burn::{
     module::{Module, Param},
@@ -167,15 +167,10 @@ pub struct Mamba1Config {
 }
 
 impl Mamba1Config {
-    /// Returns the initialized model, for a single application.
+    /// Returns the initialized model. The block holds one copy of each
+    /// parameter. A layer built for several applications tiles each parameter
+    /// of [`Mamba1::untied_params`] (see [`burn_stack::utils::untied`]).
     pub fn init(&self, device: &Device) -> Mamba1 {
-        self.init_applications(1, device)
-    }
-
-    /// Returns the initialized model for a real layer applied `n_applications`
-    /// times: every [`Self::untied`] parameter holds that many copies of one
-    /// initialisation.
-    pub fn init_applications(&self, n_applications: usize, device: &Device) -> Mamba1 {
         let d_inner = self.d_inner();
         assert_ne!(self.state_rank, 0);
         assert!(self.d_model + self.state_rank > 0);
@@ -232,16 +227,7 @@ impl Mamba1Config {
             Param::from_tensor(a_log)
         };
 
-        // How many copies `part` holds: one per application if untied. A
-        // `Linear`'s copies lie along its output axis.
-        let copies = |part| {
-            if self.untied.contains(&part) {
-                n_applications
-            } else {
-                1
-            }
-        };
-        let mut conv1d = Conv1dConfig::new(d_inner, d_inner, self.conv_kernel)
+        let conv1d = Conv1dConfig::new(d_inner, d_inner, self.conv_kernel)
             // Causal left-padding is applied manually in `forward` (from the
             // conv cache window), so the convolution itself uses no padding.
             .with_padding(PaddingConfig1d::Valid)
@@ -251,22 +237,11 @@ impl Mamba1Config {
             // fan_in = in_channels / groups * kernel_size
             .with_initializer(uniform_init(self.conv_kernel))
             .init(device);
-        conv1d.weight = untied::tile(conv1d.weight, 0, copies(Mamba1Untied::Conv1d));
-        conv1d.bias = conv1d
-            .bias
-            .map(|b| untied::tile(b, 0, copies(Mamba1Untied::Conv1d)));
-        let mut x_proj = LinearConfig::new(d_inner, dt_rank + 2 * self.state_rank)
+        let x_proj = LinearConfig::new(d_inner, dt_rank + 2 * self.state_rank)
             .with_bias(false)
             // follows PyTorch's default initializer
             .with_initializer(uniform_init(d_inner))
             .init(device);
-        x_proj.weight = untied::tile(x_proj.weight, 1, copies(Mamba1Untied::XProj));
-        let dt_proj = Linear {
-            weight: untied::tile(dt_proj.weight, 1, copies(Mamba1Untied::DtProj)),
-            bias: dt_proj
-                .bias
-                .map(|b| untied::tile(b, 0, copies(Mamba1Untied::DtProj))),
-        };
 
         Mamba1 {
             in_proj: LinearConfig::new(self.d_model, 2 * d_inner)
@@ -277,12 +252,8 @@ impl Mamba1Config {
             conv1d,
             x_proj,
             dt_proj,
-            a_log: untied::tile(a_log, 0, copies(Mamba1Untied::ALog)),
-            d: untied::tile(
-                Initializer::Ones.init::<1, _>([d_inner], device),
-                0,
-                copies(Mamba1Untied::D),
-            ),
+            a_log,
+            d: Initializer::Ones.init::<1, _>([d_inner], device),
             out_proj: LinearConfig::new(d_inner, self.d_model)
                 .with_bias(self.has_proj_bias)
                 // follows PyTorch's default initializer
