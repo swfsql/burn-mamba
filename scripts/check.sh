@@ -1,8 +1,26 @@
 #!/usr/bin/env bash
 # The check of this repo. CI runs it and skips the three steps that read this box:
 # the host paths, the prose and the coverage.
+#
+# `--coverage-base BASE`: the coverage step compares the working tree with BASE,
+# a git revision or a report of `coverage.py --save`. A path is relative to the
+# repo. With no BASE, the step gives the coverage alone.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+coverage_base=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --coverage-base)
+            coverage_base="${2:?--coverage-base takes a git revision or a report}"
+            shift 2
+            ;;
+        *)
+            echo "error: unknown argument \`$1\`." >&2
+            exit 2
+            ;;
+    esac
+done
 
 # Run a cargo command. Fail when its output holds a warning.
 no_warnings() {
@@ -55,8 +73,9 @@ check_prose() {
     return "$failed"
 }
 
-# Report the coverage of `src/` by the lib tests, with the coverage script of
-# burn-stack. A box without that script or the coverage tools skips it.
+# Report the coverage of `src/` by the lib tests, or compare it with
+# `--coverage-base`, with the coverage script of burn-stack. A box without that
+# script or the coverage tools skips it.
 check_coverage() {
     local script=../burn-stack/scripts/coverage.py
     if [ ! -f "$script" ]; then
@@ -67,7 +86,11 @@ check_coverage() {
         echo "note: this box has no coverage tools, so the coverage did not run." >&2
         return 0
     fi
-    python3 "$script" .
+    if [ -n "$coverage_base" ]; then
+        python3 "$script" . --base "$coverage_base"
+    else
+        python3 "$script" .
+    fi
 }
 
 if [ -z "${CI:-}" ]; then

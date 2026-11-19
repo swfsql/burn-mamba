@@ -17,6 +17,10 @@ An expected value comes from a source outside the code under test:
 - A closed form or a definition. Examples: the half-angle closed form in `src/mamba3/rotation/tests.rs`, and `prefix_sum_matches_the_definition` in `src/mamba3/helpers/tests.rs`.
 - The float64 `numpy` check of an `info/` note, in `scripts/`. The test cites the note, as `src/mamba3/scan_options/tests.rs` does.
 
+## A test that cannot fail first
+
+A test fails first, before the change that it checks. A change of a signature can need the new code before the test compiles, so the test passes at its first run. Then break the new code once for each such test, and run the test. It must fail. Undo each break. The **Mutation result** under `## Comments` of the ticket gives each break and each test that it failed.
+
 ## Outside the seams
 
 - A claim about training quality (for example, "this option learns faster") has no test seam. A run of an example answers it.
@@ -26,7 +30,7 @@ An expected value comes from a source outside the code under test:
 
 `scripts/check.sh` runs `../burn-stack/scripts/coverage.py` on this crate. The script gives the line, branch and condition coverage of `src/` by the lib tests. A box without that script, `cargo-llvm-cov` or the nightly toolchain skips it with a note. When nightly has no `llvm-tools-preview`, the run installs it.
 
-The "Coverage gate" section of `../burn-stack/docs/agents/testing.md` gives the rules of a coverage gate. Run its compare from the root of this repo: `python3 ../burn-stack/scripts/coverage.py . --base BASE`. A commit has no `[patch]`, so a commit base builds against its pin.
+The "Coverage gate" section of `../burn-stack/docs/agents/testing.md` gives the rules of a coverage gate. From the root of this repo, save the report of a commit base with `python3 ../burn-stack/scripts/coverage.py . --revision BASE --save tmp/<ticket>/coverage-base.json`. A commit has no `[patch]`, so a commit base builds against its pin. After the change, run `./scripts/check.sh --coverage-base tmp/<ticket>/coverage-base.json`.
 
 ## Bench gates
 
