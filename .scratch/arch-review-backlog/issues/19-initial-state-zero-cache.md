@@ -349,7 +349,7 @@ docs that read them.
     `CLAUDE.md` gives the rule for a `tests.rs`.
 - `docs/source-terms.md`: read it before you read the official code.
 - The skills of `CLAUDE.md`: `asd-ste100` for each doc and comment, and
-  `/domain-modeling` for the glossary and the ADR.
+  `/mattpocock-skills:domain-modeling` for the glossary and the ADR.
 
 **Constraints:**
 

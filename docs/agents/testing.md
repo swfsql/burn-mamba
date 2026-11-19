@@ -1,6 +1,6 @@
 # Test seams
 
-`/to-spec` and `/tdd` agree the test seams of a change with the user. Propose seams from this table first. Propose a new seam only when no row fits the change.
+`/mattpocock-skills:to-spec` and `/mattpocock-skills:tdd` agree the test seams of a change with the user. Propose seams from this table first. Propose a new seam only when no row fits the change.
 
 | Seam | Tests | Catches | Misses |
 |---|---|---|---|

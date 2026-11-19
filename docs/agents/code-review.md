@@ -1,6 +1,6 @@
 # Code review
 
-The additions of this repo to `/code-review`.
+The additions of this repo to `/mattpocock-skills:code-review`.
 
 ## What each agent receives
 
@@ -9,7 +9,7 @@ The additions of this repo to `/code-review`.
 
 ## Review before the last commit
 
-A ticket with a fixed list of commits holds the fixes of the review in its last commit. The diff of `/code-review` ends at `HEAD`, so it does not show uncommitted work. Before the review:
+A ticket with a fixed list of commits holds the fixes of the review in its last commit. The diff of `/mattpocock-skills:code-review` ends at `HEAD`, so it does not show uncommitted work. Before the review:
 
 1. Run `git add -N <path>` for each new file.
 2. Give each agent the command `git diff <base>`, in place of `git diff <base>...HEAD`.

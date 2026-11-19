@@ -66,8 +66,8 @@ scripts/compare_reports.py BASE --changed 'GLOB'...
   PR history. When you find changelog prose, delete it.
 - A change that adds, deletes or renames a file updates its
   [File Map](#file-map) line in the same change.
-- A new term goes to `GLOSSARY.md` (through `/domain-modeling`). A new
-  decision with a trade-off goes to an ADR in `docs/adr/`. A mechanism and its
+- A new term goes to `GLOSSARY.md` (through `/mattpocock-skills:domain-modeling`).
+  A new decision with a trade-off goes to an ADR in `docs/adr/`. A mechanism and its
   math go to the module header of its file.
 - A name and its docs change in the same change. A rename of an identifier
   updates every doc that names it or its concept: comments, messages, the
@@ -142,6 +142,10 @@ scripts/compare_reports.py BASE --changed 'GLOB'...
   not restate it.
 - `../burn-stack/`: the containers. Start from its `CLAUDE.md`.
   `examples/README.md`: the examples.
+- `../burn-stack/docs/burn/autodiff-semantics.md`: the rules of Burn for devices,
+  autodiff, gradients, parameters and caches, with their traps. Read it before you
+  write or brief code with a trainable tensor, a graph in a cache, a backend hop or
+  a gradient test.
 - `docs/agents/`: the configuration of the engineering skills (see
   [Agent skills](#agent-skills)).
 - `../burn/`, `../cubecl/`, `../cubek/`: Burn and CubeCL.
@@ -173,13 +177,18 @@ Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See
 
 ### Test seams
 
-The seams to propose for `/to-spec` and `/tdd`, and the bench and coverage gates of a
-ticket. See `docs/agents/testing.md`.
+The seams to propose for `/mattpocock-skills:to-spec` and `/mattpocock-skills:tdd`,
+and the bench and coverage gates of a ticket. See `docs/agents/testing.md`.
+
+### Agent briefs
+
+The sections that a brief adds to the template of
+`/mattpocock-skills:triage`, for an implementer who starts cold. See `docs/agents/agent-brief.md`.
 
 ### Code review
 
-What each `/code-review` agent receives, and how to review before the last
-commit. See `docs/agents/code-review.md`.
+What each `/mattpocock-skills:code-review` agent receives, and how to review
+before the last commit. See `docs/agents/code-review.md`.
 
 ## Notation
 

@@ -25,7 +25,7 @@ Some changes touch this repo and `../burn-stack`. Start the session in this repo
 - **Spec**: one `spec.md` in this repo.
 - **Tickets**: each ticket changes one repo. A burn-stack ticket goes to `../burn-stack/.scratch/<feature-slug>/issues/`, with the same slug.
 - **Blocking**: the `Blocked by:` line gives the path of a blocker in the other repo.
-- **Review**: `/code-review` reads the diff of one repo. Run it once in each changed repo, with the tickets of that repo as the spec source.
+- **Review**: `/mattpocock-skills:code-review` reads the diff of one repo. Run it once in each changed repo, with the tickets of that repo as the spec source.
 
 ### The burn-stack pin
 
