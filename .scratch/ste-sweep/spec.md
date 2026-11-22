@@ -111,15 +111,17 @@ nothing guards the tickets or the messages.
   files, the READMEs, `docs/`, `info/`, and the notes and handoff files of the
   examples.
 - In a `.rs` file, the linter reads the doc comments, the comments and the
-  strings of `panic!`, `expect` and `assert!` calls. This is the option
-  `--parts docs,comments,messages`.
+  strings of the message calls. This is the option
+  `--parts docs,comments,messages`. Examples of these calls are `panic!`,
+  `expect`, `assert!`, `assert_eq!`, `unreachable!`, `format!`, `println!`,
+  `write!`, `bail!` and `anyhow!`.
 
 ### Modes
 
 - Comments, rustdoc, Markdown and tickets are STE-flavored. A description has
   at most 25 words in each sentence.
-- The strings of `panic!`, `expect` and `assert!` are Strict. A sentence has at
-  most 20 words.
+- The strings of the message calls are Strict. A sentence has at most 20
+  words.
 
 ### The method of a batch
 
@@ -274,8 +276,9 @@ one lists the hits that stay, with their reasons, under `## Comments`.
 - Each `tmp/` directory, at any depth.
 - `bench.md` and `kernels.md`. `bench.sh` and `kernels.sh` write these reports,
   so a hand edit is lost at the next run.
-- Error strings that the linter does not read, for example `format!` errors
-  and CLI help.
+- The strings that the linter does not read. Examples are the strings of
+  `.context(…)`, a plain string in `Err(…)` and the `help = "…"` attribute of
+  a CLI flag.
 - A lexical review of a paragraph that has no finding.
 - A rename of a term or an identifier. The sweep rewrites the prose of a
   glossary, but its terms, their meanings and its _Avoid_ entries stay.
