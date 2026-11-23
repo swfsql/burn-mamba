@@ -236,6 +236,13 @@ rules too, and the history rule applies.
   repo. The sweep tickets do not block each other.
 - The `.scratch/` ticket of each repo goes last in its repo, so that it also
   reads the comments that the earlier batches wrote.
+- The two tickets of `.scratch/ste-lint-misses/` fix two misses of the linter.
+  They block each open sweep ticket of both repos, so that each open batch
+  runs on the new linter. The new linter adds hard findings, so the counts
+  "at the start" of the open tickets can grow.
+- `../burn-stack/.scratch/ste-sweep/issues/06-recount-swept-batches.md`
+  sweeps the scopes of burn-stack tickets 02 and 03 again on the new linter.
+  It blocks burn-stack ticket 05.
 
 ### Commits
 
