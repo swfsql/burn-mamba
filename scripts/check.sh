@@ -36,16 +36,22 @@ no_warnings() {
     fi
 }
 
-# Fail when a file has more hard STE violations than it has on origin/main. A
-# new file starts at zero. The linter is part of the `asd-ste100` skill.
+# Fail when a changed `.rs` or `.md` file has more hard STE violations than at
+# the merge base with origin/main. A new file starts at zero. The step also
+# reads the files under `.scratch/`. In a `.rs` file, it reads the doc
+# comments, the comments and the strings of the message calls. Examples of
+# these calls are `panic!`, `expect`, `assert!` and `format!`. The linter is
+# part of the `asd-ste100` skill.
 check_prose() {
     local lint="$HOME/.claude/skills/asd-ste100/scripts/ste-lint.py"
     if [ ! -f "$lint" ]; then
         echo "note: this box has no ste-lint.py, so the prose check did not run." >&2
         return 0
     fi
+    # Both sides of the compare and the report of a failure use these options.
+    local lint_options=(--enable history --parts docs,comments,messages)
     hard_violations() {
-        python3 "$lint" --enable history --summary --baseline 1000000 "$1" | awk 'NR == 2 { print $1 }'
+        python3 "$lint" "${lint_options[@]}" --summary --baseline 1000000 "$1" | awk 'NR == 2 { print $1 }'
     }
     local base old_dir file before after failed=0
     base="$(git merge-base origin/main HEAD)"
@@ -59,15 +65,15 @@ check_prose() {
         fi
         after="$(hard_violations "$file")"
         if [ "$after" -gt "$before" ]; then
-            echo "error: $file has $after hard STE violations. origin/main has $before." >&2
-            python3 "$lint" --enable history "$file" >&2 || true
+            echo "error: $file has $after hard STE violations. The merge base with origin/main has $before." >&2
+            python3 "$lint" "${lint_options[@]}" "$file" >&2 || true
             failed=1
         fi
     done < <(
         {
             git diff --name-only --diff-filter=d "$base" -- '*.rs' '*.md'
             git ls-files --others --exclude-standard -- '*.rs' '*.md'
-        } | grep -v '^\.scratch/' | sort -u
+        } | sort -u
     )
     rm -rf "$old_dir"
     return "$failed"

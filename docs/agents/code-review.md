@@ -5,7 +5,7 @@ The additions of this repo to `/mattpocock-skills:code-review`.
 ## What each agent receives
 
 - **Standards agent:** the **Constraints** and **Names** sections of the ticket, when the ticket has them. A constraint of the ticket wins over a general rule of `CLAUDE.md`. For example, a ticket that keeps an identifier stops the rename rule for that identifier.
-- **Both agents:** the results of the checks that already ran. `scripts/check.sh` covers the warnings, the doc links, the host paths and the rules of `ste-lint.py` (semicolons, sentence length, changelog phrasing). Each agent uses these results as they are, and it reports what the checks cannot see.
+- **Both agents:** the results of the checks that already ran. `scripts/check.sh` covers the warnings, the doc links, the host paths and the rules of `ste-lint.py` (for example semicolons, sentence length and changelog phrasing). Its prose step reads each changed `.rs` and `.md` file, including the files under `.scratch/`. In a `.rs` file, it also reads the strings of the message calls, for example `panic!` and `expect`. A file fails when it has more hard findings than at the merge base with `origin/main`. Each agent uses these results as they are, and it reports what the checks cannot see.
 
 ## Review before the last commit
 
