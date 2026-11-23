@@ -25,13 +25,14 @@ struct RunGrads {
     out: Tensor<3>,
     /// Final state from the returned cache.
     final_ssm: Tensor<4>,
-    /// Final tap-FIFO B from the returned cache; `None` for
+    /// Final tap-FIFO B from the returned cache. It is `None` for
     /// [`TapPattern::None`], which keeps no tap FIFO.
     final_k: Option<Tensor<5>>,
-    /// Final tap-FIFO x from the returned cache; `None` with it.
+    /// Final tap-FIFO x from the returned cache. It is `None` together with
+    /// `final_k`.
     final_v: Option<Tensor<4>>,
-    /// Final cumulative rotation angle from the returned cache; `None` for
-    /// [`RotationKind::Real1D`], which has no accumulator.
+    /// Final cumulative rotation angle from the returned cache. It is `None`
+    /// for [`RotationKind::Real1D`], which has no accumulator.
     final_angle: Option<Tensor<3>>,
     d_input: Tensor<3>,
     d_in_proj_w: Tensor<2>,
@@ -44,9 +45,9 @@ struct RunGrads {
     d_out_proj_w: Tensor<2>,
 }
 
-/// Fixed (non-tracked) random "downstream heads" used to form a scalar loss
-/// from the output **and** every final cache field, so the backward pass
-/// exercises both the output and the state path.
+/// Fixed (non-tracked) random "downstream heads". They form a scalar loss from
+/// the output **and** every final cache field. So the backward pass exercises
+/// both the output and the state path.
 struct Heads {
     out: Tensor<3>,
     ssm: Tensor<4>,
@@ -60,10 +61,10 @@ struct Heads {
 }
 
 /// Build the initial cache passed to both `forward` and the `step`
-/// unrolling. With `random = false` it is zero (the standard fresh start);
-/// with `random = true` every field (state, previous-token B/x, and
-/// cumulative rotation angle) holds random values, exercising parity from an
-/// arbitrary initial state.
+/// unrolling. With `random = false`, it is zero (the standard fresh start).
+/// With `random = true`, every field (state, previous-token B/x, and
+/// cumulative rotation angle) holds random values. This exercises parity from
+/// an arbitrary initial state.
 fn build_init_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3Cache {
     let device = test_device();
     let nheads = cfg.nheads();
@@ -96,7 +97,7 @@ fn build_init_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mamba3Cac
         };
         Tensor::from_inner(t)
     };
-    // `Real1D` has no accumulator at all; every other kind exercised here is
+    // `Real1D` has no accumulator at all. Every other kind exercised here is
     // the abelian one.
     let rotation = match cfg.rotation {
         RotationKind::Real1D => RotationState::real(),
@@ -158,10 +159,10 @@ fn assert_outputs_match(label: &str, a: &RunGrads, b: &RunGrads, tol: f32) {
     }
 }
 
-/// Run a closure that produces an output tensor from a model and an input
-/// (wrapped as a `Param` so it has its own autodiff leaf), then derive a
-/// scalar loss with a fixed (non-tracked) random "head" and return the
-/// gradients of the input and a representative set of model parameters.
+/// Run a closure that produces an output tensor from a model and an input.
+/// The input is a `Param`, so it has its own autodiff leaf. Then derive a
+/// scalar loss with a fixed (non-tracked) random "head". Return the gradients
+/// of the input and of a representative set of model parameters.
 fn run_with_grads(
     model: &Mamba3,
     input: &Param<Tensor<3>>,
@@ -255,9 +256,9 @@ fn run_with_grads(
     }
 }
 
-/// Assert that every entry in `a` and `b` agrees to within `grad_tol`,
-/// printing every comparison so a failure dump shows the full picture
-/// (instead of stopping at the first mismatch).
+/// Assert that every entry in `a` and `b` agrees to within `grad_tol`. It
+/// prints every comparison, so a failure dump shows the full picture (instead
+/// of stopping at the first mismatch).
 fn check_grads_match(label: &str, a: &RunGrads, b: &RunGrads, grad_tol: f32) {
     let grad_tol = dtype_tol(grad_tol);
     let mut failures: Vec<String> = Vec::new();
@@ -290,8 +291,8 @@ fn check_grads_match(label: &str, a: &RunGrads, b: &RunGrads, grad_tol: f32) {
 }
 
 /// Build a fresh `Param<Tensor>` from a stable inner tensor.
-/// A new Param is needed per run so that the autodiff leaf has a fresh
-/// node, isolating each backward pass to its own forward graph.
+/// Each run needs a new Param, so that the autodiff leaf has a fresh node.
+/// This isolates each backward pass to its own forward graph.
 fn param_input(input: &Tensor<3>) -> Param<Tensor<3>> {
     Param::from_tensor(Tensor::from_inner(input.clone()))
 }
@@ -303,19 +304,20 @@ fn param_input(input: &Tensor<3>) -> Param<Tensor<3>> {
 ///
 /// With `random_init = true` the shared initial cache is random rather than
 /// zero. Parity from an arbitrary initial state subsumes the split-prefill
-/// (split-vs-full) guarantee: if `forward` from any state matches the
-/// recurrent unrolling from that same state — outputs *and* final cache —
-/// then feeding a `forward`-produced cache back in continues correctly.
+/// (split-vs-full) guarantee. Suppose that `forward` from any state matches
+/// the recurrent unrolling from that same state, in outputs *and* final cache.
+/// Then a `forward`-produced cache continues correctly when the next call
+/// takes it as input.
 fn run_step_matches_forward(cfg: Mamba3Config, random_init: bool) {
     run_step_matches_forward_tol(cfg, random_init, 1e-3);
 }
 
 /// [`run_step_matches_forward`] with an explicit gradient tolerance.
 ///
-/// Only the `state_rank = 1` rung needs one: QK-norm is then `γ·x/√(x²+ε)`,
-/// whose derivative peaks at `γ/√ε ≈ 300`, so a random draw that lands a `B`/`C`
-/// channel near zero amplifies fp32 noise by that factor. The *values* are
-/// untouched (`|B| = 1` either way), so only this bound moves.
+/// Only the `state_rank = 1` rung needs one. QK-norm is then `γ·x/√(x²+ε)`,
+/// whose derivative peaks at `γ/√ε ≈ 300`. So a random draw that lands a
+/// `B`/`C` channel near zero amplifies fp32 noise by that factor. This does
+/// not change the *values* (`|B| = 1` either way), so only this bound moves.
 fn run_step_matches_forward_tol(cfg: Mamba3Config, random_init: bool, grad_tol: f32) {
     let device = test_device();
     let model = cfg.init(&device.clone().autodiff());
@@ -376,9 +378,9 @@ fn run_step_matches_forward_tol(cfg: Mamba3Config, random_init: bool, grad_tol: 
     check_grads_match("step vs forward", &r_fwd, &r_step, grad_tol);
 
     // ── Guard: the random initial state must actually be consumed ─────
-    // Re-run forward from a *zero* initial cache; its output must differ
-    // from the random-init output. Otherwise the initial state is being
-    // silently ignored and forward/step would match trivially.
+    // Re-run forward from a *zero* initial cache. Its output must differ
+    // from the random-init output. Otherwise forward silently ignores the
+    // initial state, and forward/step would match trivially.
     if random_init {
         use burn_stack::utils::test_helpers::max_abs_diff;
         let (out_zero, _) = model.forward_double_ssd(
@@ -428,7 +430,7 @@ fn cfg_real1d_mimo() -> Mamba3Config {
     cfg_real1d().with_mimo_rank(2)
 }
 /// A real transition pairs nothing, so it is the one kind whose `state_rank`
-/// may be odd — here the scalar state `state_rank = 1`.
+/// may be odd. Here it is the scalar state `state_rank = 1`.
 fn cfg_real1d_scalar() -> Mamba3Config {
     cfg_real1d().with_state_rank(1)
 }
@@ -584,15 +586,16 @@ fn step_matches_forward_rotation_half_outproj_norm_mimo_random_init() {
 
 /// One longer `forward_double_ssd` over the whole sequence equals two
 /// consecutive `forward_double_ssd` calls (prefix then suffix) that thread the
-/// returned cache between them — outputs, every final cache field, and
+/// returned cache between them. Outputs, every final cache field, and
 /// parameter gradients all agree. The initial cache is random, so the chaining
 /// starts from a non-trivial state.
 ///
 /// `step_matches_forward_random_init` already subsumes this (parity from an
 /// arbitrary initial state implies a `forward`-produced cache continues
-/// correctly); this is a direct, explicit check on the double-ssd pathway. A
-/// single `Minimal` config suffices: the three SSD paths are proven equivalent
-/// among themselves in `double_ssd::ssd::ssd_path::tests`.
+/// correctly). This test is a direct, explicit check on the double-ssd
+/// pathway. A single `Minimal` config suffices: the tests in
+/// `double_ssd::ssd::ssd_path::tests` prove the three SSD paths equivalent
+/// among themselves.
 fn run_split_matches_full(cfg: Mamba3Config) {
     let device = test_device();
     let model = cfg.init(&device.clone().autodiff());
@@ -661,15 +664,16 @@ fn split_matches_full() {
 /// Flipping the `siso_specialization*` flags must not change anything the caller
 /// can observe.
 ///
-/// At `mimo_rank == 1` the decode path swaps two degenerate GEMMs
+/// At `mimo_rank == 1`, the decode path swaps two degenerate GEMMs
 /// ([`Mamba3::step_readout`], [`helpers::mimo_outer_sum`]) for a reduction plus
-/// broadcast multiplies — that is
-/// [`Mamba3Config::siso_specialization_decode`]'s doing. Both branches are
-/// unrolled here over several steps (so the specialized state feeds the next
-/// step) and compared on outputs, every final cache field, and every gradient.
-/// Both flags are flipped together, which is how a caller toggles them; the
-/// per-branch comparisons live in the kernel-level tests.
-/// The two models share their weights by construction — only the flags differ.
+/// broadcast multiplies. [`Mamba3Config::siso_specialization_decode`] selects
+/// that swap.
+///
+/// This test unrolls both branches over several steps, so the specialized
+/// state feeds the next step. It compares them on outputs, every final cache
+/// field, and every gradient. The test flips both flags together, as a caller
+/// does. The per-branch comparisons live in the kernel-level tests. The two
+/// models share their weights by construction. Only the flags differ.
 fn run_siso_specialization_step_parity(cfg: Mamba3Config, random_init: bool) {
     assert_eq!(1, cfg.mimo_rank, "the flags are inert above mimo_rank = 1");
     let device = test_device();
@@ -737,8 +741,8 @@ fn run_siso_specialization_step_parity(cfg: Mamba3Config, random_init: bool) {
     let r_gen = run_with_grads(&general, &input_gen, &heads, |m, x| unroll(m, x, cache_gen));
 
     // Same tolerances as the other parity tests here. The two branches are the
-    // same math in a different summation order, so they are not bit-identical;
-    // a genuine mismatch (wrong axis, wrong broadcast) diverges by O(1), far
+    // same math in a different summation order, so they are not bit-identical.
+    // A genuine mismatch (wrong axis, wrong broadcast) diverges by O(1), far
     // above these bounds.
     assert_outputs_match("siso vs general step", &r_spec, &r_gen, 1e-4);
     check_grads_match("siso vs general step", &r_spec, &r_gen, 1e-3);

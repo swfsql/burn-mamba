@@ -32,7 +32,7 @@
 //! instead of `γₜ`. The kernel compensates:
 //!
 //! 1. Using a **strict** lower-triangular mask in the intra-chunk path (the
-//!    `s = t` block is excluded from the trapezoid sum).
+//!    mask excludes the `s = t` block from the trapezoid sum).
 //! 2. Adding a separate γ-weighted diagonal term `γₜ · (Cₜᵀ Bₜ) · xₜ`.
 //!
 //! ## Algorithm (per chunk, MIMO-first)
@@ -72,8 +72,8 @@ impl Mamba3SingleSsdInput {
     ///
     /// # Shapes
     /// `T = chunk_tokens = chunk_len / read_stride` is the chunk's read axis
-    /// (see [`Mamba3SingleSsdInput::c_bntmhr`]); at `read_stride = 1` it is
-    /// `chunk_len` and every shape here is the stock one.
+    /// (see [`Mamba3SingleSsdInput::c_bntmhr`]). At `read_stride = 1` it is
+    /// `chunk_len`, and every shape here is the stock one.
     /// - input: see [`Mamba3SingleSsdInput`]
     /// - output `(y_bntmhp, final_state_bhpr)`:
     ///   - `y_bntmhp`:           `[batch, nchunks, T, mimo_rank, nheads, per_head_dim]`
@@ -136,7 +136,8 @@ impl Mamba3SingleSsdInput {
         //
         // y_lower[t1] = Σ_{t2 < t1}  (C[t1] · K_scaled[t2]^T)
         //              · exp(cumA[t1] - cumA[t2])  · PsiV[t2]
-        // (block-diagonal in time t1 = t2 is excluded — handled by y_diag.)
+        // (The sum excludes the block diagonal in time, t1 = t2. y_diag
+        // handles it.)
         // =============================================================
         let y_lower_bnTMhp = {
             let c_bnhTMr = c_bnTMhr.clone().swap_dims(2, 3);
@@ -145,7 +146,8 @@ impl Mamba3SingleSsdInput {
             let cb_bnhTMLM = c_bnhTMr.matmul(k_bnhrLM);
 
             // L_strict_base[i, j] = exp(cumA[row(i)] - cumA[j]) for row(i) > j,
-            // else 0 — rectangular, the read positions against every source.
+            // else 0. It is rectangular: the read positions against every
+            // source.
             //
             // Like `segsum` but with -inf on the diagonal as well (so exp = 0
             // there), i.e. `triu(0)` rather than `triu(1)`.

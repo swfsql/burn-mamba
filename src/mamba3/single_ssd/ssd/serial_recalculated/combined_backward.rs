@@ -65,14 +65,15 @@ pub struct CombinedSingleSsdGrads<B: Backend> {
 
 /// Memory-efficient backward for the Mamba-3 MIMO-first chunkwise Single-SSD.
 ///
-/// Recomputes the forward intermediates (K1–K4) from the saved inputs, then:
-/// - computes the K5 BLUE (state-to-output) and strict lower-triangular LOWER
-///   (intra-chunk) backwards one chunk group at a time (the group size sets
-///   the memory of the score, see
-///   [`backward_chunk_group`](crate::standard_ssd::backward_chunk_group)),
-/// - computes the γ-weighted diagonal DIAG backward batched (its `m × m`
-///   working tensors are tiny),
-/// - walks the K4 state-passing backward (the one recurrence) over the
+/// Recomputes the forward intermediates (K1–K4) from the saved inputs. Then it
+/// runs these steps:
+/// - It computes the K5 BLUE (state-to-output) and strict lower-triangular
+///   LOWER (intra-chunk) backwards one chunk group at a time. The group size
+///   sets the memory of the score (see
+///   [`backward_chunk_group`](crate::standard_ssd::backward_chunk_group)).
+/// - It computes the γ-weighted diagonal DIAG backward batched (its `m × m`
+///   working tensors are tiny).
+/// - It walks the K4 state-passing backward (the one recurrence) over the
 ///   chunk-input-state gradient from the first item.
 ///
 /// K3/K2/K1 backwards then run as single batched ops.
@@ -85,7 +86,8 @@ pub struct CombinedSingleSsdGrads<B: Backend> {
 /// - `read_stride` — write positions per read position (see
 ///   [`Mamba3SingleSsdInput::read_stride`](crate::mamba3::single_ssd::ssd::Mamba3SingleSsdInput))
 /// - `siso_specialization` — the forward's γ-correction branch choice, replayed
-///   here so the backward matches it (performance-only; both agree)
+///   here so the backward matches it (performance-only, and both branches
+///   agree)
 /// - `resets` — `(keep_bn, origin_bhpr)`, or `None`. `keep_bn` is the
 ///   constant reset factor of the forward (`0` at a chunk that starts a new
 ///   segment). `origin_bhpr` is the state that those chunks start from.
@@ -115,8 +117,9 @@ pub fn combined_backward<B: Backend>(
     let keep_bn = resets.as_ref().map(|(keep_bn, _)| keep_bn.clone());
     let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = v_bnlmhp.dims();
     let [.., state_rank] = b_bnlmhr.dims();
-    // The chunk's two axes: `fused` is what it writes, `read` what it is read
-    // at. They coincide unless `micro_steps > 1`.
+    // The two axes of the chunk: `fused` is the length of its write axis, and
+    // `read` is the length of its read axis. They coincide unless
+    // `micro_steps > 1`.
     let chunk_tokens = chunk_tokens(chunk_len, read_stride);
     let fused = chunk_len * mimo_rank;
     let read = chunk_tokens * mimo_rank;
@@ -177,8 +180,8 @@ pub fn combined_backward<B: Backend>(
     //   qk_dot[m_out, m_in] = Σ_r C[m_out, r] · B[m_in, r]
     //   y_diag[m_out, p]    = γ · Σ_{m_in} qk_dot[m_out, m_in] · V[m_in, p]
     // ═══════════════════════════════════════════════════════════════════════
-    // The same position is the *read* position, so V and B enter at those
-    // positions and their gradients are scattered back onto the write axis.
+    // The same position is the *read* position. So V and B enter at those
+    // positions, and the backward scatters their gradients onto the write axis.
     let DiagGrads {
         d_v_bnlmhp: d_v_diag_bntmhp,
         d_c_bnlmhr: d_c_diag_bntmhr,

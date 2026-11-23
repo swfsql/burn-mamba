@@ -12,9 +12,9 @@
 //! The default body runs under a generic backend `B`, where the high-level
 //! `Tensor` (pinned to `Dispatch`) is not available. So the K1–K5 math uses
 //! the rank-tagged [`F`] primitive wrapper. K1–K4 do not depend on the form,
-//! and come from the [standard SSD scan](crate::standard_ssd). Only the
-//! forward K5 of single-SSD (strict-lower intra-chunk + γ-correction) is
-//! defined here. The backward of its LOWER and BLUE terms is in the
+//! and come from the [standard SSD scan](crate::standard_ssd). This file
+//! defines only the forward K5 of single-SSD (strict-lower intra-chunk +
+//! γ-correction). The backward of its LOWER and BLUE terms is in the
 //! [kernels of that scan](crate::standard_ssd::kernels). The backward of its
 //! DIAG term is in [`super::diag`].
 
@@ -81,9 +81,9 @@ impl Mamba3SingleSsdInput {
 
 /// Extends the backend for the memory-efficient single-ssd form serial SSD.
 ///
-/// The default implementation runs K1–K5 with primitive tensor operations:
-/// K1/K2/K3/K4 of the double-SSD forward (they do not depend on the form) and
-/// the single-ssd K5 below. The Autodiff wrapper overrides it: its backward
+/// The default implementation runs K1–K5 with primitive tensor operations. It
+/// runs K1/K2/K3/K4 of the double-SSD forward (they do not depend on the form)
+/// and the single-ssd K5 below. The Autodiff wrapper overrides it: its backward
 /// recomputes the forward intermediates instead of saving them.
 #[backend_extension(
     // Every `#[backend_extension]` site of this crate has the same list.
@@ -110,7 +110,7 @@ pub trait Mamba3SingleSsdBackendExt: Backend {
     ///   `chunk_tokens = chunk_len / read_stride` (see
     ///   [`Mamba3SingleSsdInput::read_stride`])
     /// - `siso_specialization`: allow the specialized `mimo_rank == 1`
-    ///   γ-correction (performance-only; see
+    ///   γ-correction (performance-only, see
     ///   [`Mamba3Config::siso_specialization`](crate::mamba3::mamba3::Mamba3Config::siso_specialization))
     /// - `resets`:             the chunks that start a new segment of a packed
     ///   row, and the accumulator that they start from, before their seed
@@ -263,7 +263,7 @@ burn_stack::impl_backend_ext_for_burn_backends!(Mamba3SingleSsdBackendExt);
 ///   `γ[t] · (Σₙ C[t,r_out,n] · B[t,r_in,n]) · V[t,r_in,p]`
 /// - **State-to-output (Y_off)**: `exp(cumA[t]) · C[t] · h'[n-1]`
 ///
-/// `cb_bnhTMLM` is the unscaled `C · Bᵀ` from K2; `b_bnlmhr` is the unscaled
+/// `cb_bnhTMLM` is the unscaled `C · Bᵀ` from K2. `b_bnlmhr` is the unscaled
 /// K/B tensor (γ-correction matmul). `T = chunk_tokens = chunk_len /
 /// read_stride` is the chunk's read axis.
 #[allow(clippy::too_many_arguments)]
@@ -321,8 +321,8 @@ fn k5_single_ssd_chunk_scan<B: Backend>(
     let diff_bnhTMLM = target_da_cumsum_bnhTMLM - source_da_cumsum_bnhTMLM;
 
     // Strict-upper -inf mask over (read position, write source) on the base time
-    // grid, then interleave-expand both axes so MIMO same-time blocks are
-    // zeroed.
+    // grid. Then interleave-expand both axes, so that the mask zeroes the MIMO
+    // same-time blocks.
     let inf_upper_bnhTMLM = expand_causal_mask(
         read_causal_mask::<B>(chunk_len, read_stride, 0, &device, dtype),
         batch,

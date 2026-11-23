@@ -16,8 +16,8 @@
 //! - K2 (`cb = C · Bᵀ`) uses the **unscaled** B / C. The single-ssd pathway
 //!   needs the unscaled CB to apply `scaleₜ` per column (lower triangular)
 //!   and to use the same-position block for the γ-correction.
-//! - K3 (chunk-end state from V·decay·K) does not depend on the form: with
-//!   the scaled K (`K_scaled = scaleₜ · B`) it gives the accumulator at each
+//! - K3 (chunk-end state from V·decay·K) does not depend on the form. With
+//!   the scaled K (`K_scaled = scaleₜ · B`), it gives the accumulator at each
 //!   chunk end, with no other change.
 //! - K4 (sequential state passing across chunks) uses a `[H, P, R]` per-chunk
 //!   state and a per-chunk decay total. Both do not depend on the form.
@@ -63,7 +63,7 @@ impl Mamba3SingleSsdInput {
 
         assert!(
             input.init_state_hpr.is_none(),
-            "init_state_hpr is not yet supported in single_ssd_serial; use single_ssd_minimal instead"
+            "single_ssd_serial does not support init_state_hpr yet. Use single_ssd_minimal instead."
         );
         assert!(nchunks > 0, "sequence length must be at least 1");
         assert_eq!(
@@ -135,7 +135,7 @@ impl Mamba3SingleSsdInput {
 /// SingleSsd chunk scan.
 ///
 /// Computes the per-chunk output from three contributions, at the chunk's
-/// **read** positions (`t1 = i·stride + stride−1`; see
+/// **read** positions (`t1 = i·stride + stride−1`, see
 /// [the read axis](crate::mamba3::product)) over all of its
 /// write sources `t2`:
 /// - **Strict lower triangular intra-chunk** (`t1 > t2`):
@@ -145,20 +145,21 @@ impl Mamba3SingleSsdInput {
 /// - **State-to-output (Y_off)** — same formula as the double-ssd K5:
 ///   `exp(cumA[t]) · C[t] · h'[n-1]`
 ///
-/// `cb_bnhTMLM` is the unscaled `C · Bᵀ` matrix from K2; `b_bnlmhr` is the
-/// unscaled K/B tensor (used for the γ-correction matmul). The strict-lower
+/// `cb_bnhTMLM` is the unscaled `C · Bᵀ` matrix from K2. `b_bnlmhr` is the
+/// unscaled K/B tensor (the γ-correction matmul uses it). The strict-lower
 /// MIMO mask excludes the same-position `R × R` block, leaving only `t1 > t2`
 /// contributions in the masked CB.
 ///
 /// # Shapes
-/// `T = chunk_tokens = chunk_len / read_stride`; at `read_stride = 1`, `T = L`
+/// `T = chunk_tokens = chunk_len / read_stride`. At `read_stride = 1`, `T = L`,
 /// and every shape here is the stock one.
 /// - `da_cumsum_bhnl`: `[B, H, N, L]` (base time grid, not fused)
 /// - `v_bnlmhp`: `[B, N, L, M, H, P]`
 /// - `b_bnlmhr`: `[B, N, L, M, H, R]`
 /// - `c_bntmhr`: `[B, N, T, M, H, R]`
 /// - `cb_bnhTMLM`: `[B, N, H, T·M, L·M]` (output of K2)
-/// - `gamma_bnth`: `[B, N, T, H]`; `scale_bnlh`: `[B, N, L, H]`
+/// - `gamma_bnth`: `[B, N, T, H]`
+/// - `scale_bnlh`: `[B, N, L, H]`
 /// - `chunk_input_state_bnhpr`: `[B, N, H, P, R]` (h' at chunk start)
 ///
 /// # Returns
@@ -191,7 +192,7 @@ pub fn k5_single_ssd_chunk_scan(
         .reshape([batch, nchunks, read, nheads, state_rank]);
 
     // Per-fused-position cumulative decay (interleave-expand the base grid), on the
-    // source axis and — sliced to the readout's own positions — on the target.
+    // source axis and (sliced to the readout's own positions) on the target.
     let da_cumsum_bhnLM = da_cumsum_bhnl
         .clone()
         .unsqueeze_dim::<5>(4)
@@ -231,8 +232,8 @@ pub fn k5_single_ssd_chunk_scan(
     let diff_bnhTMLM = target_da_cumsum_bnhTMLM - source_da_cumsum_bnhTMLM;
 
     // Strict-upper -inf mask over (read position, write source) on the base time
-    // grid, then interleave-expand both axes so that MIMO same-time blocks are
-    // zeroed out.
+    // grid. Then interleave-expand both axes, so that the mask zeroes the MIMO
+    // same-time blocks.
     let inf_upper_tl = helpers::read_causal_mask(chunk_len, read_stride, 0, &device);
     let inf_upper_bnhTMLM = inf_upper_tl
         .unsqueeze_dims::<5>(&[0, 1, 2])

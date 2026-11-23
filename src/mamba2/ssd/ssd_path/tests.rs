@@ -112,7 +112,8 @@ impl Inputs {
             c_bnlhr: self.c.val(),
             d_h: self.d.val(),
             initial_state_bhpr: self.initial_state.val(),
-            // Serial paths assert this is None — see ssd_serial / ssd_serial_recalculated.
+            // The serial paths assert that this is None. See ssd_serial /
+            // ssd_serial_recalculated.
             init_state_hpr: None,
             resets: None,
         }
@@ -284,8 +285,8 @@ fn run_minimal_matches_serial(
 
     // ── Gradient agreement ───────────────────────────────────────────
     // Looser tolerance: every path computes the same mathematical
-    // gradients, but the chunkwise reformulations accumulate the
-    // summations in different orders, so small drift is expected.
+    // gradients. But the chunkwise reformulations accumulate the
+    // summations in different orders, so the test expects a small drift.
     burn_stack::check_grads_match_two_paths!(
         baseline: r_min,
         alt1: ("Serial", r_ser),
@@ -327,8 +328,8 @@ fn paths_agree_more_heads_zero_init() {
 
 #[test]
 fn paths_agree_single_chunk() {
-    // nchunks=1 — no inter-chunk scan; checks the intra-chunk + state-passing
-    // boundary case where K4 runs a single iteration.
+    // nchunks=1: no inter-chunk scan. This checks the intra-chunk +
+    // state-passing boundary case where K4 runs a single iteration.
     run_minimal_matches_serial(2, 1, 4, 2, 8, 8, true);
 }
 

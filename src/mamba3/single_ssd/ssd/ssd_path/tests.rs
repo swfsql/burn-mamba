@@ -120,7 +120,7 @@ impl Inputs {
             gamma_bnth: self.gamma.val(),
             scale_bnlh: self.scale.val(),
             initial_state_bhpr: self.initial_state.val(),
-            // Serial asserts this is None — see single_ssd_serial.
+            // Serial asserts that this is None. See single_ssd_serial.
             init_state_hpr: None,
             read_stride: self.read_stride,
             siso_specialization,
@@ -145,9 +145,10 @@ struct PathRun {
 // ---------------------------------------------------------------------------
 // The read axis, spelled out position by position
 //
-// `helpers::read_positions` / `scatter_read_positions` are what the read-axis tests below
-// check, so they are re-derived here one `narrow` at a time rather than reused —
-// a test that calls the implementation it is verifying proves nothing about it.
+// The read-axis tests below check `helpers::read_positions` /
+// `scatter_read_positions`. So this section derives the read positions again,
+// one `narrow` at a time, and does not reuse these functions. A test that
+// calls the implementation that it checks proves nothing about it.
 // ---------------------------------------------------------------------------
 
 /// The write positions a read position sits at: `i·stride + (stride − 1)`.
@@ -313,8 +314,8 @@ fn run_minimal_matches_serial(
     );
     let inputs_rec = Inputs::from_inner(v, b, c, da, gamma, scale, init, read_stride);
 
-    // At `mimo_rank == 1` both γ-correction branches are reachable
-    // (`siso_specialization`); above it only the general one is. Running the
+    // At `mimo_rank == 1`, both γ-correction branches are reachable
+    // (`siso_specialization`). Above it, only the general one is. Running the
     // whole agreement matrix under each also pins SISO ≡ MIMO end-to-end.
     let specializations: &[bool] = if mimo_rank == 1 {
         &[true, false]
@@ -345,8 +346,8 @@ fn run_minimal_matches_serial(
         );
 
         // Same algorithm, different schedule / backward: stricter on values
-        // (1e-4), moderate on gradients (1e-3) — same tolerances as the
-        // original-form SSD-path agreement tests.
+        // (1e-4), moderate on gradients (1e-3). These are the same tolerances
+        // as the original-form SSD-path agreement tests.
         let label = format!("siso_specialization={siso}");
         assert_path_runs_agree(
             &format!("{label}: Minimal vs Serial"),
@@ -395,10 +396,10 @@ fn single_ssd_paths_agree_single_chunk_zero_init() {
     run_minimal_matches_serial(2, 1, 4, 1, 1, 2, 8, 8, false);
 }
 
-/// The chunk's **read axis**: `micro_steps > 1` narrows `C`/`γ`/`y` to one
-/// position per token while the writes stay on the write axis. All three SSD paths —
-/// and, for `SerialRecalculated`, its hand-written backward's scatter back onto
-/// the write axis — have to agree there too.
+/// The **read axis** of the chunk: `micro_steps > 1` narrows `C`/`γ`/`y` to one
+/// position per token, while the writes stay on the write axis. All three SSD
+/// paths have to agree there too. For `SerialRecalculated`, this includes the
+/// scatter of its hand-written backward onto the write axis.
 #[test]
 fn single_ssd_paths_agree_with_a_read_stride() {
     run_minimal_matches_serial(2, 3, 4, 2, 1, 2, 8, 8, true);
@@ -443,8 +444,9 @@ fn read_axis_matches_the_undecimated_kernel() {
             true,
             &device,
         );
-        // The same `C`/`γ` the full kernel would have been handed. What sits at
-        // the positions it never reads is arbitrary — zero says so loudest.
+        // The same `C`/`γ` that a caller would give the full kernel. The values
+        // at the positions that it never reads are arbitrary. Zero says so
+        // loudest.
         let c_full = scatter_reads(c_reads.clone(), 2, stride);
         let gamma_full = scatter_reads(gamma_reads.clone(), 2, stride);
 

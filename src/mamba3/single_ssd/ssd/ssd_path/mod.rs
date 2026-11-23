@@ -50,8 +50,8 @@ pub struct Mamba3SingleSsdInput {
     /// Q/C tensor: the same processing as `b_bnlmhr`, but on the **read** axis
     /// of the chunk: one position per token, not per write position.
     ///
-    /// Every micro-step of a token writes to the accumulator. The token is read
-    /// once, at its last micro-step
+    /// Every micro-step of a token writes to the accumulator. The readout reads
+    /// the accumulator once for each token, at its last micro-step
     /// ([`micro_steps`](crate::mamba3::mamba3::Mamba3Config::micro_steps) is
     /// [`Self::read_stride`]). So `C` is necessary only there, and the `y` that
     /// this bundle returns is already at token resolution. See
@@ -113,9 +113,9 @@ pub struct Mamba3SingleSsdInput {
     /// `[chunk · chunk_tokens, (chunk+1) · chunk_tokens)`.
     pub read_stride: usize,
 
-    /// Whether the specialized `mimo_rank == 1` γ-correction can be used
+    /// Whether the kernel can use the specialized `mimo_rank == 1` γ-correction
     /// ([`Mamba3Config::siso_specialization`](crate::mamba3::mamba3::Mamba3Config::siso_specialization),
-    /// the chunkwise flag; the per-token sites have their own).
+    /// the chunkwise flag). The per-token sites have their own flag.
     ///
     /// Performance-only: both branches of
     /// [`y_diag_correction`](crate::mamba3::single_ssd::ssd::diag::y_diag_correction)
@@ -134,9 +134,9 @@ pub struct Mamba3SingleSsdInput {
     /// seed of the call.
     pub resets: Option<crate::packing::SsdResets>,
 
-    /// The boundary β seed of each chunk, with resets: the installments that
-    /// the first `lag` positions of a chunk pay to the tap FIFO of the
-    /// origin, in case the chunk has a reset. `None` without resets.
+    /// The boundary β seed of each chunk, with resets. In case a chunk has a
+    /// reset, its seed holds the installments that its first `lag` positions
+    /// pay to the tap FIFO of the origin. `None` without resets.
     ///
     /// # Shape
     /// - `[batch, nchunks, nheads, per_head_dim, state_rank]`

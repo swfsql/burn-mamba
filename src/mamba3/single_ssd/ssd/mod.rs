@@ -1,9 +1,10 @@
 //! Standard MIMO-first SSD kernels specialised to the single-pass form.
 //!
-//! Three exact reformulations (Minimal / Serial / SerialRecalculated) that
-//! agree on values and gradients; selected via [`SsdPath`] and dispatched
-//! by [`Mamba3SingleSsdInput::run`](crate::mamba3::single_ssd::ssd::ssd_path::Mamba3SingleSsdInput::run).  These take the raw `v` plus `gamma`/`scale`
-//! so the kernel applies the trapezoid weights and boundary seed internally.
+//! Three exact reformulations (Minimal / Serial / SerialRecalculated) agree on
+//! values and gradients. [`SsdPath`] selects one, and
+//! [`Mamba3SingleSsdInput::run`](crate::mamba3::single_ssd::ssd::ssd_path::Mamba3SingleSsdInput::run)
+//! dispatches it. These kernels take the raw `v` and `gamma`/`scale`, so the
+//! kernel applies the trapezoid weights and the boundary seed internally.
 //!
 //! [`SsdPath`]: crate::ssd_path::SsdPath
 

@@ -1,6 +1,6 @@
-//! Parity for the primitive γ-correction: the SISO fast path must reproduce the
-//! MIMO-general path (forward *and* analytic backward), and the analytic
-//! backward must reproduce autodiff through the high-level forward.
+//! Parity for the primitive γ-correction. The SISO fast path must reproduce the
+//! MIMO-general path (forward *and* analytic backward). The analytic backward
+//! must reproduce autodiff through the high-level forward.
 
 use super::*;
 use crate::mamba3::single_ssd::ssd::diag;
@@ -22,7 +22,8 @@ fn to_tensor<const D: usize>(f: P<D>) -> Tensor<D> {
     Tensor::from_dispatch(f.inner())
 }
 
-/// `(v, b, c, gamma)` at the given shape; `gamma` non-negative like `Δ·σ(λ)`.
+/// `(v, b, c, gamma)` at the given shape. `gamma` is non-negative, like
+/// `Δ·σ(λ)`.
 #[allow(clippy::too_many_arguments)]
 fn random_input(
     batch: usize,
@@ -163,10 +164,10 @@ fn siso_matches_mimo_backward() {
     }
 }
 
-/// Each branch is the f32 result to rounding, in the dtype of the test: the
-/// forward and the four gradients of both branches are within 4 ulps of that
-/// dtype of the MIMO branch on f32 casts of the same inputs. An ulp is the
-/// spacing of the dtype at the largest value of the f32 result.
+/// Each branch is the f32 result to rounding, in the dtype of the test. The
+/// f32 result is the MIMO branch on f32 casts of the same inputs. The forward
+/// and the four gradients of both branches are within 4 ulps of it. An ulp is
+/// the spacing of the dtype at the largest value of the f32 result.
 ///
 /// This is the check of the two tests above that holds in f16. They compare
 /// the branches with each other at an absolute `1e-5`, which in f16 is less
@@ -265,16 +266,16 @@ fn each_branch_is_the_f32_result_to_rounding() {
     }
 }
 
-/// The analytic backward reproduces autodiff through the high-level forward —
+/// The analytic backward reproduces autodiff through the high-level forward,
 /// at `mimo_rank == 1` (the fast path) and above it (the general path).
 #[test]
 fn analytic_backward_matches_autodiff() {
     let (batch, nchunks, chunk_len, nheads, per_head_dim, state_rank) = SHAPE;
 
     for mimo_rank in [1, 3] {
-        // Inputs live on the plain device; `Tensor::from_inner` lifts them onto
-        // the autodiff graph for the reference run, so `grad()` comes back
-        // plain and is directly comparable with the analytic result.
+        // Inputs live on the plain device. `Tensor::from_inner` lifts them onto
+        // the autodiff graph for the reference run. So `grad()` returns a plain
+        // tensor, which is directly comparable with the analytic result.
         let device = test_device();
         let (v, b, c, gamma) = random_input(
             batch,
@@ -293,7 +294,7 @@ fn analytic_backward_matches_autodiff() {
             &device,
         );
 
-        // At `mimo_rank == 1` both branches are reachable; above it only the
+        // At `mimo_rank == 1`, both branches are reachable. Above it, only the
         // general one is. Forward and analytic backward must use the same one.
         let specializations: &[bool] = if mimo_rank == 1 {
             &[true, false]

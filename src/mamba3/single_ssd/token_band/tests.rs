@@ -1,5 +1,6 @@
 //! The correction band against a direct, index-by-index sum of its own
-//! definition — no block, no kernel, just the formula in the module header.
+//! definition. The tests use no block and no kernel, only the formula in the
+//! module header.
 
 use super::*;
 use burn::tensor::Distribution;
@@ -25,7 +26,7 @@ fn reference(
     for token in 0..tokens {
         let read = token * u + (u - 1);
         let mut acc = Tensor::zeros([batch, mimo_rank, nheads, per_head_dim], &device);
-        // C at the read — one position per token, the read axis's own resolution.
+        // C at the read: one position per token, the read axis's own resolution.
         let c_bmhr: Tensor<4> = c_btmhr.clone().narrow(1, token, 1).squeeze_dim(1);
         for j in 0..u - 1 {
             let tap = token * u + j;

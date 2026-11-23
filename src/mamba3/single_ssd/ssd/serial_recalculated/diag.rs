@@ -1,12 +1,16 @@
 //! # Diagonal γ-correction on primitives — forward and analytic backward
 //!
-//! Primitive (`F`) port of [`super::super::diag`](crate::mamba3::single_ssd::ssd::diag), plus the analytic backward
-//! the recompute node needs.  The forward is used by
-//! `super::serial_recalculated`'s K5; the backward by
-//! [`super::combined_backward`](crate::mamba3::single_ssd::ssd::serial_recalculated::combined_backward).  Both carry the same SISO fast path: at
-//! `mimo_rank == 1` the `m × m` Gram matrix is a scalar, so every matmul over
-//! the `mimo_rank` axis degenerates into a `1×K×1` / `1×1×N` GEMM and is
-//! replaced by a reduction plus broadcast multiplies.
+//! Primitive (`F`) port of
+//! [`super::super::diag`](crate::mamba3::single_ssd::ssd::diag), plus the
+//! analytic backward that the recompute node needs. The K5 of
+//! `super::serial_recalculated` uses the forward.
+//! [`super::combined_backward`](crate::mamba3::single_ssd::ssd::serial_recalculated::combined_backward)
+//! uses the backward.
+//!
+//! Both carry the same SISO fast path. At `mimo_rank == 1`, the `m × m` Gram
+//! matrix is a scalar. So every matmul over the `mimo_rank` axis degenerates
+//! into a `1×K×1` / `1×1×N` GEMM. A reduction plus broadcast multiplies
+//! replaces each such GEMM.
 //!
 //! Forward (per `(b, n, l, h)`):
 //!
@@ -20,9 +24,9 @@
 use burn_stack::utils::fprim::F;
 use burn::backend::Backend;
 
-/// Gradients produced by [`y_diag_correction_backward`] — the `y_diag` term's
-/// contribution to `d_v`, `d_c`, `d_b` and the whole of `d_gamma` (no other
-/// term consumes `γ`).
+/// Gradients produced by [`y_diag_correction_backward`]: the contribution of
+/// the `y_diag` term to `d_v`, `d_c` and `d_b`, and the whole of `d_gamma` (no
+/// other term consumes `γ`).
 pub struct DiagGrads<B: Backend> {
     /// `y_diag`'s contribution to the gradient of `v`.
     pub d_v_bnlmhp: F<B, 6>,
@@ -36,7 +40,7 @@ pub struct DiagGrads<B: Backend> {
 
 /// The γ-weighted diagonal correction `y_diag`, on primitives.
 ///
-/// Dispatches on `mimo_rank` and `siso_specialization`; see
+/// Dispatches on `mimo_rank` and `siso_specialization`. See
 /// [`super::super::diag::y_diag_correction`].
 pub fn y_diag_correction<B: Backend>(
     v_bnlmhp: F<B, 6>,

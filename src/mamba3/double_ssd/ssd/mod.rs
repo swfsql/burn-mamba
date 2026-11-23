@@ -1,8 +1,9 @@
 //! Standard MIMO-first SSD kernels reused by the double-SSD γ and β passes.
 //!
-//! Three exact reformulations (Minimal / Serial / SerialRecalculated) that
-//! agree on values and gradients; selected via [`SsdPath`] and dispatched
-//! by [`Mamba3DoubleSsdInput::run`](crate::mamba3::double_ssd::ssd::ssd_path::Mamba3DoubleSsdInput::run).
+//! Three exact reformulations (Minimal / Serial / SerialRecalculated) agree on
+//! values and gradients. [`SsdPath`] selects one, and
+//! [`Mamba3DoubleSsdInput::run`](crate::mamba3::double_ssd::ssd::ssd_path::Mamba3DoubleSsdInput::run)
+//! dispatches it.
 //!
 //! [`SsdPath`]: crate::ssd_path::SsdPath
 

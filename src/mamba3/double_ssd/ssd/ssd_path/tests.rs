@@ -5,9 +5,9 @@ use burn_stack::utils::test_helpers::{dtype_tol, test_device};
 
 type Device = burn::prelude::Device;
 
-/// Build a randomised set of tensors on the inner backend.  `Param`s
-/// wrapping these are built per-path so each path gets a fresh autodiff
-/// graph.
+/// Build a randomised set of tensors on the inner backend. The test builds the
+/// `Param`s that wrap these once for each path, so each path gets a fresh
+/// autodiff graph.
 ///
 /// `da` is drawn from a negative-mean distribution so that the implied
 /// per-token decay `exp(da)` stays in `(0, 1]`, matching how the upstream
@@ -69,8 +69,8 @@ fn random_input(
 }
 
 /// Inputs wrapped as `Param`s so each tensor becomes an autodiff leaf
-/// with `require_grad`.  A fresh `Inputs` is built per path so each path
-/// runs with its own independent autodiff graph.
+/// with `require_grad`. The test builds a fresh `Inputs` for each path, so each
+/// path runs with its own independent autodiff graph.
 struct Inputs {
     v: Param<Tensor<6>>,
     da: Param<Tensor<4>>,
@@ -106,7 +106,8 @@ impl Inputs {
             b_bnlmhr: self.b.val(),
             c_bntmhr: self.c.val(),
             initial_state_bhpr: self.initial_state.val(),
-            // Serial paths assert this is None — see ssd_serial / ssd_serial_recalculated.
+            // The serial paths assert that this is None. See ssd_serial /
+            // ssd_serial_recalculated.
             init_state_hpr: None,
             read_stride: self.read_stride,
             resets: None,
@@ -128,9 +129,9 @@ struct PathRun {
 // ---------------------------------------------------------------------------
 // The read axis, spelled out position by position
 //
-// Re-derived here one `narrow` at a time rather than reusing
-// `helpers::read_positions` / `scatter_read_positions`: a test that calls the
-// implementation it is verifying proves nothing about it.
+// This section derives the read positions again, one `narrow` at a time, and
+// does not reuse `helpers::read_positions` / `scatter_read_positions`. A test
+// that calls the implementation that it checks proves nothing about it.
 // ---------------------------------------------------------------------------
 
 /// The write positions a read position sits at: `i·stride + (stride − 1)`.
@@ -302,8 +303,8 @@ fn run_minimal_matches_serial(
 
     // ── Gradient agreement ───────────────────────────────────────────
     // Looser tolerance: every path computes the same mathematical
-    // gradients, but the chunkwise reformulations accumulate sums in
-    // different orders, so small drift is expected.
+    // gradients. But the chunkwise reformulations accumulate sums in
+    // different orders, so the test expects a small drift.
     burn_stack::check_grads_match_two_paths!(
         baseline: r_min,
         alt1: ("Serial", r_ser),
@@ -344,8 +345,8 @@ fn paths_agree_mimo_zero_init() {
 
 #[test]
 fn paths_agree_single_chunk() {
-    // nchunks=1 — no inter-chunk scan; checks the intra-chunk + state-passing
-    // boundary case where K4 runs a single iteration.
+    // nchunks=1: no inter-chunk scan. This checks the intra-chunk +
+    // state-passing boundary case where K4 runs a single iteration.
     run_minimal_matches_serial(2, 1, 4, 1, 1, 2, 8, 8, true);
 }
 
@@ -354,10 +355,10 @@ fn paths_agree_single_chunk_zero_init() {
     run_minimal_matches_serial(2, 1, 4, 1, 1, 2, 8, 8, false);
 }
 
-/// The chunk's **read axis**: `micro_steps > 1` narrows `C` and `y` to one
-/// position per token while the writes stay on the write axis. All three SSD paths —
-/// and, for `SerialRecalculated`, its hand-written backward's scatter back onto
-/// the write axis — have to agree there too.
+/// The **read axis** of the chunk: `micro_steps > 1` narrows `C` and `y` to one
+/// position per token, while the writes stay on the write axis. All three SSD
+/// paths have to agree there too. For `SerialRecalculated`, this includes the
+/// scatter of its hand-written backward onto the write axis.
 #[test]
 fn paths_agree_with_a_read_stride() {
     run_minimal_matches_serial(2, 3, 4, 2, 1, 2, 8, 8, true);
@@ -402,8 +403,9 @@ fn read_axis_matches_the_undecimated_kernel() {
             true,
             &device,
         );
-        // The same `C` the full kernel would have been handed. What sits at the
-        // positions it never reads is arbitrary — zero says so loudest.
+        // The same `C` that a caller would give the full kernel. The values at
+        // the positions that it never reads are arbitrary. Zero says so
+        // loudest.
         let c_full = scatter_reads(c_reads.clone(), 2, stride);
 
         let y_head_reads = Tensor::<6>::random(

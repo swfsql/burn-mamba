@@ -20,8 +20,8 @@
 //! `1` for the default tap pattern, `u` for
 //! [`TapPattern::Vertical`](crate::mamba3::tap_pattern::TapPattern::Vertical). A
 //! two-tap pattern adds the term in parentheses: a second shift of the same
-//! shape, because the collapse of §9 leaves one scalar per sample for any
-//! number of taps. That is all it costs here: one pass either way.
+//! shape. The reason is the collapse of §9: it leaves one scalar per sample
+//! for any number of taps. That is all it costs here: one pass either way.
 //!
 //! References:
 //! - [`mamba3_siso_fwd.py`](https://github.com/state-spaces/mamba/mamba_ssm/ops/triton/mamba3/mamba3_siso_fwd.py),
@@ -75,16 +75,17 @@ impl Mamba3 {
     /// this *is* the double-SSD form (`h' ≡ h` at every position, not only at
     /// boundaries), and the call delegates to
     /// [`Self::forward_double_ssd_packed`]. It does not run a strict-mask
-    /// kernel plus a correction that puts back what the mask removed.
+    /// kernel plus a correction that restores what the mask removed.
     ///
     /// `pad_bt` marks a right-padded batch of tokens, as in [`Self::forward`].
-    /// The last tap installment of a real position, which a padded position
-    /// would pay, then stays in the tap FIFO, exactly as at a call boundary.
-    /// So the accumulator `h'` equals the state from the end of each row on.
+    /// A padded position does not pay the last tap installment of a real
+    /// position. That installment stays in the tap FIFO, exactly as at a call
+    /// boundary. So the accumulator `h'` equals the state from the end of
+    /// each row on.
     ///
     /// `reset_bt` marks the first token of each segment of a packed batch,
     /// which starts from `origin`, as in [`Self::forward_packed`]. A reset is a
-    /// call boundary inside the row: the positions before it pay no `ν` forward
+    /// call boundary inside the row. The positions before it pay no `ν` forward
     /// (the taps of the segment start read the slots of the origin). The start
     /// state of the chunk is the `h'` of the origin plus its own boundary seed.
     /// A call from the origin starts the same way.
@@ -153,7 +154,7 @@ impl Mamba3 {
         // ── Compute scaleₜ = γₜ + νₜ₊ₗₐ₉ (+ νⁱⁿᵗₜ₊₁) ─────────────────────────
         //
         // Each shifted term is zero for the last positions that its own lag
-        // reaches past: the taps that pay them belong to the *next* call, from
+        // reaches past. The taps that pay them belong to the *next* call, from
         // the tap FIFO. This also makes the accumulator `h'` equal to the
         // state at a cache boundary, so both pathways share one cache type.
         //
@@ -161,17 +162,20 @@ impl Mamba3 {
         // [`TapPattern::HorizontalCarryOver`], lag `u` is [`TapPattern::Vertical`].
         // This is the `Δ̃` collapse (`info/mamba-3/trapezoid-as-integration.md`
         // §5). The collapse theorem of §9 is why it holds unchanged for the
-        // wider lag and for a second tap: still one scalar per sample, so one
-        // pass. Only the γ-correction widens from the diagonal to a
-        // `lag`-wide band (see [`crate::mamba3::single_ssd::token_band`]).
+        // wider lag and for a second tap. There is still one scalar per sample,
+        // so there is still one pass. Only the γ-correction widens from the
+        // diagonal to a `lag`-wide band (see
+        // [`crate::mamba3::single_ssd::token_band`]).
         let lag = self.tap_lag();
         // νₜ₊ₗ, the mass that a later position pays to this one. Zero past the
         // end of the call, where the tap belongs to the next call. Zero also
-        // across a reset of a packed row: the first positions of a segment pay
-        // the cache slots, through the seed of their chunk (below). (No output
-        // would see that mass: the reset drops the state it enters, and the
-        // band correction takes it out of the reads of its token. The zero
-        // keeps `h'` at a reset equal to that at a call boundary.)
+        // across a reset of a packed row. The first positions of a segment pay
+        // the cache slots, through the seed of their chunk (below).
+        //
+        // No output would see that mass. The reset drops the state that it
+        // enters, and the band correction removes it from the reads of its
+        // token. The zero keeps `h'` at a reset equal to that at a call
+        // boundary.
         let pay_forward = |nu_bsh: Tensor<3>, l: usize| {
             let nu_bsh = match &packed {
                 Some(p) => crate::padding::fill_padded(nu_bsh, &p.segments.heads(l), 0.0),

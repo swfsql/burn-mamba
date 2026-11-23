@@ -94,7 +94,8 @@ pub fn combined_backward<B: Backend>(
     let keep_bn = resets.as_ref().map(|(keep_bn, _)| keep_bn.clone());
     let [batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = v_bnlmhp.dims();
     let [.., state_rank] = b_bnlmhr.dims();
-    // The chunk's two axes: `fused` is what it writes, `read` what it is read at.
+    // The two axes of the chunk: `fused` is the length of its write axis, and
+    // `read` is the length of its read axis.
     let chunk_tokens = chunk_tokens(chunk_len, read_stride);
     let fused = chunk_len * mimo_rank;
     let read = chunk_tokens * mimo_rank;

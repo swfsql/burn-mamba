@@ -114,9 +114,9 @@ impl Mamba3 {
         // ── The β term's shifted, β-scaled inputs ─────────────────────────────
         //
         // "Shift-Before-Chunking": prepend the cached xₜ₋₁ / Bₜ₋₁ at the
-        // sequence level (before SSD chunking), so the β term at t=0 sees the
-        // prior token of a continued cache. For a fresh (zero) cache this is
-        // the same as zero-padding.
+        // sequence level (before SSD chunking). This makes the β term at t=0
+        // see the prior token of a continued cache. For a fresh (zero) cache
+        // this is the same as zero-padding.
         //
         // The shift is [`TapPattern::tap_lag`] *write* positions: 1 for the
         // default [`TapPattern::HorizontalCarryOver`], `u` for
@@ -186,8 +186,8 @@ impl Mamba3 {
         let sequence_padded = sequence.next_multiple_of(chunk_len);
         let pad = sequence_padded - sequence;
 
-        // Each zero block is built at most once, and the streams that need it
-        // share it (a `Tensor` clone is a handle, not a copy).
+        // The code builds each zero block at most once, and the streams that
+        // need it share it (a `Tensor` clone is a handle, not a copy).
         let pads = (pad > 0).then(|| {
             (
                 Tensor::<4>::zeros([batch, pad, nheads, per_head_dim], &device),
@@ -388,8 +388,8 @@ mod step {
         /// calls this function.
         ///
         /// At `micro_steps = u > 1` the token is `u` of those micro-steps
-        /// ([`crate::mamba3::product`]). They are evaluated **together**, not one
-        /// at a time (see the body).
+        /// ([`crate::mamba3::product`]). This function evaluates them
+        /// **together**, not one at a time (see the body).
         ///
         /// # Shapes
         /// - `input_bd` : `[batch, d_model]`
@@ -444,20 +444,20 @@ mod step {
             //
             //     h = (∏ⱼ αⱼ)·h₋₁ + Σⱼ wⱼ · writeⱼ ,    wⱼ = ∏_{r>j} αᵣ
             //
-            // Its transport `wⱼ` (the decay of a write to the end of the block)
-            // is the same quantity that [`crate::mamba3::helpers::tail_decay`]
-            // computes for the tap FIFO, over the whole block instead of its
-            // last `lag`.
+            // Its transport `wⱼ` is the decay of a write to the end of the
+            // block. [`crate::mamba3::helpers::tail_decay`] computes the same
+            // quantity for the tap FIFO, but only over the last `lag` of the
+            // block. `wⱼ` covers the whole block.
             //
             // Every `writeⱼ` is an outer product into one shared state. So with
             // the transport, and with `(u, mimo_rank)` fused into one
             // contracted axis, each **side** of the recurrence is one
-            // [`helpers::mimo_outer_sum`] (the same collapse as the single-SSD
-            // boundary seed over its slots). Thus the op count does not depend
-            // on `u`. At `u = 1` the fused axis is `mimo_rank`, and this is the
-            // unchanged op graph of stock Mamba-3.
+            // [`helpers::mimo_outer_sum`]. This is the same collapse as the
+            // single-SSD boundary seed over its slots. Thus the op count does
+            // not depend on `u`. At `u = 1` the fused axis is `mimo_rank`, and
+            // this is the unchanged op graph of stock Mamba-3.
             //
-            // The trapezoid is unchanged by all of this. A tap at
+            // All of this leaves the trapezoid unchanged. A tap at
             // [`TapPattern::tap_lag`] reads write position `p − lag`: the
             // [`helpers::shift_stream`] of `forward` over this block, with the
             // FIFO of the cache as the prefix. `β = ν·α` times
@@ -503,12 +503,12 @@ mod step {
             };
 
             // A tapped side at its own lag: the `beta_side` of `forward`, over
-            // this block. The prefix is the newest `lag` slots of the FIFO: all
-            // of it for the tap at `tap_lag`, only the newest slot for the
-            // lag-1 tap of a two-tap pattern (by the FIFO convention, that slot
-            // has the empty decay product). Under [`TapPattern::None`] there is
-            // no tapped side: no shifted stream, no second outer product, one
-            // term less in the state update.
+            // this block. The prefix is the newest `lag` slots of the FIFO. For
+            // the tap at `tap_lag`, it is the whole FIFO. For the lag-1 tap of
+            // a two-tap pattern, it is only the newest slot (by the FIFO
+            // convention, that slot has the empty decay product). Under
+            // [`TapPattern::None`] there is no tapped side: no shifted stream,
+            // no second outer product, one term less in the state update.
             let tap_write = |nu_buh: Tensor<3>, lag: usize| {
                 let TapFifo { b_bumhr: b_head_bumhr, x_buhp: x_head_buhp } = cache
                     .frame

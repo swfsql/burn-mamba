@@ -11,8 +11,9 @@
 //!                                        · V[t, m_in, h, p]
 //! ```
 //!
-//! It is computed as a new small same-position product. An extraction from the
-//! block diagonal of the fused `L·M` CB matrix would need a complex reshape.
+//! This module computes it as a new small same-position product. An extraction
+//! from the block diagonal of the fused `L·M` CB matrix would need a complex
+//! reshape.
 //!
 //! ## SISO fast path
 //!

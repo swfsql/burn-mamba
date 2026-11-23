@@ -29,19 +29,19 @@ struct RunGrads {
     d_out_proj_w: Tensor<2>,
 }
 
-/// Fixed (non-tracked) random "downstream heads" used to form a scalar loss
-/// from the output **and** the final cache, so the backward pass exercises
-/// both the output and the state path.
+/// Fixed (non-tracked) random "downstream heads". They form a scalar loss from
+/// the output **and** the final cache. So the backward pass exercises both the
+/// output and the state path.
 struct Heads {
     out: Tensor<3>,
     conv: Tensor<3>,
     ssm: Tensor<3>,
 }
 
-/// Run a closure that produces an output tensor from a model and an input
-/// (wrapped as a `Param` so it has its own autodiff leaf), then derive a
-/// scalar loss with a fixed (non-tracked) random "head" and return the
-/// gradients of the input and a representative set of model parameters.
+/// Run a closure that produces an output tensor from a model and an input.
+/// The input is a `Param`, so it has its own autodiff leaf. Then derive a
+/// scalar loss with a fixed (non-tracked) random "head". Return the gradients
+/// of the input and of a representative set of model parameters.
 fn run_with_grads(
     model: &Mamba1,
     input: &Param<Tensor<3>>,
@@ -132,9 +132,9 @@ fn assert_outputs_match(label: &str, a: &RunGrads, b: &RunGrads, tol: f32) {
     );
 }
 
-/// Assert that every entry in `a` and `b` agrees to within `grad_tol`,
-/// printing every comparison so a failure dump shows the full picture
-/// (instead of stopping at the first mismatch).
+/// Assert that every entry in `a` and `b` agrees to within `grad_tol`. It
+/// prints every comparison, so a failure dump shows the full picture (instead
+/// of stopping at the first mismatch).
 fn check_grads_match(label: &str, a: &RunGrads, b: &RunGrads, grad_tol: f32) {
     let grad_tol = dtype_tol(grad_tol);
     let mut failures: Vec<String> = Vec::new();
@@ -170,8 +170,8 @@ fn check_grads_match(label: &str, a: &RunGrads, b: &RunGrads, grad_tol: f32) {
 }
 
 /// Helper that builds a fresh `Param<Tensor>` from a stable inner tensor.
-/// A new Param is needed per run so that the autodiff leaf has a fresh
-/// node, isolating each backward pass to its own forward graph.
+/// Each run needs a new Param, so that the autodiff leaf has a fresh node.
+/// This isolates each backward pass to its own forward graph.
 fn param_input(input: &Tensor<3>) -> Param<Tensor<3>> {
     Param::from_tensor(Tensor::from_inner(input.clone()))
 }
@@ -211,9 +211,10 @@ fn build_init_cache(cfg: &Mamba1Config, batch: usize, random: bool) -> Mamba1Cac
 ///
 /// With `random_init = true` the shared initial cache is random rather than
 /// zero. Parity from an arbitrary initial state subsumes the split-prefill
-/// (split-vs-full) guarantee: if `forward` from any state equals the
-/// recurrent unrolling from that same state — outputs *and* final cache —
-/// then feeding a `forward`-produced cache back in continues correctly.
+/// (split-vs-full) guarantee. Suppose that `forward` from any state equals
+/// the recurrent unrolling from that same state, in outputs *and* final cache.
+/// Then a `forward`-produced cache continues correctly when the next call
+/// takes it as input.
 fn run_step_matches_forward(cfg: Mamba1Config, random_init: bool) {
     let device = test_device();
     let model = cfg.init(&device.clone().autodiff());
@@ -266,9 +267,9 @@ fn run_step_matches_forward(cfg: Mamba1Config, random_init: bool) {
     check_grads_match("step vs forward", &r_fwd, &r_step, 1e-3);
 
     // ── Guard: the random initial state must actually be consumed ─────
-    // Re-run forward from a *zero* initial cache; its output must differ
-    // from the random-init output. Otherwise the initial state is being
-    // silently ignored and forward/step would match trivially.
+    // Re-run forward from a *zero* initial cache. Its output must differ
+    // from the random-init output. Otherwise forward silently ignores the
+    // initial state, and forward/step would match trivially.
     if random_init {
         use burn_stack::utils::test_helpers::max_abs_diff;
         let (out_zero, _) = model.forward(

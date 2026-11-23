@@ -2,7 +2,7 @@
 //!
 //! The MIMO-first chunkwise scan as a serial loop over chunks. Its structure
 //! is that of the five Mamba-2 kernels ([`crate::mamba2::ssd::serial`]),
-//! generalised over the `mimo_rank` axis: the chunk and rank axes fuse into one
+//! generalised over the `mimo_rank` axis. The chunk and rank axes fuse into one
 //! length `L·M` for the intra-chunk products. **Both** the γ-pass and the
 //! β-pass of the double-SSD decomposition use these kernels (the caller
 //! pre-scales `v` by γ or β and shifts the β inputs).
@@ -49,7 +49,7 @@ impl Mamba3DoubleSsdInput {
 
         assert!(
             input.init_state_hpr.is_none(),
-            "init_state_hpr is not yet supported in ssd_serial; use ssd_minimal instead"
+            "ssd_serial does not support init_state_hpr yet. Use ssd_minimal instead."
         );
         assert!(nchunks > 0, "sequence length must be at least 1");
 
@@ -148,10 +148,10 @@ pub fn k1_ssd_chunk_cumsum(da_bnlh: Tensor<4>) -> (Tensor<4>, Tensor<3>) {
 
 /// Compute the intra-chunk CB matrix on fused (mimo_rank-into-chunk) tensors.
 ///
-/// The two arguments carry the chunk's two axes, which differ only when
-/// `micro_steps > 1`: `C` is indexed by the positions the chunk is **read** at
-/// (one per token) and `B` by the positions it is **written** at (one per
-/// micro-step). See [the read axis](crate::mamba3::product).
+/// The two arguments carry the two axes of the chunk. These axes differ only
+/// when `micro_steps > 1`. The **read** positions of the chunk (one per token)
+/// index `C`, and its **write** positions (one per micro-step) index `B`. See
+/// [the read axis](crate::mamba3::product).
 ///
 /// # Arguments
 /// - `c_bntmhr`: `[batch, nchunks, chunk_tokens, mimo_rank, nheads, state_rank]`
@@ -165,8 +165,9 @@ pub fn k2_ssd_bmm(c_bntmhr: Tensor<6>, b_bnlmhr: Tensor<6>) -> Tensor<5> {
     let read = chunk_tokens * mimo_rank;
     let fused = chunk_len * mimo_rank;
 
-    // Fuse M into the chunk axes. `C`'s is the chunk's *read* axis and `B`'s its
-    // *write* axis; they coincide unless `micro_steps > 1`.
+    // Fuse M into the chunk axes. The axis of `C` is the *read* axis of the
+    // chunk, and the axis of `B` is its *write* axis. They coincide unless
+    // `micro_steps > 1`.
     let c_bnTMhr = c_bntmhr.reshape([batch, nchunks, read, nheads, state_rank]);
     let b_bnLMhr = b_bnlmhr.reshape([batch, nchunks, fused, nheads, state_rank]);
 
@@ -183,7 +184,7 @@ pub fn k2_ssd_bmm(c_bntmhr: Tensor<6>, b_bnlmhr: Tensor<6>) -> Tensor<5> {
 
 /// Compute the state at the end of each chunk, assuming a zero state at its start.
 ///
-/// Uses the pre-scaled V tensor — no `dt·B` scaling is performed here.
+/// Uses the pre-scaled V tensor. This kernel does not scale by `dt·B`.
 ///
 /// # Arguments
 /// - `v_bnlmhp`: `[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim]` — pre-scaled V
@@ -238,17 +239,20 @@ pub fn k3_ssd_chunk_state(
 ///
 /// The walk is deliberate. `hₙ = dₙ·hₙ₋₁ + sₙ` has a **scalar** `dₙ`, so it is
 /// the affine monoid `(d₁,s₁)∘(d₂,s₂) = (d₁d₂, d₂s₁+s₂)` and the whole stream
-/// is equally one masked matmul — the form [`minimal`](super::minimal) uses for
-/// it. That form trades `3n` launches for `O(n²)` work plus a
-/// `(b, n, h) → (b, h, n)` round-trip, and the launches are the side that is
+/// is equally one masked matmul. [`minimal`](super::minimal) uses that form
+/// for it.
+///
+/// That form trades `3n` launches for `O(n²)` work plus a
+/// `(b, n, h) → (b, h, n)` round-trip. The launches are the side that is
 /// already free: in a real pass they queue behind GPU work. Swapping the two
 /// moves `forward` by less than the run-to-run noise at 32 *and* 64 chunks
 /// (CUDA, `d_model = 1024`, sequence 256 and 2048) and costs `train` ~2%.
-/// Timed **alone** the same swap looks like a 2× win on this kernel — the
-/// measurement that does not carry over.
+/// Timed **alone**, the same swap looks like a 2× win on this kernel. That
+/// measurement does not transfer.
 ///
-/// This kernel is independent of MIMO rank — it operates on the `[nheads, per_head_dim, state_rank]` state
-/// which is already aggregated over ranks.
+/// This kernel is independent of MIMO rank. It operates on the
+/// `[nheads, per_head_dim, state_rank]` state, which is already aggregated over
+/// ranks.
 ///
 /// # Arguments
 /// - `intra_chunk_state_bnhpr`: `[batch, nchunks, nheads, per_head_dim, state_rank]`
@@ -419,8 +423,8 @@ pub fn k5_ssd_chunk_scan(
     let diff_da_cumsum_bnhTMLM = target_da_cumsum_bnhTMLM - source_da_cumsum_bnhTMLM;
 
     // MIMO causal neg-inf mask: −∞ where j//m > i//m (source strictly ahead of target in time).
-    // `triu(1)` keeps the diagonal — the double-SSD sum is inclusive of the
-    // same position, unlike the single-SSD one.
+    // `triu(1)` keeps the diagonal: the double-SSD sum includes the same
+    // position, unlike the single-SSD one.
     let neg_inf_base_bnhtl: Tensor<5> = helpers::read_causal_mask(chunk_len, read_stride, 1, &device)
         .unsqueeze_dims::<5>(&[0, 1, 2]) // neg_inf_base_111tl
         .expand([batch, nchunks, nheads, chunk_tokens, chunk_len]); // neg_inf_base_bnhtl

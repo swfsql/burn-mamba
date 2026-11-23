@@ -17,11 +17,13 @@
 //!
 //! ## Why the band never has to enter the kernel
 //!
-//! The band would cross chunk boundaries, and the part of it that arrived
-//! through the accumulator at the start of the chunk could not be
-//! un-weighted. But it does not have to enter the kernel. The only outputs of `forward` are at the
-//! **last** micro-step of each token (the [read axis](crate::mamba3::product)
-//! of the chunk). For a read at write position `p = τ·u + (u−1)`, the band
+//! The band would cross chunk boundaries. The part of it that arrived through
+//! the accumulator at the start of the chunk could not be un-weighted. But it
+//! does not have to enter the kernel.
+//!
+//! The only outputs of `forward` are at the **last** micro-step of each token
+//! (the [read axis](crate::mamba3::product) of the chunk). For a read at write
+//! position `p = τ·u + (u−1)`, the band
 //! `{p−u+1 … p}` is *exactly token `τ`*. So the correction is one small
 //! contraction per token, applied after the kernel at token resolution. It
 //! needs no mask change, no chunk-length constraint and no cross-chunk term.
@@ -29,22 +31,25 @@
 //! This is the one place where the two pathways do not agree pointwise. They
 //! stay equivalent on **everything that a caller can observe**: the output of
 //! the block and every field of the returned cache. That is all that
-//! `forward_single_ssd_packed` promises. The correction does not apply to the
-//! intermediate `y` at the `u−1` write positions per token that the read axis
-//! does not read (and does not compute): partial sums on the way to the read,
-//! never a value that the block returns. The **state** is exact at every
-//! position in both pathways. The caches carry it, and a split prefill
-//! continues from it.
+//! `forward_single_ssd_packed` promises.
+//!
+//! Each token has `u−1` write positions that the read axis does not read. At
+//! these positions, the read axis does not compute the intermediate `y`, and
+//! the correction does not apply to it. Each such `y` is a partial sum on the
+//! way to the read, never a value that the block returns. The **state** is
+//! exact at every position in both pathways. The caches carry it, and a split
+//! prefill continues from it.
 //!
 //! A correction of those positions too is possible, but not free. Their band
-//! reaches back over a token boundary. So part of it arrives through the
-//! accumulator at the start of the chunk (or, in the first token of the call,
-//! through the boundary β seed), already weighted by `scale`, where it cannot
-//! be un-weighted. This module does not pay that cost.
+//! reaches back over a token boundary. So part of it arrives already weighted
+//! by `scale`. It arrives through the accumulator at the start of the chunk,
+//! or, in the first token of the call, through the boundary β seed. In both
+//! routes, it cannot be un-weighted. This module does not pay that cost.
 //!
 //! ## The term
 //!
-//! The diagonal of the kernel is already `γ`, so what is left is `j < u−1`:
+//! The diagonal of the kernel is already `γ`, so the remaining positions are
+//! `j < u−1`:
 //!
 //! ```text
 //!   corr[τ, m_out, h, p] = Σ_{j<u−1} νᵗᵃᵖ[τ,j] · dcy[τ,j]
@@ -95,8 +100,8 @@ pub fn token_band_correction(
     let [.., state_rank] = b_bsmhr.dims();
     let tokens = sequence / u;
     debug_assert_eq!(tokens, c_btmhr.dims()[1], "C is on the read axis");
-    // The `u−1` tapped positions per token; the `u`-th is the read itself, whose
-    // weight the kernel's γ-diagonal already fixed.
+    // The `u−1` tapped positions per token. The `u`-th position is the read
+    // itself, and the γ-diagonal of the kernel already fixed its weight.
     let taps = u - 1;
 
     // ── The per-tap scalar: the unpaid excess, decayed to the read ────────────
@@ -122,9 +127,9 @@ pub fn token_band_correction(
         .reshape([batch, tokens, u, mimo_rank, nheads, state_rank])
         .narrow(2, 0, taps)
         .reshape([batch, tokens, fused, nheads, state_rank]);
-    // The read `C` is the token's last micro-step — the copy carrying the
-    // cumulative rotation the readout happens at, which is the only one it is
-    // ever built at.
+    // The read `C` is the last micro-step of the token. This copy carries the
+    // cumulative rotation at which the readout happens. The code never builds
+    // `C` at another rotation.
 
     // ── (C · Bᵀ) · V, contracting state_rank then the fused axis ──────────────
     let c_bthmr = c_btmhr.swap_dims(2, 3);

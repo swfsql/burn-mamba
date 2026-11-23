@@ -13,7 +13,8 @@ pub mod backward;
 /// The assembly of the memory-efficient backward. Its kernels are in the
 /// [standard SSD scan](crate::standard_ssd::kernels).
 pub mod combined_backward;
-/// The diagonal γ-correction on primitives — forward and analytic backward.
+/// The diagonal γ-correction on primitives: its forward and its analytic
+/// backward.
 pub mod diag;
 mod serial_recalculated;
 

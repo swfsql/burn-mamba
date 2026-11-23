@@ -45,17 +45,17 @@ fn cfg_real1d_mimo() -> Mamba3Config {
 }
 
 /// A real transition pairs nothing, so it is the one kind whose `state_rank`
-/// may be odd — here the scalar state `state_rank = 1`.
+/// may be odd. Here it is the scalar state `state_rank = 1`.
 fn cfg_real1d_scalar() -> Mamba3Config {
     cfg_real1d().with_state_rank(1)
 }
 
 /// Build a matched pair of initial caches for cross-pathway parity: the first
 /// for `forward_double_ssd` and `step`, the second for `forward_single_ssd`.
-/// With `random = true` the state and cumulative rotation angle are random
-/// while the previous-token K/V history is **zero** — so the single-ssd form's
-/// boundary-β seed is zero and both forms share the exact same logical initial state.
-/// With `random = false` everything is zero.
+/// With `random = true`, the state and cumulative rotation angle are random,
+/// but the previous-token K/V history is **zero**. So the boundary-β seed of
+/// the single-ssd form is zero, and both forms share the exact same logical
+/// initial state. With `random = false`, everything is zero.
 fn build_cross_caches(
     cfg: &Mamba3Config,
     batch: usize,
@@ -73,8 +73,9 @@ fn build_cross_caches(
     } else {
         Tensor::<4>::zeros([batch, nheads, per_head_dim, state_rank], &device)
     };
-    // `Real1D` has no accumulator at all; the other kinds exercised here are
-    // abelian. Built once, so both caches start from the same rotation.
+    // `Real1D` has no accumulator at all. The other kinds exercised here are
+    // abelian. The code builds the angle once, so both caches start from the
+    // same rotation.
     let angle = (cfg.rotation != RotationKind::Real1D).then(|| {
         if random {
             Tensor::<3>::random([batch, nheads, num_rotation_angles], dist, &device)
@@ -140,7 +141,7 @@ fn build_single_ssd_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mam
         };
         Tensor::from_inner(t)
     };
-    // `Real1D` has no accumulator at all; every other kind exercised here is
+    // `Real1D` has no accumulator at all. Every other kind exercised here is
     // the abelian one.
     let rotation = match cfg.rotation {
         RotationKind::Real1D => RotationState::real(),
@@ -162,8 +163,9 @@ fn build_single_ssd_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mam
     }
 }
 
-/// Per-run gradient bundle (subset of params; mirrors the equivalent struct
-/// in `mamba3::tests` but kept local to avoid cross-module visibility).
+/// Per-run gradient bundle (a subset of params). It mirrors the equivalent
+/// struct in `mamba3::tests`, but it stays local to avoid cross-module
+/// visibility.
 struct RunGrads {
     out: Tensor<3>,
     d_input: Tensor<3>,
@@ -259,8 +261,9 @@ struct Heads {
     angle: Option<Tensor<3>>,
 }
 
-/// Add the rotation accumulator's term to a run's loss — a no-op when the block
-/// is [`RotationKind::Real1D`] and there is no accumulator to attach a head to.
+/// Add the term of the rotation accumulator to the loss of a run. It is a no-op
+/// when the block is [`RotationKind::Real1D`] and there is no accumulator to
+/// attach a head to.
 fn add_angle_loss(loss: Tensor<1>, angle: Option<Tensor<3>>, heads: &Heads) -> Tensor<1> {
     match angle {
         Some(a) => {
@@ -283,9 +286,9 @@ struct SingleSsdRun {
     final_angle: Option<Tensor<3>>,
 }
 
-/// Like [`run_with_grads`] but the loss couples the output with every final
-/// cache field, and the final cache is returned for comparison. Both runs
-/// being compared use `forward_single_ssd`.
+/// Like [`run_with_grads`], but the loss couples the output with every final
+/// cache field, and the function returns the final cache for comparison. Both
+/// compared runs use `forward_single_ssd`.
 fn run_with_grads_single_ssd(
     model: &Mamba3,
     input: &Param<Tensor<3>>,
@@ -395,8 +398,8 @@ fn check_single_ssd_match(
 }
 
 /// Guard: a random initial state must actually change the forward_single_ssd output
-/// (vs a *zero* single-ssd cache). Otherwise the initial state is being silently
-/// ignored, which would make the parity comparisons pass trivially.
+/// (vs a *zero* single-ssd cache). Otherwise the forward silently ignores the
+/// initial state, which would make the parity comparisons pass trivially.
 fn guard_random_init_consumed(
     random_init: bool,
     model: &Mamba3,
@@ -426,9 +429,10 @@ fn guard_random_init_consumed(
 
 /// forward_single_ssd ≡ forward_double_ssd on values and gradients, from the same
 /// initial state. With `random_init = true` the shared logical initial state
-/// is random (random state + cumulative rotation angle; zero previous-token
-/// history so the single-ssd and double-ssd forms coincide). The output and all
-/// parameter gradients must agree. The final cache is not compared here.
+/// is random (random state + cumulative rotation angle, and zero previous-token
+/// history, so that the single-ssd and double-ssd forms coincide). The output
+/// and all parameter gradients must agree. This test does not compare the
+/// final cache.
 /// `run_forward_single_ssd_split_matches_full` and
 /// `run_cross_pathway_continuation_parity` compare it.
 fn forward_match(cfg: Mamba3Config, scan_options: Mamba3ScanOptions, random_init: bool) {
@@ -437,10 +441,10 @@ fn forward_match(cfg: Mamba3Config, scan_options: Mamba3ScanOptions, random_init
 
 /// [`forward_match`] with an explicit gradient tolerance.
 ///
-/// Only the `state_rank = 1` rung needs one: QK-norm is then `γ·x/√(x²+ε)`,
-/// whose derivative peaks at `γ/√ε ≈ 300`, so a random draw that lands a `B`/`C`
-/// channel near zero amplifies fp32 noise by that factor. The *values* are
-/// untouched (`|B| = 1` either way), so only this bound moves.
+/// Only the `state_rank = 1` rung needs one. QK-norm is then `γ·x/√(x²+ε)`,
+/// whose derivative peaks at `γ/√ε ≈ 300`. So a random draw that lands a
+/// `B`/`C` channel near zero amplifies fp32 noise by that factor. This does
+/// not change the *values* (`|B| = 1` either way), so only this bound moves.
 fn forward_match_tol(
     cfg: Mamba3Config,
     scan_options: Mamba3ScanOptions,
@@ -753,7 +757,7 @@ fn forward_single_ssd_matches_step_mimo_random_init() {
 /// `forward_single_ssd(suffix, mid_cache)`. Compares outputs, the final single-ssd cache,
 /// and gradients. A random initial cache covers the split-prefill
 /// continuity guarantee from any starting state (a zero-init split-vs-full test
-/// is a special case). The guard at the end confirms that the block uses the
+/// is a special case). The guard at the end checks that the block uses the
 /// initial cache (and does not silently ignore it).
 fn run_forward_single_ssd_split_matches_full(cfg: Mamba3Config, single_ssd_scan_options: Mamba3ScanOptions) {
     let device = test_device();
@@ -863,11 +867,11 @@ fn forward_single_ssd_split_matches_full_mimo() {
 
 // ── Cross-pathway continuation parity ───────────────────────────────────
 
-/// Like [`run_with_grads_single_ssd`], but the runner hands back the four
+/// Like [`run_with_grads_single_ssd`], but the runner returns the four
 /// final-cache field tensors directly (so the pathway of the last call does
-/// not matter). The loss couples the output with every
-/// final-cache field; gradients of the input and representative parameters
-/// are returned alongside the (inner) output and final-cache values.
+/// not matter). The loss couples the output with every final-cache field. The
+/// function returns the gradients of the input and of representative
+/// parameters, with the (inner) output and final-cache values.
 #[allow(clippy::type_complexity)]
 fn run_cache_fields_with_grads(
     model: &Mamba3,
@@ -990,7 +994,7 @@ fn run_cross_pathway_continuation_parity(cfg: Mamba3Config, scan_options: Mamba3
     };
 
     // Shared, fully-random initial cache fields (including the previous-token
-    // K/V history) — both runs start from the exact same logical state.
+    // K/V history). Both runs start from the exact same logical state.
     let init_ssm = Tensor::<4>::random([batch, nheads, per_head_dim, state_rank], normal, &device);
     let slots = cfg.tap_pattern.tap_slots(cfg.micro_steps);
     let init_k =
@@ -1090,11 +1094,12 @@ fn cross_pathway_continuation_parity_mimo_ngroups2() {
 // ── Quaternion4D on the single-ssd pathway ──────────────────────────────
 //
 // The single-pass SSD scan is rotation-agnostic (it consumes the rotated
-// B̄/C̄), so once `forward_single_ssd` applies the quaternion rotation it must
+// B̄/C̄). So once `forward_single_ssd` applies the quaternion rotation, it must
 // match `forward_double_ssd` (the verified reference pathway) and the recurrent
-// `step`. Both runs start from a fresh (None) cache — each builds its own fresh
-// cache (identity quaternion, zero state/history), which are logically identical
-// across pathways, so no manual cross-cache construction is needed.
+// `step`. Both runs start from a fresh (None) cache. Each run builds its own
+// fresh cache (identity quaternion, zero state/history). These caches are
+// logically identical across pathways, so the test needs no manual cross-cache
+// construction.
 
 fn cfg_quat() -> Mamba3Config {
     Mamba3Config::new(32)
@@ -1223,13 +1228,15 @@ fn quaternion_single_matches_step_mimo() {
 /// Flipping the `siso_specialization*` flags must not change anything the caller
 /// can observe on the single-SSD forward.
 ///
-/// At `mimo_rank == 1` this path takes the specialized branches of the diagonal
-/// γ-correction (`ssd::diag`, inside every SSD path — including the
-/// recompute backward, which must pick the *same* branch as its forward; that is
-/// [`Mamba3Config::siso_specialization`]) and of the boundary-β seed
-/// (`helpers::mimo_outer_sum`, the per-token flag). Both are flipped together so
-/// the two sites are covered. The two models share their weights by
-/// construction; only the flags differ.
+/// At `mimo_rank == 1`, this path takes the specialized branches of two sites:
+///
+/// - the diagonal γ-correction (`ssd::diag`, inside every SSD path). This
+///   includes the recompute backward, which must pick the *same* branch as its
+///   forward. The flag of this site is [`Mamba3Config::siso_specialization`].
+/// - the boundary-β seed (`helpers::mimo_outer_sum`, the per-token flag).
+///
+/// The test flips both flags together, so that it covers the two sites. The two
+/// models share their weights by construction. Only the flags differ.
 fn run_siso_specialization_forward_parity(cfg: Mamba3Config, scan_options: Mamba3ScanOptions) {
     assert_eq!(1, cfg.mimo_rank, "the flags are inert above mimo_rank = 1");
     let device = test_device();
@@ -1301,7 +1308,7 @@ fn run_siso_specialization_forward_parity(cfg: Mamba3Config, scan_options: Mamba
         m.forward_single_ssd(x, Some(cache_gen), &gen_scan_options, None)
     });
 
-    // Same tolerances as the other parity tests here — the branches differ only
+    // Same tolerances as the other parity tests here. The branches differ only
     // in summation order, while a real mismatch diverges by O(1).
     check_single_ssd_match("siso vs general forward", &r_spec, &r_gen, 1e-4, 1e-3);
 }

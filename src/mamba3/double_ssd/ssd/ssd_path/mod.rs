@@ -39,7 +39,8 @@ pub struct Mamba3DoubleSsdInput {
 
     /// Query/C tensor: the same processing as B, but on the **read** axis of
     /// the chunk. That is one position per token, not per write position, because
-    /// a token is read once, at its last micro-step. See
+    /// the readout reads the state once for each token, at its last micro-step.
+    /// See
     /// [`Mamba3SingleSsdInput::c_bntmhr`](crate::mamba3::single_ssd::ssd::Mamba3SingleSsdInput)
     /// and [the read axis](crate::mamba3::product).
     ///
