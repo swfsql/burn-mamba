@@ -131,10 +131,11 @@ training step per window, and **carries the final state into the next window**:
     characters of each story.
   - The threshold must be *above* the level where the model settles, or the
     curriculum never starts.
-- The carry is **detached**. It makes a round trip through the inner backend, not
-  `Tensor::detach` (which frees nothing). Gradients never cross a window
-  boundary, and the peak memory is the activations of one window, however deep
-  the run goes. Back-propagation *within* the window does not change.
+- The carry is **detached**. It makes a round trip through the inner backend
+  (`cache_detach`). Gradients never cross a window boundary. The backward of
+  each window frees its activations, so the peak memory is the activations of
+  one window, however deep the run goes. Back-propagation *within* the window
+  does not change.
 
 Every row of a mini-batch walks its own story in lockstep. So one training
 iteration is still one batch, and the log line stays `Batch b/N`. It adds
