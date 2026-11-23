@@ -37,11 +37,13 @@ no_warnings() {
 }
 
 # Fail when a changed `.rs` or `.md` file has more hard STE violations than at
-# the merge base with origin/main. A new file starts at zero. The step also
-# reads the files under `.scratch/`. In a `.rs` file, it reads the doc
-# comments, the comments and the strings of the message calls. Examples of
-# these calls are `panic!`, `expect`, `assert!` and `format!`. The linter is
+# the merge base with origin/main. A new file starts at zero. The linter is
 # part of the `asd-ste100` skill.
+#
+# The step reads the files under `.scratch/`. It skips the files under each
+# `tmp/` directory, at any depth. In a `.rs` file, it reads the doc comments,
+# the comments and the strings of the message calls. Examples of these calls
+# are `panic!`, `expect`, `assert!` and `format!`.
 check_prose() {
     local lint="$HOME/.claude/skills/asd-ste100/scripts/ste-lint.py"
     if [ ! -f "$lint" ]; then
@@ -73,7 +75,7 @@ check_prose() {
         {
             git diff --name-only --diff-filter=d "$base" -- '*.rs' '*.md'
             git ls-files --others --exclude-standard -- '*.rs' '*.md'
-        } | sort -u
+        } | grep -v -E '(^|/)tmp/' | sort -u
     )
     rm -rf "$old_dir"
     return "$failed"

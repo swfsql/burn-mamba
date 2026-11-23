@@ -199,6 +199,8 @@ the ticket.
 In both repos:
 
 - The step also reads the files under `.scratch/`.
+- The step skips the files under each `tmp/` directory, at any depth, as the
+  sweep does.
 - The step reads each `.rs` file with `--parts docs,comments,messages`, on
   both sides of the compare.
 - The rule stays. A changed file fails when it has more hard findings than at

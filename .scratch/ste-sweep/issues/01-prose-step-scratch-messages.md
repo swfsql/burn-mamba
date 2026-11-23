@@ -106,3 +106,13 @@ file. The comment of `check_prose` gives four of them as examples.
 - `.scratch/check-script-followups/issues/01-prose-ratchet-reads-scratch.md`
   asks for the same step. This change meets each of its criteria. Its
   `Status:` stays `needs-triage` for the maintainer.
+
+### The `tmp/` directories
+
+After the review, the maintainer selects a skip of each `tmp/` directory, at
+any depth, so the step reads what the sweep reads. A second commit in each repo
+adds `grep -v -E '(^|/)tmp/'` to the list of files, and a sentence to the
+comment of `check_prose`. In burn-mamba, 13 tracked `.md` files are under
+`examples/{hnet-stories,tiny-stories}/tmp/`, and `.gitignore` has the root
+`tmp/`. `docs/agents/code-review.md:8` and the section "The prose step of
+`scripts/check.sh`" of the spec also give the skip.
