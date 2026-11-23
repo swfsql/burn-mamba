@@ -57,6 +57,13 @@ and the root files follows the `asd-ste100` skill.
   _Avoid_ entry is "step (alone, for one recurrence step or for one training
   step)". So the copy of this repo can also say "part". Then the two copies
   are equal.
+- For burn-stack ticket 05, the user selects zero hard findings. No code span
+  hides a phrase from the linter. A record can remove a historical phrase,
+  with a hint that the git history keeps it.
+- So the rule on changelog prose of `../burn-stack/CLAUDE.md` gives "an old
+  state next to the current one" in place of a quote of a banned phrase. The
+  rule of this repo has the same quote. With these words, it can lose the
+  kept finding that the body of this ticket names.
 - Burn-stack ticket 05 closes before this ticket runs. For each shared rule
   that this ticket changes, write a new burn-stack ticket in
   `../burn-stack/.scratch/ste-sweep/issues/`. That ticket applies the change
