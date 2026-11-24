@@ -1,22 +1,27 @@
 //! The positive systems, from the log-semiring primitive up to the block.
 //!
-//! 1. **The scan**: `lse` is exact beside [`LOG_ZERO`] and splits a tie; the
+//! 1. **The scan**: `lse` is exact beside [`LOG_ZERO`] and splits a tie. The
 //!    doubling [`scan::prefix`] is the sequential [`scan::fold`], in values and
-//!    gradients; the projective read ignores a common shift.
-//! 2. **The members against their textbook recursions**, in f64: the gain is
-//!    the covariance-form Kalman filter (and `η/Λ` its mean), and under a
-//!    trapezoid the plant's own recurrence on ones; the register is the hard
-//!    max-plus recursion to within `ln(t + 1)`.
-//! 3. **The invariants the design leans on**: the confidence ceiling, a decay
-//!    that only ever adds forgetting, Birkhoff's contraction rate, and finite
-//!    gradients where a mass underflows (f32 and f16).
-//! 4. **The block**: stock at `κ = 0` / `e = 0`, with live gradients into the
-//!    join (the out-norm on or off), and finite ones when a head's `Δ`
-//!    vanishes; `forward` ≡ `step` ≡ the other pathway ≡ a split prefill ≡ the other
-//!    SSD path, on outputs, every cache field and gradients, across the
-//!    lattice the two systems have to commute with (tap patterns, micro-steps,
-//!    rotation kinds, MIMO, the out-norm); the fields survive a no-grad region;
-//!    the in-projection's widths agree with the Muon plan.
+//!    gradients. The projective read ignores a common shift.
+//! 2. **The members against their textbook recursions**, in f64:
+//!    - The gain is the covariance-form Kalman filter, and `η/Λ` is its mean.
+//!      Under a trapezoid, the gain is the recurrence of the plant on ones.
+//!    - The register is the hard max-plus recursion to within `ln(t + 1)`.
+//! 3. **The invariants that the design needs**:
+//!    - the confidence ceiling,
+//!    - a decay that only ever adds forgetting,
+//!    - Birkhoff's contraction rate,
+//!    - finite gradients where a mass underflows (f32 and f16).
+//! 4. **The block**:
+//!    - It is stock at `κ = 0` / `e = 0`, with live gradients into the join
+//!      (the out-norm on or off). Its gradients are finite when the `Δ` of a
+//!      head vanishes.
+//!    - `forward` ≡ `step` ≡ the other pathway ≡ a split prefill ≡ the other
+//!      SSD path, on outputs, every cache field and gradients. This holds
+//!      across the lattice that the two systems have to commute with (tap
+//!      patterns, micro-steps, rotation kinds, MIMO, the out-norm).
+//!    - The fields survive a no-grad region.
+//!    - The widths of the in-projection agree with the Muon plan.
 
 use super::kalman::{self, GainInput, LogMasses};
 use super::scan::{self, Affine, Mobius};
@@ -198,10 +203,11 @@ fn run_gain(case: &GainCase, carry: Tensor<2>) -> kalman::GainOutput {
 }
 
 /// The gain is the scalar Kalman filter of a random walk observed through the
-/// token's write, `a² = 1/α`, `q = κ·Δ·eʳ`, `r = 1/Δ`, written in covariance
-/// form in f64: `Λₜ = 1/Pₜ` and the log-decay `ln dₜ`, at every position. The
-/// same loop checks the information-form identity the plant relies on — the
-/// state `η` updated by `dₜ` divided by `Λ` is the filter's mean.
+/// write of the token, with `a² = 1/α`, `q = κ·Δ·eʳ` and `r = 1/Δ`. The test
+/// writes the filter in covariance form in f64, and it checks `Λₜ = 1/Pₜ` and
+/// the log-decay `ln dₜ` at every position. The same loop checks the
+/// information-form identity that the plant relies on: the state `η`, updated
+/// by `dₜ` and divided by `Λ`, is the mean of the filter.
 #[test]
 fn gain_matches_the_covariance_form_filter() {
     let device = test_device();
@@ -266,13 +272,13 @@ fn gain_matches_the_covariance_form_filter() {
     assert!(max_abs_diff(first(fresh.log_precision_bsh), first(case.dt.clone().log())) < dtype_tol(1e-5));
 }
 
-/// Under a trapezoid the evidence is the plant's own two installments, and `Λ`
-/// is the plant's recurrence on ones, run on the very coefficients the SSD
-/// consumes: `Wₜ = αₜ·Wₜ₋₁ + γₜ + αₜ·νⁱⁿᵗₜ + νₜ·Tₜ`, `Tₜ` the transport of the
-/// tap at `tap_lag` across its lag (front factors `1`, as
-/// `helpers::interior_gap_decay` pads).
-/// Equal for a lag-1 tap, an upper bound for a lag-`u` one; the ceiling
-/// `Λₜ < 1/qₜ + γₜ` holds either way.
+/// Under a trapezoid, the evidence is the plant's own two installments. `Λ` is
+/// the recurrence of the plant on ones, run on the very coefficients that the
+/// SSD consumes: `Wₜ = αₜ·Wₜ₋₁ + γₜ + αₜ·νⁱⁿᵗₜ + νₜ·Tₜ`. `Tₜ` is the transport
+/// of the tap at `tap_lag` across its lag, with front factors `1`, as
+/// `helpers::interior_gap_decay` pads.
+/// `Λ` is equal to `W` for a lag-1 tap and an upper bound for a lag-`u` tap. The
+/// ceiling `Λₜ < 1/qₜ + γₜ` holds either way.
 #[test]
 fn the_precision_is_the_plants_weight_on_ones() {
     use crate::mamba3::helpers::trapezoidal_coefficients;
@@ -349,8 +355,8 @@ fn the_precision_is_the_plants_weight_on_ones() {
 }
 
 /// The soft register is the max-plus recursion `c = max(c + a, b)` from above,
-/// and by at most `ln(t + 1)` in projection units — the log-sum-exp over the
-/// `t + 1` ways the maximum can have been reached.
+/// and by at most `ln(t + 1)` in projection units. This bound is the
+/// log-sum-exp over the `t + 1` ways to reach the maximum.
 ///
 /// The margin is `dtype_tol(1e-3)`. A tie reaches the bound itself: at `t = 1`,
 /// `8 + ln 2 = 8.6931`, which f16 rounds to `8.6953` (the spacing is `0.0078` at 8).
@@ -407,10 +413,11 @@ fn precision_has_a_ceiling_and_the_decay_only_adds_forgetting() {
     assert!(raise.max().into_scalar::<f32>() <= 0.0, "a decay above stock's");
 }
 
-/// For `q, m > 0` every micro-step is an entrywise-positive matrix, so it contracts
-/// the Hilbert distance `|ln Λ − ln Λ'|` by at least
-/// `tanh(¼·ln(1 + 1/(q·γ)))` (here `γ = Δ`) — with no `α` in it — and two caches that disagree
-/// about the evidence held forget the disagreement.
+/// For `q, m > 0`, every micro-step is an entrywise-positive matrix. So it
+/// contracts the Hilbert distance `|ln Λ − ln Λ'|` by at least
+/// `tanh(¼·ln(1 + 1/(q·γ)))` (here `γ = Δ`), with no `α` in the bound. And two
+/// caches that disagree about the evidence that they hold forget the
+/// disagreement.
 #[test]
 fn a_disagreement_about_the_evidence_contracts_at_the_birkhoff_rate() {
     let device = test_device();
@@ -441,10 +448,11 @@ fn all_finite<const D: usize>(t: Tensor<D>) -> bool {
     floats(t.cast(DType::F32)).iter().all(|v| v.is_finite())
 }
 
-/// A mass that underflows to `0` — `Δ` past softplus's range (≈ −104 of
-/// pre-activation in f32, ≈ −17 in f16) or a saturated `λ` — leaves the
-/// gradient finite, in both dtypes: the gain's masses are logs of
-/// pre-activations, never `ln` of a zero.
+/// A mass that underflows to `0` leaves the gradient finite, in both dtypes.
+/// Two causes give such a mass: a `Δ` past the range of softplus (≈ −104 of
+/// pre-activation in f32, ≈ −17 in f16), or a saturated `λ`. The gradient stays
+/// finite because the masses of the gain are logs of pre-activations, never
+/// `ln` of a zero.
 #[test]
 fn an_underflowing_mass_keeps_the_gradient_finite() {
     let device = test_device();
@@ -506,11 +514,15 @@ impl Case {
     }
 }
 
-/// The lattice the positive systems must commute with, covered pairwise rather
-/// than as a product: every gain, both registers, the tap patterns that change
-/// the algorithm (none, lag 1, lag `u`, two taps, a lag-1 tap that closes at
-/// token boundaries), `u ∈ {1, 2, 3}`,
-/// all four rotation kinds, MIMO and the out-norm.
+/// The lattice that the positive systems must commute with. The cases cover it
+/// pairwise, not as a product:
+/// - every gain,
+/// - both registers,
+/// - the tap patterns that change the algorithm (none, lag 1, lag `u`, two
+///   taps, a lag-1 tap that closes at token boundaries),
+/// - `u ∈ {1, 2, 3}`,
+/// - all four rotation kinds,
+/// - MIMO and the out-norm.
 fn lattice() -> Vec<Case> {
     use Gain::*;
     use RotationKind::*;
@@ -572,7 +584,8 @@ fn assert_caches_match(label: &str, a: &Mamba3Cache, b: &Mamba3Cache) {
 }
 
 /// `forward` ≡ unrolled `step` ≡ the single-SSD pathway ≡ a split prefill ≡
-/// the `Minimal` SSD path — outputs and every cache field, across the lattice.
+/// the `Minimal` SSD path, on the outputs and every cache field, across the
+/// lattice.
 #[test]
 fn forward_step_pathways_and_prefill_agree_across_the_lattice() {
     let device = test_device();
@@ -623,10 +636,10 @@ fn forward_step_pathways_and_prefill_agree_across_the_lattice() {
     }
 }
 
-/// The third leg of forward ≡ step: backprop through the chunked pass and
-/// through the unrolled recurrence agrees on the input, the in-projection
-/// (whose tail carries the noise and register channels) and the positive
-/// systems' own parameters.
+/// The third leg of forward ≡ step. Backprop through the chunked pass and
+/// through the unrolled recurrence agrees on the input, the in-projection and
+/// the parameters of the positive systems. The tail of the in-projection
+/// carries the noise and register channels.
 #[test]
 fn forward_and_step_gradients_agree() {
     let device = test_device();
@@ -718,10 +731,11 @@ fn as_stock(model: &Mamba3) -> Mamba3 {
     }
 }
 
-/// At `κ = 0` (and the init's `ω = 0`, `e = 0`) the block **is** stock. For
-/// the tied gain, whose in-projection is stock's, bit for bit on outputs and
-/// state, through both pathways and `step`; the widened in-projections (noise,
-/// register) round their shared rows through a wider matmul, so to 1e-6.
+/// At `κ = 0` (and the init's `ω = 0`, `e = 0`), the block **is** stock. The
+/// tied gain has the in-projection of stock, so the block is stock bit for bit
+/// on outputs and state, through both pathways and `step`. The widened
+/// in-projections (noise, register) round their shared rows through a wider
+/// matmul, so the block is stock to 1e-6.
 #[test]
 fn zero_kappa_and_zero_readout_are_the_stock_block() {
     let device = test_device();
@@ -802,7 +816,8 @@ fn the_join_has_live_gradients_at_init() {
         live("ln κ", norm1(model.kalman_log_kappa_h.as_ref().unwrap().val().grad(&grads)));
         live("ω", norm1(model.kalman_read_h.as_ref().unwrap().val().grad(&grads)));
         live("e", norm2(model.tropical_readout_hp.as_ref().unwrap().val().grad(&grads)));
-        // The noise rows are the in-projection's; they see `κ`'s gradient.
+        // The noise rows are rows of the in-projection. They see the gradient
+        // of `κ`.
         let layout = model.in_proj_layout();
         let noise = layout.channels_of(GroupKey::KalmanNoise);
         let tropical =

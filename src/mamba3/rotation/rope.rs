@@ -17,7 +17,8 @@ use burn::prelude::*;
 /// `2π` does not change the rotation. In f16 and bf16, the dtype cannot hold
 /// `2π`, so the subtraction is in two parts (`helpers::sub_periods`).
 /// Otherwise, each wrap of the decode cache would lose `1.9·10⁻³` per turn.
-/// `|angle| ≤ π` keeps precision in low-bit floats: about
+///
+/// `|angle| ≤ π` keeps precision in low-bit floats. About
 /// half of the representable `f16` values are in `|x| ≤ 1`, and the periodic
 /// `sin`/`cos` lose accuracy only when the argument drifts to large
 /// magnitudes. The same applies to the cumulative angle accumulator. Without
@@ -49,14 +50,15 @@ pub fn wrap_angle<const D: usize>(angles: Tensor<D>) -> Tensor<D> {
 /// `x₁' = sin·x₀ + cos·x₁`. Section 2 of that header compares this direction with
 /// the sources.
 ///
-/// Two pairing conventions are supported, selected by `rotate_pairwise`:
+/// The function supports two pairing conventions, and `rotate_pairwise`
+/// selects one:
 ///
 /// - `rotate_pairwise = true` — **interleaved** (NeoX / Triton style): adjacent
-///   pairs `(0,1)`, `(2,3)`, … are rotated together. Used by the SISO Triton
-///   kernel (`mamba3_siso_*.py`).
+///   pairs `(0,1)`, `(2,3)`, … rotate together. The SISO Triton kernel
+///   (`mamba3_siso_*.py`) uses it.
 /// - `rotate_pairwise = false` — **half-and-half** (GPT-J style): position `n`
-///   is paired with `n + state_rank/2`. Used by the MIMO Tilelang kernel
-///   (`mamba3_mimo_fwd.py`).
+///   pairs with `n + state_rank/2`. The MIMO Tilelang kernel
+///   (`mamba3_mimo_fwd.py`) uses it.
 ///
 /// Reference: `mamba3.py:335` sets `rotate_pairwise = not self.is_mimo`.
 ///
@@ -144,8 +146,8 @@ pub fn apply_rope_partial<const D: usize>(
 
     if rotate_pairwise {
         // Pairs are local. A slice of the first rotation_dim entries gives the
-        // same result as the reference (which rotates the whole headdim, with
-        // identity cos/sin for the tail pairs).
+        // same result as the reference. The reference rotates the whole
+        // headdim, with identity cos/sin for the tail pairs.
         let x_rope = x.clone().narrow(D - 1, 0, rotation_dim);
         let x_rest = x.narrow(D - 1, rotation_dim, state_rank - rotation_dim);
         let x_rope_rotated = apply_rope::<D>(x_rope, angles, true);
@@ -171,8 +173,8 @@ pub fn apply_rope_partial<const D: usize>(
     let x_h2_rope = x_h2.clone().narrow(D - 1, 0, num_rotation_angles);
     let x_h2_pass = x_h2.narrow(D - 1, num_rotation_angles, half - num_rotation_angles);
 
-    // angles: [..., num_rotation_angles] — broadcasts element-wise against the
-    // rotation-active slices.
+    // angles: [..., num_rotation_angles]. It broadcasts element-wise against
+    // the rotation-active slices.
     let angles = wrap_angle(angles);
     let cos = angles.clone().cos();
     let sin = angles.sin();

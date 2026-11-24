@@ -63,7 +63,7 @@ impl<B: Backend> Clone for Quat<B> {
 
 impl<B: Backend> Quat<B> {
     /// Unpack a packed `[batch, sequence, nheads, blocks, 4]` tensor into SoA
-    /// components (the only `narrow`s in the scan — done once at entry).
+    /// components (the only `narrow`s in the scan, done once at entry).
     pub fn from_rank5(q_bshj4: F<B, 5>) -> Self {
         let w = q_bshj4.clone().narrow(4, 0, 1).squeeze_dim::<4>(4);
         let x = q_bshj4.clone().narrow(4, 1, 1).squeeze_dim::<4>(4);
@@ -73,7 +73,7 @@ impl<B: Backend> Quat<B> {
     }
 
     /// Pack SoA components back into a `[batch, sequence, nheads, blocks, 4]`
-    /// tensor (the only `cat` in the scan — done once at exit).
+    /// tensor (the only `cat` in the scan, done once at exit).
     pub fn pack(self) -> F<B, 5> {
         F::cat(
             vec![
@@ -97,7 +97,7 @@ impl<B: Backend> Quat<B> {
         }
     }
 
-    /// Hamilton product `self ⊗ other` (pure element-wise; no narrow/cat).
+    /// Hamilton product `self ⊗ other` (pure element-wise, with no narrow/cat).
     /// Broadcasts over the leading dims, so a `[b,1,h,j]` carry multiplies a
     /// `[b,s,h,j]` sequence.
     pub fn mul(self, other: Quat<B>) -> Quat<B> {
@@ -170,7 +170,8 @@ impl<B: Backend> Quat<B> {
     }
 
     /// Inclusive **suffix**-sum along the write axis (`out[t] = Σ_{s≥t} in[s]`),
-    /// per component — `flip → cumsum → flip`. Used by the backward's `S[t]`.
+    /// per component: `flip → cumsum → flip`. The `S[t]` of the backward uses
+    /// it.
     pub fn reverse_cumsum_seq(self) -> Quat<B> {
         let rc = |t: F<B, 4>| t.flip(&[1]).cumsum(1).flip(&[1]);
         Quat {
@@ -189,12 +190,12 @@ impl<B: Backend> Quat<B> {
 /// The caller folds in the carry (one extra [`Quat::mul`]). The recompute
 /// backward needs `P` alone (`G[t] = P[t] ⊗ S[t]`).
 ///
-/// `P` is renormalised once, after the doubling. `|a ⊗ b| = |a|·|b|`, so the
-/// norm errors of the multiplies do not move the directions, and one
-/// correction at the end is as good as one per level. Without it, the norm is
-/// a random walk (≈ 2% at 512 micro-steps in f16). The backward reads `Pₜ ⊗ P̄ₛ`
-/// as the product of the micro-steps between `s` and `t`, which is true only for a
-/// unit `P`.
+/// The function renormalises `P` once, after the doubling.
+/// `|a ⊗ b| = |a|·|b|`, so the norm errors of the multiplies do not move the
+/// directions, and one correction at the end is as good as one per level.
+/// Without it, the norm is a random walk (≈ 2% at 512 micro-steps in f16). The
+/// backward reads `Pₜ ⊗ P̄ₛ` as the product of the micro-steps between `s` and
+/// `t`, which is true only for a unit `P`.
 pub(crate) fn quat_prefix_product_soa<B: Backend>(q: Quat<B>) -> Quat<B> {
     let [batch, sequence, nheads, blocks] = q.w.dims();
     let device = q.w.device();

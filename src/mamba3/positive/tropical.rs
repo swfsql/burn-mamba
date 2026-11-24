@@ -19,11 +19,12 @@ use burn::prelude::*;
 ///
 /// The readout sees the value after the last micro-step of the token (the
 /// read axis, `helpers::read_positions`), and the cache holds the same value. The
-/// `u − 1` values between are computed and never read. A composition of the
-/// maps of each token first (`u − 1` elementwise [`Affine`] composes), then a
-/// scan over tokens, would give the same reads and carry at `1/u` of the
-/// scanned length. This function scans the write axis instead: the axis that
-/// the Kalman gain needs, because every micro-step reads its decay.
+/// scan computes the `u − 1` values between them, and nothing reads these. An
+/// alternative first composes the maps of each token (`u − 1` elementwise
+/// [`Affine`] composes) and then scans over tokens. It would give the same reads
+/// and carry at `1/u` of the scanned length. This function scans the write axis
+/// instead: the axis that the Kalman gain needs, because every micro-step reads
+/// its decay.
 ///
 /// # In a packed row
 ///

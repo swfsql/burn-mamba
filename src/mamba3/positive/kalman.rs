@@ -11,20 +11,22 @@
 //! under [`TapPattern::None`](crate::mamba3::tap_pattern::TapPattern::None)). The
 //! plant pays the left-endpoint installment of a sample one micro-step late,
 //! transported by the decay of that micro-step (`β = ν·α`, with `d` for `α`). So `Λ`
-//! **is** the recurrence of the plant on ones: the total weight of every
-//! sample it wrote (the zero tap slot of a fresh cache included). And `η/Λ` is
-//! a weighted mean of what it wrote. Each micro-step is still one Möbius map: shift
-//! by `ν`, predict, and shift by `γ` compose to
-//! `ln [[α(1+qγ), αν + γ(1+qαν)], [αq, 1+qαν]]`. So the scan is unchanged.
+//! **is** the recurrence of the plant on ones: the total weight of every sample
+//! that the plant wrote. This total includes the zero tap slot of a fresh cache.
+//! And `η/Λ` is a weighted mean of what the plant wrote.
+//!
+//! Each micro-step is still one Möbius map: shift by `ν`, predict, and shift
+//! by `γ` compose to `ln [[α(1+qγ), αν + γ(1+qαν)], [αq, 1+qαν]]`. So the scan
+//! is unchanged.
 //!
 //! That identity is exact for a **lag-1** tap: every pattern at `u = 1`, and
-//! the default at any `u`. A lag-`u` tap (the `Vertical*` patterns at `u > 1`)
-//! is transported across its whole gap, `∏ d` over `u` micro-steps. That reads `u`
-//! earlier precisions, so it is not a 2×2 map. Its installment enters `L` like
-//! a lag-1 installment, transported by `dₜ` alone, and `Λ` over-counts the
-//! plant by `νₜ·(dₜ − ∏ d)` per micro-step. `Λ` is then an upper bound on the weight
-//! of the plant, not the weight itself. Every other property (the ceiling, the
-//! contraction, the stock join) holds unchanged.
+//! the default at any `u`. The plant transports a lag-`u` tap (the `Vertical*`
+//! patterns at `u > 1`) across its whole gap, `∏ d` over `u` micro-steps. That
+//! reads `u` earlier precisions, so it is not a 2×2 map. Its installment enters
+//! `L` like a lag-1 installment, transported by `dₜ` alone, and `Λ` over-counts
+//! the plant by `νₜ·(dₜ − ∏ d)` per micro-step. `Λ` is then an upper bound on
+//! the weight of the plant, not the weight itself. Every other property (the
+//! ceiling, the contraction, the stock join) holds unchanged.
 //!
 //! Everything is in log coordinates: `ℓ = ln Λ`. The decay is a log-decay
 //! correction, `ln dₜ = ln αₜ − softplus(ln qₜ + ln αₜ + ln Lₜ)`. So `κ = 0`
@@ -92,7 +94,7 @@ impl LogMasses {
     /// tap at [`tap_lag`](crate::mamba3::tap_pattern::TapPattern::tap_lag).
     ///
     /// # Shapes
-    /// - `dt_raw_bsh`, `lambda_raw_bsh` : `[batch, len, nheads]` (`dd_dt + dt_bias`; `λ`'s logit)
+    /// - `dt_raw_bsh`, `lambda_raw_bsh` : `[batch, len, nheads]` (`dd_dt + dt_bias`, `λ`'s logit)
     /// - `tap_open_1s1`                 : `[1, len, 1]`, `0` where the tap at `tap_lag` is closed
     pub fn new(
         dt_raw_bsh: Tensor<3>,

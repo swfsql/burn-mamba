@@ -4,12 +4,12 @@
 //! `[batch, position, head]`. It has two shapes:
 //!
 //! - [`Mobius`](scan::Mobius) — all four entries, acting **projectively** on
-//!   `(ℓ, 0)`. The read is `σ₀ − σ₁`, so any constant shift of the product is
-//!   allowed. The scan applies one after every combine, to keep the entries
+//!   `(ℓ, 0)`. The read is `σ₀ − σ₁`, so the scan can shift the product by any
+//!   constant. It applies one shift after every combine, to keep the entries
 //!   bounded.
-//! - [`Affine`](scan::Affine) — the lower row is fixed at `(−∞, 0)`, so only
-//!   `(a, b)` is carried. The read `lse(a + c₀, b)` is absolute: no shift is
-//!   allowed, and none is necessary.
+//! - [`Affine`](scan::Affine) — the lower row is fixed at `(−∞, 0)`, so the
+//!   element carries only `(a, b)`. The read `lse(a + c₀, b)` is absolute: the
+//!   scan must not shift the element, and no shift is necessary.
 //!
 //! [`prefix`](scan::prefix) composes them by Hillis–Steele doubling, the same
 //! schedule as the quaternion scan (`rotation::quat_cumprod`): `⌈log₂ len⌉`
@@ -48,7 +48,7 @@ fn one_and_zero(like: &Tensor<3>, len: usize) -> (Tensor<3>, Tensor<3>) {
 
 /// An associative element over `[batch, len, nheads]` tensors.
 pub trait Element: Sized + Clone {
-    /// `later ∘ earlier` — apply `earlier` first.
+    /// `later ∘ earlier`, which applies `earlier` first.
     fn compose(later: Self, earlier: Self) -> Self;
     /// The identity over `len` positions, with the batch, heads, device and
     /// dtype of this element.
@@ -165,7 +165,7 @@ impl Element for Mobius {
     }
 }
 
-/// An affine element `c ↦ lse(c + a, b)` — the matrix `[[a, b], [−∞, 0]]`.
+/// An affine element `c ↦ lse(c + a, b)`: the matrix `[[a, b], [−∞, 0]]`.
 #[derive(Clone, Debug)]
 pub struct Affine {
     /// The log-gain, `[batch, len, nheads]` (any sign).
@@ -244,14 +244,16 @@ impl Element for Affine {
 ///
 /// `helpers::prefix_sum` blocks its scan, and its measurements show blocking
 /// faster than doubling at every length. But its blocks run on `cumsum`, a
-/// one-launch in-block scan that this element does not have: the log-semiring
+/// one-launch in-block scan that this element does not have. The log-semiring
 /// product is not `+`, and the [`Mobius`] one is not even commutative. So an
-/// in-block pass would itself be a doubling or a loop. The schedule is thus
-/// that of `quat_scan`: `⌈log₂ len⌉` full-width rounds over the whole write
-/// axis. Each round is about fifty kernels for [`Mobius`] (four [`lse`]s,
-/// the renormalising shift, the new floors) and a dozen for [`Affine`]. The
-/// tensors are `[batch, len, nheads]`, with no `per_head_dim·state_rank`
-/// factor, so the cost that grows with `len` is mostly launches, not bytes.
+/// in-block pass would itself be a doubling or a loop.
+///
+/// The schedule is thus that of `quat_scan`: `⌈log₂ len⌉` full-width rounds
+/// over the whole write axis. Each round is about fifty kernels for [`Mobius`]
+/// (four [`lse`]s, the renormalising shift, the new floors) and a dozen for
+/// [`Affine`]. The tensors are `[batch, len, nheads]`, with no
+/// `per_head_dim·state_rank` factor, so the cost that grows with `len` is
+/// mostly launches, not bytes.
 ///
 /// The backward is plain autodiff, which keeps the intermediates of every
 /// round alive until it runs. A recompute backward like that of `quat_scan` is
@@ -303,8 +305,8 @@ impl Resets {
     }
 }
 
-/// [`prefix`] over the segments of a packed row: each product starts at the
-/// first position of its own segment (`start_bs`, `[batch, len]`; `-1`
+/// [`prefix`] over the segments of a packed row. Each product starts at the
+/// first position of its own segment (`start_bs`, `[batch, len]`, with `-1`
 /// before the first reset of the row).
 ///
 /// A combine whose older window would reach back past the start takes the

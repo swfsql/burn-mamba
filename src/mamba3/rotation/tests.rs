@@ -1,12 +1,12 @@
 //! Tests for the quaternion (`k = 4`) rotational-state reference.
 //!
-//! The headline result is [`factored_matches_explicit`]: the factored form
-//! (rotate `B`/`C` by the cumulative quaternion, then run a plain scalar-decay
-//! SSM) reproduces the explicit recurrence that carries the `4×4` rotation
-//! inside the state — for **non-commuting** quaternions. The two paths use
-//! deliberately different primitives (quaternion product vs materialised `4×4`
-//! matmul), so agreement cross-validates both the homomorphism and the
-//! factoring of the RoPE trick at once.
+//! The headline result is [`factored_matches_explicit`]. The factored form
+//! rotates `B`/`C` by the cumulative quaternion, then runs a plain scalar-decay
+//! SSM. For **non-commuting** quaternions, it reproduces the explicit
+//! recurrence that carries the `4×4` rotation inside the state. The two paths
+//! use deliberately different primitives (quaternion product vs materialised
+//! `4×4` matmul). So their agreement cross-validates both the homomorphism and
+//! the factoring of the RoPE trick at once.
 //!
 //! The other tests pin the supporting facts: the `q ↦ L_q` homomorphism and
 //! orthogonality, the cross-chunk carry of [`quat_cumprod`], the abelian
@@ -217,7 +217,7 @@ fn factored_matches_explicit() {
 
 #[test]
 fn factored_matches_explicit_multiblock() {
-    // state_rank = 4·J with J > 1 — independent quaternion blocks.
+    // state_rank = 4·J with J > 1: independent quaternion blocks.
     check_factored_matches_explicit(2, 6, 2, 3, true);
 }
 
@@ -225,7 +225,7 @@ fn factored_matches_explicit_multiblock() {
 // 1b. Rotor4D: the same headline for the *full* SO(4) rotation
 // ---------------------------------------------------------------------------
 
-/// Matrix of **right** multiplication `v ↦ v ⊗ p` — the second factor's
+/// Matrix of **right** multiplication `v ↦ v ⊗ p`: the second factor's
 /// oracle, mirroring [`quat_to_rot4`] (which is the left one). Test-only: the
 /// production path never materialises either.
 fn quat_to_rot4_right<const D: usize, const DR: usize>(p: Tensor<D>) -> Tensor<DR> {
@@ -344,9 +344,9 @@ fn factored_recurrence_rotor(
     Tensor::cat(ys, 1)
 }
 
-/// The `Rotor4D` headline: absorbing the inverse cumulative `SO(4)` rotation
-/// into `B`/`C` reproduces the recurrence that carries the rotation in the
-/// state — for generic (non-commuting, non-isoclinic) rotors. As in
+/// The `Rotor4D` headline, for generic (non-commuting, non-isoclinic) rotors.
+/// Absorbing the inverse cumulative `SO(4)` rotation into `B`/`C` reproduces
+/// the recurrence that carries the rotation in the state. As in
 /// [`factored_matches_explicit`], the two sides use different primitives
 /// (materialised `4×4` matmuls vs quaternion products), so this cross-validates
 /// the two-sided factoring and the `L_q · R_p̄` identification at once.
@@ -382,7 +382,7 @@ fn rotor_factored_matches_explicit() {
     }
 }
 
-/// A trivial right factor is exactly the left-isoclinic kind — so `Rotor4D`
+/// A trivial right factor is exactly the left-isoclinic kind. So `Rotor4D`
 /// contains `Quaternion4D`, and the shared code path cannot be quietly
 /// reinterpreting the left factor.
 #[test]
@@ -413,8 +413,9 @@ fn rotor_with_identity_right_factor_is_quaternion4d() {
 /// What the right factor buys, in one line of algebra: with a shared axis the
 /// two invariant planes turn by `a−b` and `a+b`, i.e. **independently**.
 /// Left-only rotation is isoclinic (`b = 0` forces both planes to `a`), so this
-/// is precisely the abelian `SO(2)²` behaviour `Quaternion4D` cannot express —
-/// and the reason the ladder needs `Rotor4D` to contain `Complex2D`.
+/// is precisely the abelian `SO(2)²` behaviour that `Quaternion4D` cannot
+/// express. It is also the reason that the ladder needs `Rotor4D` to contain
+/// `Complex2D`.
 #[test]
 fn rotor_turns_the_two_planes_independently() {
     let device = test_device();
@@ -532,10 +533,10 @@ fn cumprod_split_equals_full() {
 // ---------------------------------------------------------------------------
 // 3b. Parallel scan == sequential oracle (values + grads)
 //
-// `quat_cumprod` is the Hillis–Steele log-depth scan; `quat_cumprod_sequential`
-// below is the readable token-by-token reference it replaced. They must agree
-// exactly (it is the same associative product, just a different evaluation
-// order), on both values and gradients — this pins the fast path to the oracle.
+// `quat_cumprod` is the Hillis–Steele log-depth scan. `quat_cumprod_sequential`
+// below is the readable token-by-token reference. They must agree exactly, on
+// both values and gradients: it is the same associative product, only in a
+// different evaluation order. This pins the fast path to the oracle.
 // ---------------------------------------------------------------------------
 
 /// Sequential (O(sequence)) reference for [`quat_cumprod`]: a token-by-token
@@ -609,7 +610,7 @@ fn cumprod_parallel_matches_sequential_grads() {
         &device,
     );
 
-    // Backprop a scalar loss on `cum` through each scan; the input gradient on
+    // Backprop a scalar loss on `cum` through each scan. The input gradient on
     // the (normalised) quaternion must match.
     let grad_for = |parallel: bool| -> Tensor<5> {
         let p = Param::from_tensor(Tensor::from_inner(q_raw.clone()));
@@ -638,13 +639,13 @@ fn cumprod_parallel_matches_sequential_grads() {
 
 #[test]
 fn single_axis_collapses_to_cumsum() {
-    // Quaternions about a fixed axis (here î) commute; their cumulative product
-    // is the half-angle-cumsum quaternion — exactly the closed form of
+    // Quaternions about a fixed axis (here î) commute. Their cumulative product
+    // is the half-angle-cumsum quaternion, exactly the closed form of
     // `Complex2D`.
     let device = test_device();
     let (batch, sequence, nheads, blocks) = (2, 8, 2, 2);
 
-    // Random per-micro-step angles θₜ; the quaternion of each micro-step is
+    // Random per-micro-step angles θₜ. The quaternion of each micro-step is
     // (cos(θ/2), sin(θ/2), 0, 0).
     let theta_bsh1 = Tensor::<5>::random(
         [batch, sequence, nheads, blocks, 1],
@@ -690,11 +691,12 @@ fn single_axis_collapses_to_cumsum() {
 /// its 4-block by the same angle `φ`. The production `apply_rope` (interleaved)
 /// rotates each 2-pair `(0,1),(2,3),…` by its own angle.
 ///
-/// So restricting the quaternion machinery to a single fixed axis (the abelian
-/// case) and locking each block's two rotation pairs to a shared angle, the two
-/// pathways must agree **exactly** — and the non-abelian `quat_cumprod`
-/// collapses to the cumulative angle of `Complex2D`. This ties the quaternion
-/// code to the abelian `Complex2D` implementation at `k = 2`.
+/// The test restricts the quaternion machinery to a single fixed axis (the
+/// abelian case). It also locks the two rotation pairs of each block to a
+/// shared angle. Then the two pathways must agree **exactly**, and the
+/// non-abelian `quat_cumprod` collapses to the cumulative angle of `Complex2D`.
+/// This ties the quaternion code to the abelian `Complex2D` implementation at
+/// `k = 2`.
 #[test]
 fn k2_quaternion_matches_production_rotation() {
     let device = test_device();
@@ -725,9 +727,10 @@ fn k2_quaternion_matches_production_rotation() {
     let b_quat = rotate_state_rank_blocks::<4, 5>(bvec.clone(), qcum);
 
     // ── Production Complex2D rotation ───────────────────────────────────────
-    // Cumulative per-block angle Φⱼ = cumsum(aⱼ) (single-axis quaternions
-    // commute, so the product's angle is the sum), duplicated across each
-    // block's two interleaved pairs: angles = [Φ⁰, Φ⁰, Φ¹, Φ¹, …].
+    // Cumulative per-block angle Φⱼ = cumsum(aⱼ). Single-axis quaternions
+    // commute, so the angle of the product is the sum. The test duplicates Φⱼ
+    // across the two interleaved pairs of each block:
+    // angles = [Φ⁰, Φ⁰, Φ¹, Φ¹, …].
     let phi_bshj = a_bshj.cumsum(1);
     let angles_bshr2 = phi_bshj
         .unsqueeze_dim::<5>(4) // [b,s,h,J,1]
@@ -747,10 +750,10 @@ fn k2_quaternion_matches_production_rotation() {
 //    `Complex2D`)
 // ---------------------------------------------------------------------------
 
-/// Two generic (multi-axis) quaternions do **not** commute, so swapping the
-/// order of two rotation micro-steps changes the cumulative rotation — something no
-/// `cumsum`-of-angles (abelian `Complex2D`) can represent. This is the
-/// structural source of the extra state-tracking power.
+/// Two generic (multi-axis) quaternions do **not** commute. So swapping the
+/// order of two rotation micro-steps changes the cumulative rotation. No
+/// `cumsum`-of-angles (abelian `Complex2D`) can represent this change. This is
+/// the structural source of the extra state-tracking power.
 #[test]
 fn rotation_order_matters_for_generic_quaternions() {
     let device = test_device();
@@ -823,13 +826,13 @@ fn all_finite<const D: usize>(t: Tensor<D>) -> bool {
 /// the per-position rotation generator can land on exactly zero.)
 ///
 /// The clamp floors the **sum-of-squares** at `div_eps`, which is a representable
-/// normal in every supported dtype (f64/f32/f16/bf16); a `div_eps²`-sized floor
+/// normal in every supported dtype (f64/f32/f16/bf16). A `div_eps²`-sized floor
 /// would underflow to a no-op in f16 and re-open the NaN.
 #[test]
 fn scaled_axis_zero_generator_grad_finite() {
     let device = test_device();
-    // Row 0 is the exact zero generator; the rest are generic. Mixing the two
-    // checks both that the degenerate row is guarded and that the clamp does not
+    // Row 0 is the exact zero generator. The rest are generic. Mixing the two
+    // checks both that the clamp guards the degenerate row and that it does not
     // disturb the ordinary rows (which still backprop normally).
     let random = Tensor::<2>::random([7, 3], Distribution::Normal(0.0, 1.0), &device);
     let raw = Tensor::cat(vec![Tensor::<2>::zeros([1, 3], &device), random], 0); // [8, 3]
@@ -847,7 +850,8 @@ fn scaled_axis_zero_generator_grad_finite() {
 /// Regression companion to [`scaled_axis_zero_generator_grad_finite`] for
 /// [`quat_normalize`]: a zero quaternion (all four components 0) must backprop
 /// to a finite gradient. Same `sqrt`-at-origin mechanism, same pre-`sqrt`
-/// `clamp_min` fix; a unit quaternion (sum-of-squares 1) is left untouched.
+/// `clamp_min` fix. The fix leaves a unit quaternion (sum-of-squares 1)
+/// untouched.
 #[test]
 fn normalize_zero_quaternion_grad_finite() {
     let device = test_device();
@@ -927,8 +931,8 @@ fn config_rotation_channels_and_d_in_proj() {
         q.num_rotation_channels() as i64 - base.num_rotation_channels() as i64
     );
 
-    // Rotor4D: the same blocks, but a generator per *factor* — twice the
-    // channels of Quaternion4D, and twice the scan's block axis.
+    // Rotor4D: the same blocks, but a generator per *factor*. So it has twice
+    // the channels of Quaternion4D, and twice the block axis of the scan.
     let r = base.with_rotation(RotationKind::Rotor4D);
     assert_eq!(r.num_quat_blocks(), q.num_quat_blocks());
     assert_eq!(r.num_rotation_blocks(), 2 * q.num_quat_blocks());
@@ -1020,9 +1024,10 @@ fn rotor_generator_channels_are_left_then_right() {
 }
 
 /// The block stores its [`RotationKind`] as a `#[module(skip)]` field (a
-/// non-parameter constant). It must therefore be excluded from the record yet
-/// survive a `into_record` → `load_record` round-trip (carried from the module
-/// being loaded into), and the loaded block must still run the quaternion path.
+/// non-parameter constant). So the record must not hold it. But the field must
+/// survive a `into_record` → `load_record` round-trip. Its value comes from the
+/// module that loads the record. The loaded block must still run the quaternion
+/// path.
 #[test]
 fn quaternion_rotation_field_survives_record_roundtrip() {
     use crate::mamba3::mamba3::Mamba3Config;
@@ -1049,11 +1054,12 @@ fn quaternion_rotation_field_survives_record_roundtrip() {
     assert_eq!([2, 4, 32], out.dims());
 }
 
-/// A quaternion block's chunked `forward` must equal its recurrent `step`
-/// unrolling — the same parity guarantee the abelian path satisfies, now for the
-/// non-abelian quaternion rotation (chunked `quat_cumprod` vs single-step
-/// `quat_mul`, feeding the unchanged double-ssd SSD scan). Both the
-/// left-isoclinic and the full-`SO(4)` kind run it.
+/// The chunked `forward` of a quaternion block must equal its recurrent `step`
+/// unrolling. This is the same parity guarantee that the abelian path
+/// satisfies, here for the non-abelian quaternion rotation. The chunked
+/// `quat_cumprod` and the single-step `quat_mul` both feed the unchanged
+/// double-ssd SSD scan. Both the left-isoclinic and the full-`SO(4)` kind run
+/// it.
 fn quaternion_forward_step_parity_kind(kind: RotationKind, rotation_fraction: f64, mimo_rank: usize) {
     use crate::mamba3::mamba3::Mamba3Config;
     use crate::mamba3::scan_options::Mamba3ScanOptions;
@@ -1125,10 +1131,10 @@ fn rotor_block_forward_step_parity_mimo() {
     quaternion_forward_step_parity_kind(RotationKind::Rotor4D, 1.0, 2);
 }
 
-/// Split-prefill continuity for Quaternion4D: a single `forward` over the full
-/// sequence must equal a split `forward(prefix)` → `forward(suffix)` that threads
-/// the cache across the seam (exercises the cross-chunk quaternion carry at the
-/// block level).
+/// Split-prefill continuity for Quaternion4D. A single `forward` over the full
+/// sequence must equal a split `forward(prefix)` → `forward(suffix)` that
+/// threads the cache across the seam. This exercises the cross-chunk quaternion
+/// carry at the block level.
 fn quaternion_split_prefill_matches_full_kind(kind: RotationKind) {
     use crate::mamba3::mamba3::Mamba3Config;
     use crate::mamba3::scan_options::Mamba3ScanOptions;
@@ -1174,17 +1180,17 @@ fn quaternion_split_prefill_matches_full() {
     quaternion_split_prefill_matches_full_kind(RotationKind::Quaternion4D);
 }
 
-/// Both `SO(4)` factors are carried across the seam — a right factor dropped
-/// from the cache would show up here and nowhere else.
+/// The cache carries both `SO(4)` factors across the seam. Only this test would
+/// find a right factor that the cache dropped.
 #[test]
 fn rotor_split_prefill_matches_full() {
     quaternion_split_prefill_matches_full_kind(RotationKind::Rotor4D);
 }
 
-/// Gradient parity for Quaternion4D: backprop through the chunked `forward` and
+/// Gradient parity for Quaternion4D. Backprop through the chunked `forward` and
 /// through the recurrent `step` unrolling must agree (same function ⇒ same
-/// gradients), confirming the backward path through the quaternion scan matches
-/// the recurrent form.
+/// gradients). So the test checks that the backward path through the quaternion
+/// scan matches the recurrent form.
 fn quaternion_forward_step_grad_parity_kind(kind: RotationKind) {
     use crate::mamba3::mamba3::Mamba3Config;
     use crate::mamba3::scan_options::Mamba3ScanOptions;
@@ -1262,10 +1268,10 @@ fn rotor_forward_step_grad_parity() {
 /// Every field of a Mamba-3 cache, compared: the state, the tap FIFO, and
 /// the cumulative rotation.
 ///
-/// The rotation is compared as the rotation it *stands for*, not as the number
-/// stored: `wrap_angle` reduces mod 2π, so two representatives of one rotation
-/// differ by a whole turn whenever the two paths land on opposite sides of the
-/// cut. `(sin, cos)` is the comparison that does not care.
+/// The function compares the rotation that the stored number *represents*, not
+/// the number itself. `wrap_angle` reduces mod 2π. So two representatives of one
+/// rotation differ by a whole turn whenever the two paths land on opposite
+/// sides of the cut. A comparison of `(sin, cos)` ignores that whole turn.
 fn assert_cache_parity(
     label: &str,
     a: crate::mamba3::cache::Mamba3Cache,
@@ -1286,26 +1292,29 @@ fn assert_cache_parity(
     assert!(d < dtype_tol(VAL_TOL), "{label}: cumulative rotation: {d:.3e}");
 }
 
-/// Full parity — **output, cache and gradients** — for the abelian angle scan,
+/// Full parity (**output, cache and gradients**) for the abelian angle scan,
 /// at write lengths on both sides of
 /// [`prefix_sum`](crate::mamba3::helpers::prefix_sum)'s blocking threshold.
 ///
-/// `step` scans one token's `micro_steps` at a time and carries the rest
-/// through the cache, so its axis is `u` — below
-/// [`scan_block`](crate::mamba3::helpers::scan_block) at any usable `u`, hence
-/// never the blocked branch. That makes it the oracle which outlives whichever
-/// algorithm `forward` builds the prefix with — `Tensor::cumsum` once, the
-/// blocked scan now, whatever replaces it — which is the whole point of pinning
-/// the contract here rather than against the op.
+/// `step` scans the `micro_steps` of one token at a time and carries the rest
+/// through the cache. So its axis is `u`, below
+/// [`scan_block`](crate::mamba3::helpers::scan_block) at any usable `u`, and
+/// `step` never takes the blocked branch. That makes `step` an oracle that
+/// outlives each algorithm that `forward` can build the prefix with:
+/// `Tensor::cumsum`, the blocked scan, or a later replacement. This is the
+/// whole point of pinning the contract here, not against the op.
 ///
-/// The cases are the branch cases: a write axis inside one block, one spanning
-/// several exactly, and one with a partial last block — the middle one reached
-/// through `micro_steps`, which is what multiplies the axis and made the scan's
-/// cost matter in the first place. Every *other* `Complex2D` forward/step test
-/// in the crate runs at a write length of 18 or less, i.e. entirely on the
-/// unblocked branch, so this is the one that covers the blocked one; the
-/// [`scan_block`](crate::mamba3::helpers::scan_block) assertion fails loudly
-/// rather than silently losing that coverage if the block rule is re-tuned.
+/// The cases are the branch cases:
+/// - a write axis inside one block,
+/// - one that spans several blocks exactly, reached through `micro_steps`,
+/// - one with a partial last block.
+///
+/// `micro_steps` multiplies the axis, and this makes the cost of the scan
+/// matter. Every *other* `Complex2D` forward/step test in the crate runs at a
+/// write length of 18 or less, i.e. entirely on the unblocked branch. So this
+/// test is the one that covers the blocked branch. If a change re-tunes the
+/// block rule, the [`scan_block`](crate::mamba3::helpers::scan_block) assertion
+/// fails loudly. So the test does not silently lose that coverage.
 #[test]
 fn complex_angle_scan_forward_step_parity() {
     use crate::mamba3::helpers::scan_block;
@@ -1320,8 +1329,8 @@ fn complex_angle_scan_forward_step_parity() {
         assert_eq!(
             blocked,
             scan_block(write_len) < write_len,
-            "{label}: the scan's branch moved — re-pick the lengths so both \
-             branches stay covered"
+            "{label}: the scan's branch moved. Pick the lengths again so that \
+             both branches stay covered"
         );
 
         let model = Mamba3Config::new(32)
@@ -1381,16 +1390,16 @@ fn complex_angle_scan_forward_step_parity() {
     }
 }
 
-/// The scan's **carry-in**, at full parity: a split prefill whose *continuation*
-/// is long enough to take the blocked branch must land exactly where one call
-/// does — output, every cache field, and gradients.
+/// The scan's **carry-in**, at full parity. A split prefill whose
+/// *continuation* is long enough to take the blocked branch must land exactly
+/// where one call does. This holds for the output, every cache field, and the
+/// gradients.
 ///
-/// The cached angle enters the scan as its initial value, and it rides the block
-/// offset rather than costing a pass of its own, so getting it wrong (dropped,
-/// or broadcast along the wrong axis) is invisible to any test whose second call
-/// is short — which, before this one, was all of them: the existing split-prefill
-/// tests continue into calls of 12 write positions or fewer, entirely on the
-/// unblocked branch.
+/// The cached angle enters the scan as its initial value. It rides the block
+/// offset and costs no pass of its own. So an error in it (a dropped angle, or
+/// a broadcast along the wrong axis) is invisible to any test whose second call
+/// is short. The other split-prefill tests continue into calls of 12 write
+/// positions or fewer, entirely on the unblocked branch.
 #[test]
 fn complex_angle_scan_split_prefill_parity() {
     use crate::mamba3::helpers::scan_block;
@@ -1402,8 +1411,8 @@ fn complex_angle_scan_split_prefill_parity() {
     let tokens = head_tokens + tail_tokens;
     assert!(
         scan_block(tail_tokens) < tail_tokens,
-        "the continuation must take the blocked branch, or the carry-in this \
-         test exercises is not the blocked one — lengthen it"
+        "the continuation must take the blocked branch. Otherwise, the carry-in \
+         that this test exercises is not the blocked one. Lengthen the continuation"
     );
 
     let model = Mamba3Config::new(32)
@@ -1458,7 +1467,7 @@ fn complex_angle_scan_split_prefill_parity() {
 /// The right factor must be *trainable*, not merely present: gradient has to
 /// reach the second half of every head's generator channels. A forward that
 /// dropped the right factor (or built it from the same channels as the left)
-/// would still pass every value-parity test above, and fail here.
+/// would still pass every value-parity test above. It would fail here.
 #[test]
 fn rotor_right_factor_channels_receive_gradient() {
     use crate::mamba3::mamba3::Mamba3Config;
@@ -1555,10 +1564,10 @@ fn rotation_state_wrong_unwrap_panics() {
     let _ = a.quaternion();
 }
 
-/// The bidirectional wrapper must also run with the quaternion rotation: it
-/// defaults its caches to the double-ssd pathway when the block is Quaternion4D
-/// (a straight + reversed double-ssd pass), rather than panicking on a single-ssd
-/// cache.
+/// The bidirectional wrapper must also run with the quaternion rotation. When
+/// the block is Quaternion4D, the wrapper defaults its caches to the double-ssd
+/// pathway (a straight + reversed double-ssd pass). So it does not panic on a
+/// single-ssd cache.
 #[test]
 fn quaternion_bidi_forward_runs() {
     use crate::mamba3::mamba3::Mamba3Config;
@@ -1734,10 +1743,11 @@ fn without_rotation_channels(
     block
 }
 
-/// The same block re-labelled as [`RotationKind::Real1D`]: the trailing
-/// rotation columns of `in_proj` are **dropped** (not zeroed) and every derived
-/// rotation count goes to zero. Every other weight is shared, so the two blocks
-/// differ in exactly one thing — whether the rotation exists.
+/// The same block re-labelled as [`RotationKind::Real1D`]. The function
+/// **drops** the trailing rotation columns of `in_proj` (it does not zero them),
+/// and every derived rotation count goes to zero. The two blocks share every
+/// other weight, so they differ in exactly one thing: whether the rotation
+/// exists.
 fn as_real1d(block: crate::mamba3::mamba3::Mamba3) -> crate::mamba3::mamba3::Mamba3 {
     use burn::module::Param;
     let mut block = block;
@@ -1758,9 +1768,10 @@ fn as_real1d(block: crate::mamba3::mamba3::Mamba3) -> crate::mamba3::mamba3::Mam
 }
 
 /// [`RotationKind::Real1D`] is *the* rotation-disabled ablation, and it must be
-/// the honest one: a block whose rotation is switched off by zeroing its
-/// generator (any kind, so any per-micro-step rotation is the identity) has to agree
-/// with the `Real1D` block that never projects those channels at all.
+/// the honest one. Take a block of any kind, and remove its rotation with a zero
+/// generator. Then each per-micro-step rotation is the identity. That block
+/// has to agree with the `Real1D` block that never projects those channels at
+/// all.
 ///
 /// The equality is what makes `Real1D` an ablation rather than a fourth model:
 /// it removes the rotation and changes nothing else.
@@ -1836,15 +1847,15 @@ fn row(t: Tensor<2>) -> Vec<f32> {
     t.into_data().try_into_vec_as::<f32>().unwrap()
 }
 
-/// The rotation the block applies is a turn about the axis the projection
-/// *names*: the bounded generator is parallel to the raw channels whatever
-/// their magnitude, and its length alone carries the angle.
+/// The rotation that the block applies is a turn about the axis that the
+/// projection *names*. The bounded generator is parallel to the raw channels
+/// whatever their magnitude, and its length alone carries the angle.
 ///
-/// Squashing the three channels separately — the obvious way to bound a
-/// generator — fails exactly here: `tanh` compresses large components more than
-/// small ones, so the axis would drift toward the diagonal as the projection
-/// grows, and the reachable set would be a cube (angle `√3·max` about the
-/// diagonal, `max` about a coordinate axis) rather than a ball.
+/// The obvious way to bound a generator is to squash the three channels
+/// separately. It fails exactly here. `tanh` compresses large components more
+/// than small ones, so the axis would drift toward the diagonal as the
+/// projection grows. The reachable set would also be a cube (angle `√3·max`
+/// about the diagonal, `max` about a coordinate axis), not a ball.
 ///
 /// f16 cannot show the monotony. At scale 2, `‖r‖ ≈ 4.58` and
 /// `1 − tanh(4.58) ≈ 2·10⁻⁴`, but the f16 spacing below 1 is `4.9·10⁻⁴`. So the
@@ -1885,7 +1896,7 @@ fn bounded_generator_keeps_its_axis() {
         assert!(len > last_len, "angle not monotone at scale {scale}");
         last_len = len;
     }
-    // the bound is approached, so the whole range is usable
+    // the angle approaches the bound, so the whole range is usable
     assert!(
         last_len > 0.99 * max_angle as f32,
         "the bound is never approached: {last_len}"
@@ -1895,15 +1906,15 @@ fn bounded_generator_keeps_its_axis() {
 /// Why [`Mamba3Config::rotation_range`](crate::mamba3::mamba3::Mamba3Config::rotation_range)
 /// defaults to 2 for the quaternion path.
 ///
-/// A rotation of exactly the bound sits at `tanh`'s asymptote, where f32 gives a
-/// forward value that is exactly right and a gradient that is exactly **zero** —
-/// so at `range = 1` the half-turn, the single most useful rotation for
-/// state-tracking, is reachable only by a training step the optimiser can
-/// never take. At `range = 2` the same half-turn sits at `tanh = 0.5`, in the
-/// interior, with a healthy gradient.
+/// A rotation of exactly the bound sits at `tanh`'s asymptote. There, f32 gives
+/// a forward value that is exactly right and a gradient that is exactly
+/// **zero**. So at `range = 1`, only a training step that the optimiser can
+/// never take reaches the half-turn. The half-turn is the single most useful
+/// rotation for state-tracking. At `range = 2`, the same half-turn sits at
+/// `tanh = 0.5`, in the interior, with a healthy gradient.
 ///
 /// The dead gradient is an exact 0 in f32 only. At the asymptote, the
-/// derivative of `tanh` is 0 in f16 too, but the derivative of the direction
+/// derivative of `tanh` is 0 in f16 too. But the derivative of the direction
 /// `r/‖r‖` along `r` is a difference of two terms that are equal in exact
 /// arithmetic. In f32 they round to the same value. In f16 the division
 /// backward rounds `1/‖r‖²`, and one spacing at 0.1 stays: `dw = −2⁻¹³`.
@@ -1948,8 +1959,8 @@ fn half_turn_is_reachable_with_a_live_gradient() {
 }
 
 /// `rotation_range = 1.0` must stay bit-for-bit the reference formula
-/// `Δ · π · tanh(ϑ)`, so a model that needs the Mamba-3 of the paper and the
-/// official kernels can ask for it in one line. (It is not the default: the
+/// `Δ · π · tanh(ϑ)`. So a model that needs the Mamba-3 of the paper and the
+/// official kernels can ask for it in one line. (It is not the default. The
 /// default is the whole rotation group per unit `Δ`, which keeps the half-turn
 /// differentiable.)
 #[test]
@@ -1968,9 +1979,9 @@ fn complex_range_one_matches_the_reference_angle() {
     );
 }
 
-/// The knob reaches the block: a non-default `rotation_range` changes the
-/// output, and `forward` and `step` still agree under it (they must read the
-/// same [`RotationSpec`], not two copies of the formula).
+/// The knob reaches the block. A non-default `rotation_range` changes the
+/// output, and `forward` and `step` still agree under it. They must read the
+/// same [`RotationSpec`], not two copies of the formula.
 fn rotation_range_is_wired_through(kind: RotationKind) {
     use crate::mamba3::mamba3::Mamba3Config;
     use crate::mamba3::scan_options::Mamba3ScanOptions;
@@ -1994,11 +2005,11 @@ fn rotation_range_is_wired_through(kind: RotationKind) {
         widened
             .clone()
             .forward(x.clone(), None, Mamba3ScanOptions::new(SsdPath::Minimal), None);
-    // A lower bound, so it does not grow with `dtype_tol`: with the range
-    // ignored, the two runs are the same computation and `d` is exactly 0 in
+    // A lower bound, so it does not grow with `dtype_tol`. If the block ignores
+    // the range, the two runs are the same computation, and `d` is exactly 0 in
     // every dtype. The effect itself is ~1e-2, below the f16 `dtype_tol(1e-4)`.
     let d = max_abs_diff(y_default, y_widened.clone());
-    assert!(d > 1e-4, "{kind:?}: rotation_range is ignored: {d}");
+    assert!(d > 1e-4, "{kind:?}: the block ignores rotation_range: {d}");
 
     // forward vs unrolled step under the same non-default range
     let mut cache = None;
@@ -2031,10 +2042,10 @@ fn rotation_range_is_wired_through_quaternion() {
     rotation_range_is_wired_through(RotationKind::Quaternion4D);
 }
 
-/// The scan multiplies unit quaternions, so its prefixes must stay unit — the
-/// quaternion path's replacement for `wrap_angle`'s job on the abelian side.
-/// Checked over a long sequence, where the doubling scan has composed every
-/// prefix out of many factors.
+/// The scan multiplies unit quaternions, so its prefixes must stay unit. On the
+/// quaternion path, this property does the job of `wrap_angle` on the abelian
+/// side. The test checks it over a long sequence, where the doubling scan
+/// composes every prefix out of many factors.
 #[test]
 fn cumulative_quaternion_stays_unit() {
     let device = test_device();
@@ -2077,10 +2088,10 @@ fn quaternion_partial_rotation_must_be_whole_blocks() {
 }
 
 /// Bounding the magnitude leaves the **axis** trainable even where the angle is
-/// pinned at the bound: `tanh` saturates in the radial direction only, so a
-/// projection long enough to freeze the angle can still be turned. Squashing
-/// each component separately froze both at once, because there the axis *is*
-/// the three saturated components.
+/// pinned at the bound. `tanh` saturates in the radial direction only, so the
+/// gradient can still turn a projection that is long enough to freeze the
+/// angle. Squashing each component separately would freeze both at once,
+/// because there the axis *is* the three saturated components.
 #[test]
 fn saturated_generator_keeps_a_live_axis_gradient() {
     let device = test_device();
@@ -2105,10 +2116,10 @@ fn saturated_generator_keeps_a_live_axis_gradient() {
 }
 
 /// A projection large enough to overflow the sum-of-squares must still saturate
-/// at the bound, not collapse: `‖r‖²` is formed at the raw scale, so a channel
-/// above `√max` of the dtype overflows it (`1.8e19` in f32, `256` in f16) —
-/// after which `max/∞ = 0` would silently mean *no rotation at all*, the
-/// opposite of the intended "as far as the bound allows".
+/// at the bound, not collapse. At the raw scale, `‖r‖²` overflows for a channel
+/// above `√max` of the dtype (`1.8e19` in f32, `256` in f16). Then `max/∞ = 0`
+/// would silently mean *no rotation at all*, the opposite of the intended "as
+/// far as the bound allows".
 ///
 /// The scales follow the dtype: two below `√max`, and two above it, up to
 /// `max/2`.
@@ -2179,8 +2190,8 @@ fn a_tiny_generator_keeps_the_gradient_finite() {
 fn quaternion_generators_are_per_head() {
     let device = test_device();
     let (nheads, blocks) = (2, 1);
-    // head 0 turns about x, head 1 about y — impossible to express when the
-    // three channels are shared and only Δ differs.
+    // head 0 turns about x, and head 1 about y. This is impossible to express
+    // when the heads share the three channels and only Δ differs.
     let raw = [1.0f32, 0.0, 0.0, /* head 1 */ 0.0, 1.0, 0.0];
     let rot = Tensor::<1>::from_floats(raw.as_slice(), &device).reshape([1, nheads * 3 * blocks]);
     let dt = Tensor::<1>::from_floats([1.0f32, 1.0].as_slice(), &device).reshape([1, nheads]);
@@ -2209,9 +2220,9 @@ fn quaternion_generators_are_per_head() {
 /// unbiased error only by a random walk.
 ///
 /// The inputs of `quat_normalize` are near-unit here (the exp map, and a
-/// second normalisation). That is the hard case: at a norm ≈ 1, the f16 grid
-/// spacing above 1 is twice the spacing below, and a division by `√Σq²` gave a mean
-/// of `+2e-4` (10% of drift over 512 factors).
+/// second normalisation). That is the hard case. At a norm ≈ 1, the f16 grid
+/// spacing above 1 is twice the spacing below. There, a division by `√Σq²`
+/// would give a mean of `+2e-4` (10% of drift over 512 factors).
 #[test]
 fn a_normalised_quaternion_has_an_unbiased_norm() {
     let device = test_device();

@@ -54,34 +54,37 @@ use burn::backend::{Backend, BackendTypes};
 /// Given the saved inputs (`q`, `init`) and the upstream cotangent `d_cum`,
 /// recomputes the prefix product `P` and returns `(d_q, d_init)` via the
 /// closed-form unit-quaternion VJP documented in the module header. All ops are
-/// parallel (a prefix product + a reverse-cumsum); there is no token loop.
+/// parallel (a prefix product + a reverse-cumsum). The function has no token
+/// loop.
 fn quat_scan_backward<B: Backend>(
     q_bshj4: F<B, 5>,
     init_bhj4: F<B, 4>,
     d_cum_bshj4: F<B, 5>,
 ) -> (F<B, 5>, F<B, 4>) {
-    // Unpack to struct-of-arrays once; all the heavy math is narrow/cat-free.
+    // Unpack to struct-of-arrays once. All the heavy math is narrow/cat-free.
     let q = Quat::from_rank5(q_bshj4);
     let init = Quat::from_rank5(init_bhj4.unsqueeze_dim::<5>(1)); // [b,1,h,j] components
     let d_cum = Quat::from_rank5(d_cum_bshj4);
     let sequence = q.w.dims()[1];
 
-    // Pₜ = qₜ ⊗ … ⊗ q₀ (prefix product, no carry) — recomputed, not stored.
+    // Pₜ = qₜ ⊗ … ⊗ q₀ (prefix product, no carry), recomputed and not stored.
     let p = quat_prefix_product_soa::<B>(q);
 
     // cum[t] = Pₜ ⊗ init (broadcast over the write axis).
     let cum = p.clone().mul(init.clone());
 
-    // S[t] = Σ_{s≥t} conj(Pₛ) ⊗ d_cum[s] — suffix-sum (reverse cumsum) per component.
+    // S[t] = Σ_{s≥t} conj(Pₛ) ⊗ d_cum[s]: a suffix-sum (reverse cumsum) per
+    // component.
     let s = p.clone().conj().mul(d_cum).reverse_cumsum_seq();
 
     // G[t] = Pₜ ⊗ S[t].
     let g = p.mul(s.clone());
 
-    // cum_prev[t] = cum[t-1]; cum_prev[0] = init (prepend init, drop the last).
+    // cum_prev[t] = cum[t-1], and cum_prev[0] = init (prepend init, drop the
+    // last).
     let cum_prev = cum.shift_prepend(init, sequence);
 
-    // d_q[t] = G[t] ⊗ conj(cum_prev[t]);  d_init = S[0].
+    // d_q[t] = G[t] ⊗ conj(cum_prev[t]), and d_init = S[0].
     let d_q_bshj4 = g.mul(cum_prev.conj()).pack();
     let d_init_bhj4 = s.pack().narrow(1, 0, 1).squeeze_dim::<4>(1);
 
@@ -98,7 +101,7 @@ impl<B: Backend + Mamba3QuatScanBackendExt, C: CheckpointStrategy> Mamba3QuatSca
 
         #[derive(Clone, Debug)]
         struct State<B: Backend> {
-            // Saved forward inputs (only the leaves — no scan intermediates).
+            // Saved forward inputs (only the leaves, no scan intermediates).
             q_bshj4: <B as BackendTypes>::FloatTensorPrimitive,
             init_bhj4: <B as BackendTypes>::FloatTensorPrimitive,
             shape_q_bshj4: [usize; 5],

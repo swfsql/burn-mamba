@@ -1,8 +1,8 @@
-//! Tests for the memory-efficient quaternion scan: the recompute-backward
+//! Tests for the memory-efficient quaternion scan. The recompute-backward
 //! [`quat_cumprod_recalculated`] must equal the plain-autodiff reference
 //! [`quat_cumprod`](crate::mamba3::rotation::quat_cumprod) on **values** and
-//! **gradients** (the recompute math is exact for the unit quaternions the
-//! rotation produces). Only the backward's memory profile differs.
+//! **gradients**. The recompute math is exact for the unit quaternions that the
+//! rotation produces. Only the memory profile of the backward differs.
 
 use super::quat_cumprod_recalculated;
 use crate::mamba3::rotation::{quat_cumprod, quat_normalize};
@@ -65,10 +65,10 @@ fn recalculated_matches_quat_cumprod_grads() {
         &device,
     );
 
-    // Backprop a scalar loss touching BOTH `cum` and `final_carry` (so the
-    // final-carry slice's gradient path is exercised) through the (normalised)
-    // quaternion inputs `q` and the carry `init`. Both inputs must receive the
-    // same gradient from each scan.
+    // Backprop a scalar loss touching BOTH `cum` and `final_carry` through the
+    // (normalised) quaternion inputs `q` and the carry `init`. The loss touches
+    // `final_carry`, so the test exercises the gradient path of the final-carry
+    // slice. Both inputs must receive the same gradient from each scan.
     let grad_for = |recalc: bool| -> (Tensor<5>, Tensor<4>) {
         let pq = Param::from_tensor(Tensor::from_inner(q_raw.clone()));
         let pi = Param::from_tensor(Tensor::from_inner(init_raw.clone()));

@@ -12,7 +12,7 @@
 //! ```
 //!
 //! The one-way path is the design rule. `Mₜ` reads the token and never the
-//! plant, so the cascade still scans: the chunkwise SSD of the plant takes the
+//! plant, so the cascade still scans. The chunkwise SSD of the plant takes the
 //! scheduled coefficients as ordinary tensors, and `σ` has its own associative
 //! scan ([`scan`]). A gain that read the state of the plant would close the
 //! loop and lose both.
@@ -49,18 +49,21 @@
 //! ```
 //!
 //! The masses of the trapezoid are the evidence. `γₜ` is the right endpoint.
-//! `νₜ` is the installment of the left endpoint, which the plant pays one
-//! micro-step late and transports by the decay of that micro-step (exact for
-//! a lag-1 tap, an upper bound at lag `u`, see [`kalman`]). Without a tap,
-//! `γ = Δ` and `ν = 0`. The stock `αₜ` is in the covariance (`a² = 1/α`), and
-//! `qₜ = κₕ·Δₜ` is Brownian: doubt grows with elapsed time.
-//! [`Gain::KalmanProjectedNoise`] multiplies `q` by a projected `exp(rₜ)`, so a
-//! token can add doubt without evidence (a gap).
+//! `νₜ` is the installment of the left endpoint. The plant pays it one
+//! micro-step late and transports it by the decay of that micro-step. This
+//! transport is exact for a lag-1 tap and an upper bound at lag `u` (see
+//! [`kalman`]).
+//! Without a tap, `γ = Δ` and `ν = 0`.
 //!
-//! Only the decay changes. `dₜ` replaces `αₜ` where `αₜ` is formed, before any
-//! consumer reads it. So the transports of the trapezoid, the tap FIFO and
-//! the single-SSD key scale all follow. At `κ = 0` the block is stock, bit for
-//! bit (`log1p(0) = 0`). Two facts carry the design:
+//! The stock `αₜ` is in the covariance (`a² = 1/α`), and `qₜ = κₕ·Δₜ` is
+//! Brownian: doubt grows with elapsed time. [`Gain::KalmanProjectedNoise`]
+//! multiplies `q` by a projected `exp(rₜ)`, so a token can add doubt without
+//! evidence (a gap).
+//!
+//! Only the decay changes. `dₜ` replaces `αₜ` where the block forms `αₜ`,
+//! before any consumer reads it. So the transports of the trapezoid, the tap
+//! FIFO and the single-SSD key scale all follow. At `κ = 0` the block is stock,
+//! bit for bit (`log1p(0) = 0`). Two facts carry the design:
 //!
 //! - **a ceiling:** `Λₜ < 1/qₜ + γₜ` for every history. So strong evidence
 //!   dominates for a bounded time, not for a time that grows with its
@@ -74,7 +77,7 @@
 //! The block also reads through `(Λₜ + ε)^(−ωₕ)` (`ω = 0` at init). `ω = 1`
 //! reads the estimate `S = η/Λ` instead of the information `η`: a mean, not a
 //! sum. The scale applies to the SSD readout *before* the `D` skip and the
-//! `c·e` of the register. So a per-head output norm does not remove it: the
+//! `c·e` of the register. So a per-head output norm does not remove it. The
 //! norm removes only what the three terms share, and `ω` sets the share of the
 //! SSD against the other two. It cancels only when the other two vanish, and
 //! then only up to the `ε` of the norm.
@@ -150,7 +153,8 @@ pub enum Gain {
 }
 
 impl Gain {
-    /// Whether the decay is computed (a `ln Λ` cache field, a `κ` per head).
+    /// Whether a Kalman filter computes the decay (a `ln Λ` cache field, a `κ`
+    /// per head).
     pub fn is_kalman(self) -> bool {
         !matches!(self, Gain::Projected)
     }

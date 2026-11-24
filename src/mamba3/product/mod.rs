@@ -68,12 +68,13 @@
 //!   [`mimo_rank`](crate::mamba3::mamba3::Mamba3Config::mimo_rank) fills
 //!   *jointly*: an epoch of `u` samples against a minibatch of `M`. It is also
 //!   why this dial is on Mamba-3 and not on Mamba-2, whose transition is
-//!   scalar by construction: there `u` would buy nothing. The containment is
-//!   exact and one-way. `MambaProduct(u = M)` reproduces a whole `MIMO(M)`
-//!   trajectory. The converse fails by a closed-form dimension count, because
-//!   `M` ties its values, step sizes and rotation where `u` leaves them free
-//!   (`info/mamba-3/mimo-as-batch.md` §9). What `M` gives back is cost: it is
-//!   parallel, and its state bytes stay flat.
+//!   scalar by construction: there `u` would buy nothing.
+//!
+//!   The containment is exact and one-way. `MambaProduct(u = M)` reproduces a
+//!   whole `MIMO(M)` trajectory. The converse fails by a closed-form dimension
+//!   count, because `M` ties its values, step sizes and rotation where `u`
+//!   leaves them free (`info/mamba-3/mimo-as-batch.md` §9). In exchange, `M`
+//!   costs less: it is parallel, and its state bytes stay flat.
 //! - **On the abelian rotation, it lifts a bound that the block cannot
 //!   otherwise cross.** One micro-step turns by at most
 //!   [`rotation_range`](crate::mamba3::mamba3::Mamba3Config::rotation_range)`·π·Δ`.
@@ -81,10 +82,12 @@
 //!   gradient is exactly zero. So at `rotation_range = 1`, descent cannot reach
 //!   the half-turn that state-tracking wants. `u` micro-rotations, each well
 //!   inside the bound, compose to `u`× the reach with live gradients at every
-//!   factor. Note the price: the token gets `u` *full-size* micro-steps, so its
+//!   factor.
+//!
+//!   Note the price: the token gets `u` *full-size* micro-steps, so its
 //!   effective interval is `u`× longer, not subdivided. The consistent
-//!   alternative (`Δⱼ = Δ/u`, the same per-token transition, only the
-//!   staggered writes and the ordering below) stays inside the reach of the
+//!   alternative is `Δⱼ = Δ/u`: the same per-token transition, with only the
+//!   staggered writes and the ordering below. It stays inside the reach of the
 //!   model, because `dt_limit` has no lower floor by default. So this is a
 //!   superset of it, not a substitute.
 //! - **On the non-abelian rotations, it is the argument of DeltaProduct
@@ -107,10 +110,12 @@
 //!   micro-step *writes* to the state, so `B`, `x`, `Δ`, `A`, `λ` and the
 //!   rotation are on the write axis. The token is *read* once, so `C` stays at
 //!   token resolution, and so does the `y` that the SSD returns. That is the
-//!   **read axis** of the chunk (`helpers::read_positions`). `u` widens only the
-//!   write axis of a chunk. So the intra-chunk score, the state-to-output
-//!   product and the QK-norm/rotation of `C` are `u`-invariant. The block does
-//!   not compute `u`× the output to discard all positions but one.
+//!   **read axis** of the chunk (`helpers::read_positions`).
+//!
+//!   `u` widens only the write axis of a chunk. So the intra-chunk score, the
+//!   state-to-output product and the QK-norm/rotation of `C` are `u`-invariant.
+//!   The block does not compute `u`× the output to discard all positions but
+//!   one.
 //! - **`z`, the `D` skip and the output gate are per token.** The skip takes
 //!   the `x` of the last micro-step, which is contemporaneous with the readout
 //!   ([`last_micro4`]).
@@ -125,7 +130,7 @@
 //! kernel launches at every `u`.
 //!
 //! Everything else is per micro-step, including the decay. In Mamba, the decay
-//! is not a control of its own: it comes from the step size (`α = exp(ΔA)`),
+//! is not a control of its own. It comes from the step size (`α = exp(ΔA)`),
 //! and `Δ` also weights the write and paces the rotation. So the "forget gate on micro-step 0" of
 //! DeltaProduct has no faithful analogue here. `α ≡ 1` on the interior
 //! micro-steps would also stop the rotation. A scalar decay composes either way

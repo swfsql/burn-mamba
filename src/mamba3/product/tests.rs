@@ -33,7 +33,8 @@ fn unfold_reads_micro_steps_in_order() {
     let out = unfold_micro_bs(t, 3);
     assert_eq!([1, 6, 2], out.dims());
     let flat: Vec<f32> = out.into_data().try_into_vec_as::<f32>().unwrap();
-    // Token 0's micro-steps are (0,1), (2,3), (4,5); token 1's follow.
+    // The micro-steps of token 0 are (0,1), (2,3), (4,5). Those of token 1
+    // follow.
     assert_eq!(
         vec![0., 1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11.],
         flat
@@ -46,9 +47,9 @@ fn unfold_reads_micro_steps_in_order() {
     assert_eq!(vec![0., 1., 2., 3., 4., 5.], flat);
 }
 
-/// `last_micro4` takes the position the readout is contemporaneous with — the
-/// last of every run of `u` — which is the same rule the chunk's read axis
-/// applies inside the SSD.
+/// `last_micro4` takes the position that the readout is contemporaneous with:
+/// the last position of every run of `u`. The read axis of the chunk applies
+/// the same rule inside the SSD.
 #[test]
 fn last_micro_takes_the_read_position() {
     let device = test_device();
@@ -107,9 +108,9 @@ fn in_proj_repeats_only_the_per_micro_step_sub_projections() {
 // ---------------------------------------------------------------------------
 
 /// Unroll `step` token by token and compare against `forward` over the same
-/// sequence — the property that pins the fold: `forward` runs the recurrence on
-/// the write axis, `step` runs `u` explicit micro-steps, and they must
-/// agree on outputs *and* on every cache field.
+/// sequence. This property pins the fold. `forward` runs the recurrence on the
+/// write axis, and `step` runs `u` explicit micro-steps. They must agree on
+/// outputs *and* on every cache field.
 fn forward_matches_step_double(kind: RotationKind, micro_steps: usize) {
     let device = test_device();
     let config = cfg(kind, micro_steps);
@@ -186,8 +187,8 @@ fn forward_matches_step_double_rotor() {
 }
 
 /// The same for the single-pass pathway. `step` runs the double-SSD
-/// recurrence on its cache, so this also pins that the two accumulators still
-/// coincide at token boundaries when a token is `u` micro-steps long.
+/// recurrence on its cache. So this test also pins that the two accumulators
+/// still coincide at token boundaries when a token is `u` micro-steps long.
 fn forward_single_matches_step(kind: RotationKind, micro_steps: usize) {
     let device = test_device();
     let config = cfg(kind, micro_steps);
@@ -229,9 +230,9 @@ fn forward_single_matches_step_all_kinds() {
     forward_single_matches_step(RotationKind::Complex2D, MICRO);
 }
 
-/// A prefill split at a token boundary must equal the whole one: the cache
-/// carries the *last micro-step*, which is exactly what the next call's first
-/// micro-step follows.
+/// A prefill split at a token boundary must equal the whole one. The cache
+/// carries the *last micro-step*, which is exactly what the first micro-step of
+/// the next call follows.
 #[test]
 fn split_prefill_matches_full() {
     let device = test_device();
@@ -268,10 +269,10 @@ fn split_prefill_matches_full() {
 
 /// The third leg of forward ≡ step, alongside the outputs and the cache:
 /// backprop through the chunked `forward` and through the unrolled `step` must
-/// agree. Same function ⇒ same gradients, so a fold whose backward disagreed
-/// with its own recurrence — a micro-step whose gradient landed on the wrong
-/// position, or a `C` broadcast whose gradient was not summed back over the
-/// group — would show up here and in no value test.
+/// agree. Same function ⇒ same gradients. So this test would find a fold whose
+/// backward disagreed with its own recurrence, and no value test would find it.
+/// Two examples are a micro-step whose gradient landed on the wrong position,
+/// and a `C` broadcast whose gradient was not summed back over the group.
 fn forward_step_grad_parity(kind: RotationKind, micro_steps: usize) {
     let device = test_device();
     let config = cfg(kind, micro_steps);
@@ -337,8 +338,8 @@ fn forward_step_grad_parity_non_abelian() {
 
 /// Every micro-step's slice of the widened `in_proj` must receive gradient.
 /// A fold that dropped a micro-step (or read the sub-projections in the wrong
-/// order) would leave one of these sub-projections dead, and every
-/// value-parity test above would still pass.
+/// order) would leave one of these sub-projections dead. Every value-parity
+/// test above would still pass.
 #[test]
 fn every_micro_step_receives_gradient() {
     let device = test_device();
