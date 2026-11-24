@@ -48,7 +48,7 @@ serves both of them:
   running maxima, resets.
 
 The audit is in §5, and it is stricter than it looks. A classifier gets a
-large part of the output of a positive system free: the per-token gate of the
+large part of the output of a positive system free. The per-token gate of the
 block cross-multiplies, and its final norm divides. What survives is narrow
 and specific:
 
@@ -224,16 +224,16 @@ This is still one Möbius map (shift by `ν`, predict, shift by `γ`):
            [αq,         1 + qαν       ]]
 ```
 
-With it, `Λ` is **exactly** the recurrence of the plant on ones: the total
-weight of every sample written (the zero tap slot of a fresh cache is one of
-them). `η/Λ` is their weighted mean. The ceiling becomes `Λₜ < 1/qₜ + γₜ`. The
-exact rate of the contraction uses `γ + αν(1 + qγ) ≥ γ`, so
-`tanh(¼·ln(1 + 1/(q·γ)))` is still an `α`-free bound. Without a tap, `γ = Δ`
-and `ν = 0`, and this is the element of §3.
+With it, `Λ` is **exactly** the recurrence of the plant on ones. That is the
+total weight of every sample written (the zero tap slot of a fresh cache is
+one of them). `η/Λ` is their weighted mean. The ceiling becomes
+`Λₜ < 1/qₜ + γₜ`. The exact rate of the contraction uses
+`γ + αν(1 + qγ) ≥ γ`, so `tanh(¼·ln(1 + 1/(q·γ)))` is still an `α`-free
+bound. Without a tap, `γ = Δ` and `ν = 0`, and this is the element of §3.
 
-A **lag-`u`** tap (the `Vertical*` patterns at `u > 1`) is transported across
-its whole gap, `∏ d` over `u` micro-steps. That product reads `u` earlier
-precisions, and no 2×2 map does that. The gain adds it like a lag-1
+The product `∏ d` over `u` micro-steps transports a **lag-`u`** tap (the
+`Vertical*` patterns at `u > 1`) across its whole gap. That product reads `u`
+earlier precisions, and no 2×2 map does that. The gain adds it like a lag-1
 installment and over-counts by `νₜ·(dₜ − ∏ d)`. So `Λ` is an upper bound of
 the weight of the plant, not equal to it.
 
@@ -262,10 +262,11 @@ zero, that is, an integrator with anti-windup. `(0, v)` is a running maximum.
 The property that *distinguishes* the member is in the exponential domain.
 There, the same recursion reads `Λₜ = e^{aₜ}·Λₜ₋₁ + e^{bₜ}`. That is a linear
 recurrence whose **decay is above one** when `a > 0`. The decay of a Mamba
-head is `α = exp(Δ·A)` with `A < 0`: structurally, at most one. A floor needs
-the state to grow *and* a lower limit that catches it. So a floor is the part
-of the semiring that the plant cannot reach. A maximum, whose `a` is zero, is
-not that part (§5.4).
+head is `α = exp(Δ·A)` with `A < 0`: structurally, at most one.
+
+A floor needs the state to grow *and* a lower limit that catches it. So a
+floor is the part of the semiring that the plant cannot reach. A maximum,
+whose `a` is zero, is not that part (§5.4).
 
 ---
 
@@ -291,23 +292,25 @@ read port free.** The port buys a *value*, not a decision. (For this reason,
 
 **§5.2: a gap does not move the estimate.** To scale `η` and `Λ` by the same
 factor keeps `η/Λ` and decreases only the weight behind it. So the effect of a
-discount shows one micro-step later, when new evidence is blended in. A task that
-measures it must thus put fresh evidence after the gap, and probe after that.
+discount shows one micro-step later, when new evidence enters the estimate. A
+task that measures it must thus put fresh evidence after the gap, and probe
+after that.
 
-**§5.3: the size of the drift separation.** On a stream whose probes are at
-the edge of the estimate itself, the best geometric-discount arm reaches ~96%
-in f64 (and 97.7% in the f32 example sweep of the crate). The filter reaches
-100%. The separation is real and small.
+**§5.3: the size of the drift separation.** Take a stream whose probes are at
+the edge of the estimate itself. On it, the best geometric-discount arm
+reaches ~96% in f64 (and 97.7% in the f32 example sweep of the crate). The
+filter reaches 100%. The separation is real and small.
 
 **§5.4: a maximum is a sum in the exponential domain.** `Σ exp(S·vₛ)` at decay
 one decides exactly "is `v` a new maximum", if `e^S` is more than the sequence
 length. It needs no logarithm. So a running maximum does not need the
-semiring. It needs the **range** of the semiring: that arm spans
+semiring. It needs the **range** of the semiring. That arm spans
 `e^{S·(v_max − v_min)}` (1.5e15 in the setting of the script, against the
-~1e7 of f32), where the register spans `S·v`. The dial is the alphabet:
-`examples/tally/record` ties at six values and separates at twelve. Every
-in-projection channel is an affine read of one embedding, and for this reason
-more heads do not buy more digits.
+~1e7 of f32), where the register spans `S·v`.
+
+The dial is the alphabet: `examples/tally/record` ties at six values and
+separates at twelve. Every in-projection channel is an affine read of one
+embedding, and for this reason more heads do not buy more digits.
 
 ---
 
@@ -367,7 +370,7 @@ capability. But the family is necessary. The tables are those of
 - **Not yet a training claim.** Everything above is representability plus
   three tiny trained rungs. This note does not test whether a computed decay
   helps a language model at scale. The crate can promise one thing: the join
-  is exact. So to answer the question, turn `κ` on.
+  is exact. So to answer the question, enable `κ`.
 
 ---
 

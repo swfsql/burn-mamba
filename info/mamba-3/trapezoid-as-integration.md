@@ -33,7 +33,7 @@ online. In that reading, a micro-step of Mamba-2 is one gradient step on an
 isotropic ridge, pulled toward a rank-one target. The exponential-trapezoidal
 discretisation of Mamba-3 is usually described as an improvement to
 second-order accuracy, or as a two-tap FIR filter on the gradient stream. After
-that, it is put aside as orthogonal to everything else.
+that, it is not studied further, as orthogonal to everything else.
 
 It is orthogonal, and this note makes the orthogonality precise, not assumed.
 Four results:
@@ -155,7 +155,7 @@ consequences:
   per-micro-step factors ⟹ `u` can change only the write) holds with the
   trapezoid on.
 - The usual one-line summary, *"the trapezoid does not change the
-  objective"*, is half correct and worth a split: the **quadratic term** does
+  objective"*, is half correct and worth a split. The **quadratic term** does
   not change, but the objective does. The stronger version makes the
   trapezoid look as if it is outside the framework.
 
@@ -185,11 +185,11 @@ quadrature. The whole discretisation table is the choice of that quadrature.
 | `½` | symmetric **Strang** | 2nd |
 | `σ(u_t)` | a learned, per-token, per-head interpolation | — |
 
-All four are verified. This derives the error remark of the source, and does
-not only repeat it: **Strang splitting is second-order only when the split is
-symmetric**. That is exactly the condition `λ_t = ½ + O(Δ_t)` that the
-appendix needs for an `O(Δ³)` local truncation error. The script measures the
-quadrature of the samples alone, against the exact integral, so that the
+The script verifies all four. This derives the error remark of the source,
+and does not only repeat it: **Strang splitting is second-order only when the
+split is symmetric**. That is exactly the condition `λ_t = ½ + O(Δ_t)` that
+the appendix needs for an `O(Δ³)` local truncation error. The script measures
+the quadrature of the samples alone, against the exact integral. This way, the
 right-hand approximation of the transition does not contaminate the fit. The
 fitted orders are **1.93** for exponential-Euler and **3.05** for the
 trapezoid at `λ = ½`.
@@ -237,7 +237,7 @@ Two bookkeeping facts, both verified:
   total mass. It changes *when* the mass lands, not how much.
 
 Finally, `β, γ ≥ 0` always, and `Δ̃_s ≥ λ_sΔ_s`. The second installment adds
-to the first and never removes. The trapezoid is a **write-side** mechanism,
+to the first and never subtracts. The trapezoid is a **write-side** mechanism,
 and it makes no negative weight. This is a characterisation, not a
 scorecard. State tracking is the job of the rotation (companion note §§4, 8),
 and no trapezoid variant in this note aims at it.
@@ -247,7 +247,7 @@ and no trapezoid variant in this note aims at it.
 ## 6. The augmented state is a feedforward buffer
 
 The expansion of §5 terminates: each sample appears in exactly two terms and
-never again (§7). So the buffer `w_t := v_t` gives back a first-order Markov
+never again (§7). So the buffer `w_t := v_t` restores a first-order Markov
 form:
 
 $$\begin{bmatrix}S_t\\w_t\end{bmatrix}=\underbrace{\begin{bmatrix}M_t&(1-\lambda_t)\Delta_tM_t\\ \mathbf 0&\mathbf 0\end{bmatrix}}_{\hat A_t}\begin{bmatrix}S_{t-1}\\w_{t-1}\end{bmatrix}+\begin{bmatrix}\lambda_t\Delta_t\,v_t\\v_t\end{bmatrix},\qquad \boxed{\operatorname{spec}(\hat A_t)=\operatorname{spec}(M_t)\cup\{0\}^N}$$
@@ -293,8 +293,8 @@ Verified against the recurrence on the write axis. Compared with the
 DeltaProduct, there are three structural differences:
 
 1. **The samples enter `A` in DeltaProduct, and cannot in MambaProduct.** The
-   `A` of Mamba contains no key, no value and **no `λ`**. This is verified on
-   the homogeneous token map under two different `λ` schedules. That is
+   `A` of Mamba contains no key, no value and **no `λ`**. The script verifies
+   this on the homogeneous token map under two different `λ` schedules. That is
    isotropy (companion note §7) stated as a normal form: **the trapezoid adds
    nothing to `A`.**
 2. **The partial-product shape of `B` is shared, but it tells nothing.** Any
@@ -377,9 +377,9 @@ transport across a gap of `d` micro-steps. That breaks the collapse of §5, and
 seems to delete the single-SSD pathway. This comes from the wrong transport,
 not from a property of any design.
 
-> **Collapse theorem.** For any set of taps, each at its own lag `d` with the
-> coefficient `ν` and transported across its own gap, the total contribution
-> of sample `s` to `h_T` is
+> **Collapse theorem.** Take any set of taps, each at its own lag `d` with the
+> coefficient `ν` and transported across its own gap. Then the total
+> contribution of sample `s` to `h_T` is
 > `[γ_s + Σ_taps ν_{s+d}] · M_{s+1:T} v_s`: **one scalar per sample, for any
 > lags.** So any multi-tap trapezoid keeps the single-SSD form, and only the
 > correction band widens to `max(d)`.
@@ -408,7 +408,7 @@ degenerate cases rank them:
 | `VerticalPlusHorizontalInToken` | both, the lag-1 tap closed | `u` | is `HorizontalCarryOver` |
 | `VerticalPlusHorizontalCarryOver` | both, always | `u+1` | is `HorizontalCarryOver` |
 
-Every degeneracy is verified:
+The script verifies every degeneracy:
 
 - `HorizontalInToken` alone has no cross-token path at all. So it cannot do the
   job that the trapezoid was introduced for. It is a component, not an
@@ -442,13 +442,14 @@ Every degeneracy is verified:
 channel. On the single-SSD pathway it costs nothing else. The collapse gives
 one scalar per sample for any number of taps. So the key scale gets a term,
 and the pass count does not. The band stays the lag-`u` mass alone (a lag-1
-installment has already landed at every read that the band covers). On the
-double-SSD pathway, the two taps have different shifts and cannot share a
-pass, so it runs **three** SSD calls. That asymmetry is the honest price of
+installment has already landed at every read that the band covers).
+
+On the double-SSD pathway, the two taps have different shifts and cannot share
+a pass, so it runs **three** SSD calls. That asymmetry is the honest price of
 the join, and it shows where the join belongs.
 
 The map is not a ranking. Its purpose is the invariant: **protect the
-collapse**. The single-SSD pathway is built on it, and it stays true for any
+collapse**. The single-SSD pathway rests on it, and it stays true for any
 tap set that transports each tap over its own gap.
 
 How to *parameterise* the members is a separate question, and this note does
@@ -466,7 +467,7 @@ The trapezoid is a quadrature of the integral of the samples, or equivalently
 an operator splitting with the parameter `λ` (§4). It is entirely in the linear
 term of the local objective (§3). "A two-tap FIR filter on the gradient
 stream" is an accurate description and the correct one-line summary.
-"Structurally the same move as momentum" needs the qualifier of §6: the entry
+"Structurally the same move as momentum" needs the qualifier of §6. The entry
 that makes momentum what it is, is exactly the entry that the trapezoid does
 not have.
 
@@ -474,8 +475,9 @@ not have.
 
 The composite key scale of `single_ssd` *is* `Δ̃`, and `diag.rs` is its
 diagonal exception (§5). A future change to which samples the write
-integrates must keep the collapse, or give up that pathway. §9 states the
-condition that keeps it: transport each tap over its own gap.
+integrates must keep the collapse. Otherwise the change cannot use that
+pathway. §9 states the condition that keeps the collapse: transport each tap
+over its own gap.
 
 ### 10.3 The trapezoid and `micro_steps` are disjoint dials
 
@@ -539,9 +541,13 @@ Rust test suites assert, separately, that it agrees with the implementation
 **Note on novelty.** The equations of the trapezoid, the mask factorisation
 `L = L₁L₂` and the error rate are from the source paper. Three readings are
 prior, and none is a new result in optimization or numerical analysis alone:
-the added term as a two-tap FIR filter on the gradient stream, the observation
-that under a rotation the older tap arrives parallel-transported,
-and a wider band as the natural extension. This note assembles:
+
+- the added term as a two-tap FIR filter on the gradient stream,
+- the observation that under a rotation the older tap arrives
+  parallel-transported,
+- a wider band as the natural extension.
+
+This note assembles:
 
 - `λ` identified as an operator-splitting parameter, which derives the error
   condition of the source and does not only quote it (§4),

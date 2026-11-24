@@ -62,8 +62,8 @@ scripts/compare_reports.py BASE --changed 'GLOB'...
 - `_Avoid_` applies to our own words. A doc can use a source word in quotes or
   backticks when it cites that source (ADR-0008).
 - Keep the docs small. They describe the code as it is now. A doc is never a
-  changelog: it has no "used to be / now", no "verified by", no dates and no
-  PR history. When you find changelog prose, delete it.
+  changelog: it has no old state next to the current one, no "verified by", no
+  dates and no PR history. When you find changelog prose, delete it.
 - A change that adds, deletes or renames a file updates its
   [File Map](#file-map) line in the same change.
 - A new term goes to `GLOSSARY.md` (through `/mattpocock-skills:domain-modeling`).
@@ -97,7 +97,7 @@ scripts/compare_reports.py BASE --changed 'GLOB'...
 - A dangerous-command-guard hook (`dcg`) checks each Bash command. It blocks
   a `>` redirect to a path that holds a variable. Use a literal path, or a
   script file.
-- **Waiting**: a build, a run, a chain of runs or one step of a chain can take
+- **Waiting**: a build, a run, a chain of runs or one part of a chain can take
   more than ~1 min. Run each such command or wait in the background. Watch it
   with a `Monitor` (preferred), a background waiter script or
   `run_in_background`, then return the turn to the user. The watch also
@@ -198,11 +198,13 @@ before the last commit. See `docs/agents/code-review.md`.
 A tensor name ends with a suffix that gives its shape, and shape `assert`s back
 it. Such a name needs no extra comment. A comment can write a shape as `_bhl`
 or as `[...]`. Paper style (upper-case `A,B,C,H,Y,L,…`) can be in comments,
-never in code identifiers. A lower-case letter is a base dimension (below). An
-upper-case letter is a relation of base dimensions (offset, multiple, concat):
-`X` can be `x±1` or `x*2`, and `XY` can be `x+y` or `x*y`. A letter in a
-formula can be a paper symbol instead of a shape letter. For example, `hₜ` is
-the state, and the suffix `_bhl` still has `h` = `nheads`.
+never in code identifiers.
+
+A lower-case letter is a base dimension (below). An upper-case letter is a
+relation of base dimensions (offset, multiple, concat): `X` can be `x±1` or
+`x*2`, and `XY` can be `x+y` or `x*y`. A letter in a formula can be a paper
+symbol instead of a shape letter. For example, `hₜ` is the state, and the
+suffix `_bhl` still has `h` = `nheads`.
 
 | Letter | Dimension | Paper | Python | Typical |
 |--------|-----------|-------|--------|---------|

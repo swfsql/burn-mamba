@@ -23,9 +23,9 @@
 > - This note takes the block around it, plus the **parameterisation** of the
 >   scalar channels that the trio takes as given.
 >
-> §§5–6 are where that second half reaches into the recurrence: for the sign of
-> the taps of the trapezoid, and for the locus that data-dependent `A` opens.
-> Neither changes an algebraic claim of the trio.
+> §§5–6 are where that second half reaches into the recurrence. It does so for
+> the sign of the taps of the trapezoid, and for the locus that data-dependent
+> `A` opens. Neither changes an algebraic claim of the trio.
 >
 > [`scripts/mamba-3/architecture_deltas.py`](../../scripts/mamba-3/architecture_deltas.py)
 > checks every numbered claim below in float64 (35 checks, with the same
@@ -39,8 +39,8 @@
 The three core changes get the method sections of the paper. The block around
 them was rebuilt at the same time, and the rebuild is not incidental. Mamba-3:
 
-- deletes the short causal convolution and its activation,
-- deletes the post-gate gated RMSNorm of Mamba-2,
+- removes the short causal convolution and its activation,
+- removes the post-gate gated RMSNorm of Mamba-2,
 - adds RMS normalisation on `B` and `C`,
 - adds a learnable per-(head, channel) bias to each of them,
 - makes `A` data-dependent.
@@ -53,7 +53,9 @@ Four results:
    is thus the *bias-only* read (a decay-weighted causal average) to within
    `O(1/√N)` (§4.10). This is the quantitative content of the sentence of the
    source "we hypothesize that these biases induce a convolution-like
-   behavior". It also predicts the ablation table of the source. The floor is
+   behavior".
+
+   It also predicts the ablation table of the source. The floor is
    `⟨b_C, b_B⟩`: `N` at the ones init, `N/4` at `U(0,1)`, and `0` at the zero
    init and at the symmetric init. This is the same order as the measured
    perplexities (§4.6).
@@ -69,7 +71,7 @@ Four results:
    trapezoid is exactly a width-2 filter on the *samples* `B_tx_t` (§5.1).
    Its taps `β, γ` are strictly positive for every input (§5.2), and the bias
    floor is positive by construction. A learned depthwise conv can have a
-   negative tap, but the pair that replaced it cannot. What Mamba-3 gave up is
+   negative tap, but the pair that replaced it cannot. What Mamba-3 loses is
    the difference of adjacent tokens, not their smoothing.
 4. **Data-dependent `A` buys exactly one degree of freedom per (token,
    head).** In Mamba-2, `(α, γ) = (e^{ΔA_h}, Δ)` traces a one-dimensional locus
@@ -135,12 +137,12 @@ mass that splits the left endpoint between two taps. Only a two-tap
 it folds away at `micro_steps = 1`. Every per-micro-step sub-projection occurs
 `u` times. `z` and `C` occur once.
 
-Rows 2–4 together have a consequence that is worth a separate statement:
-**the only nonlinearities left on the `B`/`C`/`x` path are the normalisation
-itself and the squashing of the scalar channels** (`softplus` on `Δ` and `A`,
-`σ` on `λ` and `μ`, `tanh` on `θ`). Values reach the SSD scan as raw
-projections. The `SiLU` of the gate is the only pointwise activation of the
-block.
+Rows 2–4 together have a consequence that is worth a separate statement.
+**The only nonlinearities left on the `B`/`C`/`x` path are the normalisation
+itself and the squashing of the scalar channels.** That squashing is
+`softplus` on `Δ` and `A`, `σ` on `λ` and `μ`, and `tanh` on `θ`. Values
+reach the SSD scan as raw projections. The `SiLU` of the gate is the only
+pointwise activation of the block.
 
 The `B`/`C` path, in the order of the reference kernel (`mamba3.py` →
 `mamba3_siso_fwd.py`) and of this crate (`helpers::qk_norm_expand_bias`, then
@@ -194,18 +196,21 @@ The source also reports these results, which this note does not derive again:
 
 RMSNorm over the `N` axis with unit gain sends any `B ≠ 0` to a vector of RMS
 1, so `‖B‖ = √N` (§3.1). It is invariant to any positive rescaling of the
-projection that made it (§3.2). So the score `C^⊤B` is no longer a product of
-two learned scales. Under a `10×` reparameterisation of both projections, the
-unnormalised score moves by `100×`, and the normalised one does not move
-(§3.3). The shape fixes the magnitude of the score: mean `0`, standard
-deviation `√N` over random data (§3.4).
+projection that made it (§3.2). So, unlike the unnormalised score, the score
+`C^⊤B` is not a product of two learned scales. Under a `10×`
+reparameterisation of both projections, the unnormalised score moves by
+`100×`, and the normalised one does not move (§3.3). The shape fixes the
+magnitude of the score: mean `0`, standard deviation `√N` over random data
+(§3.4).
 
-That is the whole mechanism behind the stability claim of the source ("BCNorm
-is also able to stabilize large-scale runs, resulting in the removal of the
-post-gate RMSNorm"). Mamba-2 controlled the output scale of the block at the
-*end*, after the SSD. Mamba-3 controls the two factors that set it at the
-*start*. The state is a sum of outer products of `B` with values, and the read
-pairs it against `C`. So to pin both operands pins the whole path, except the
+That is the whole mechanism behind the stability claim of the source. The
+claim is: "BCNorm is also able to stabilize large-scale runs, resulting in the
+removal of the post-gate RMSNorm". Mamba-2 controlled the output scale of the
+block at the *end*, after the SSD. Mamba-3 controls the two factors that set
+it at the *start*.
+
+The state is a sum of outer products of `B` with values, and the read pairs
+it against `C`. So to pin both operands pins the whole path, except the
 values. When that exception matters, the optional output norm (§7) is there
 for it.
 
@@ -247,15 +252,16 @@ for the ones init, `N/4` for `U(0,1)`, and `0` for the zero init and (in
 expectation) for `U(−1,1)` (§4.6). That is a *weak* order. The measured
 `15.72 < 15.76 < 16.07 < 16.57` refines it and does not contradict it. The
 floor ranks the first two and ties the last two, and variance breaks the tie.
+
 A symmetric init keeps the two `O(√N)` cross terms of the ones init, but none
-of its floor. The zero init adds neither. The weak order carries the
-summary of the source, that the model "is not very sensitive to the
+of its floor. The zero init adds neither. The weak order carries the summary
+of the source. That summary says that the model "is not very sensitive to the
 initialization of the biases as long as they are positive". Positivity is not
 a convention: without it, the four-term expansion has no floor.
 
-**The rotation localises the floor.** The bias is added before the rotation.
-So each bias vector is rotated by its own cumulative angles, and the constant
-term becomes (§4.7):
+**The rotation localises the floor.** The block adds the bias before the
+rotation. So the block rotates each bias vector by its own cumulative angles,
+and the constant term becomes (§4.7):
 
 $$b_C^\top R_t^\top R_s b_B=(N-\texttt{rotation\_dim})+2\sum_{j}\cos\big(\theta_{t,j}-\theta_{s,j}\big)$$
 
@@ -302,7 +308,7 @@ $$h_t=\alpha_th_{t-1}+\beta_tv_{t-1}+\gamma_tv_t
 =\alpha_th_{t-1}+\tilde v_t,\qquad \tilde v_t=\gamma_tv_t+\beta_tv_{t-1}$$
 
 So the three-term recurrence is a two-term recurrence that runs on a width-2
-filter of the samples (§5.1). The filter is different from the deleted
+filter of the samples (§5.1). The filter is different from the removed
 convolution on three axes at the same time:
 
 - It is **data-dependent** (`β`, `γ` are per-token functions of `Δ`, `A`,
@@ -318,11 +324,12 @@ convolution on three axes at the same time:
 **Both replacements are strictly positive.** `β = (1−λ)Δα` and `γ = λΔ`, with
 `λ ∈ (0,1)`, `Δ > 0`, `α > 0`. So the taps are positive for every input
 (§5.2). Their ratio is unbounded, so the pair sweeps the whole positive
-quadrant and nothing else (§5.3). The bias floor is positive by §4. So the two
-mechanisms that replaced the convolution are both **low-pass**. They can
-average adjacent samples in any proportion, but they cannot subtract one
-from the other. A learned depthwise kernel can. This is the one capability
-that the deletion really costs. It is worth an exact name, because "the
+quadrant and nothing else (§5.3). The bias floor is positive by §4.
+
+So the two mechanisms that replaced the convolution are both **low-pass**.
+They can average adjacent samples in any proportion, but they cannot subtract
+one from the other. A learned depthwise kernel can. This is the one capability
+that the removal really costs. It is worth an exact name, because "the
 convolution is redundant" is a claim about a trained 440M language model, not
 about the function classes.
 
@@ -367,9 +374,10 @@ Mamba-2 ends its block with a gated RMSNorm over `d_inner`, applied *after*
 the gate. Mamba-3 removes it and ends with the bare `y ⊙ SiLU(z)`. For hybrid
 models, the source adds it again, as a **pre-gate, per-head-grouped** norm. It
 reports that this buys length-generalised retrieval, at a small cost in
-in-context retrieval, and it does not call any row of its table the best. The
-three placements are not variants of one operation. Each erases a different
-thing:
+in-context retrieval. It does not call any row of its table the best.
+
+The three placements are not variants of one operation. Each erases a
+different thing:
 
 | placement | rescaling of `y` | rescaling of the gate `SiLU(z)` | check |
 |---|---|---|---|
@@ -380,7 +388,7 @@ thing:
 The middle row is the interesting one. A norm before the gate keeps the
 *magnitude* of the gate as a live signal. A norm after the gate keeps only its
 direction. A retrieval head needs a gate that can attenuate its own output, to
-suppress a position. A norm after the gate removes exactly that. This is a
+suppress a position. A norm after the gate erases exactly that. This is a
 mechanism for the observation of the source, not a prediction of its table.
 
 Grouping is the second axis, and it is independent. A per-head norm makes the
@@ -400,17 +408,20 @@ stabilisation upstream.
 The chunked algorithm of SSD costs `intra + inter` FLOPs per chunk. At
 `C = N = P` and rank 1, the total is `≈ 8TN²` (§8.1). Under MIMO, the
 intra-chunk term scales with `(CR)²` (exactly `R²` at fixed `C`, §8.3), and
-the inter-chunk term scales with `R`. The remedy of the source is to halve the
-chunk as the rank grows, `C_MIMO = C_SISO / R`. This makes the total
-`≈ 8TRN²` again, that is, `R×` SISO and not `R²×` (§8.2). Its reference
-implementation gives the same advice in a comment on the `chunk_size`
-argument ("64 for SISO, 64/mimo_rank for MIMO"). At `N = P = 64`, `R = 4`,
-the two schedules differ by `2.5×` (§8.4).
+the inter-chunk term scales with `R`.
+
+The remedy of the source is to halve the chunk as the rank grows,
+`C_MIMO = C_SISO / R`. This makes the total `≈ 8TRN²` again, that is, `R×`
+SISO and not `R²×` (§8.2). Its reference implementation gives the same advice
+in a comment on the `chunk_size` argument ("64 for SISO, 64/mimo_rank for
+MIMO"). At `N = P = 64`, `R = 4`, the two schedules differ by `2.5×` (§8.4).
 
 This crate fuses the rank onto the chunk axis: `[L·M, L·M]` intra-chunk
 matrices in `single_ssd/ssd/serial.rs`. (§8.7 gives the general `[T·M, L·M]`,
-where `T` is the read positions of the chunk. At `u = 1`, the two are the same.) So
-the same arithmetic applies without change, and
+where `T` is the read positions of the chunk. At `u = 1`, the two are the
+same.)
+
+So the same arithmetic applies without change, and
 `Mamba3ScanOptions::optimal_chunk_len` implements it: `√(N·P)` divided by
 `mimo_rank`, then rounded up to a multiple of 32 and clamped to `32..=512`.
 At `N = 128`, `P = 64`, that is `96 / 64 / 32` for a rank of `1 / 2 / ≥4`
@@ -423,11 +434,12 @@ Each of the `u` micro-steps of a token writes to the state, and the SSD
 **reads** the token once, at its last micro-step. So a chunk has two axes:
 `C` writes by `C/u` reads. Its score is `[batch, nchunks, heads, (C/u)·M,
 C·M]`, that is, `batch · sequence · heads · C · M²` elements, with no `u` in
-it (§8.7). The rank is on *both* axes, so it divides the chunk. `u` is on one
-axis, so it only subdivides the chunk. Hence the second half of the schedule:
-round the width up to a multiple of `u`. Then a chunk is a whole number of
-tokens, and its read positions are a contiguous run of them: a reshape, not a
-gather.
+it (§8.7).
+
+The rank is on *both* axes, so it divides the chunk. `u` is on one axis, so it
+only subdivides the chunk. Hence the second half of the schedule: round the
+width up to a multiple of `u`. Then a chunk is a whole number of tokens, and
+its read positions are a contiguous run of them: a reshape, not a gather.
 
 The alternative is to also divide by `u`, because a chunk of `C` positions
 holds `C/u` tokens. It is worse on both counts:
@@ -439,7 +451,7 @@ holds `C/u` tokens. It is worse on both counts:
   current schedule, and the backward of both pathways walks it chunk by
   chunk.
 - It does not even buy the memory that it costs. The 32 grid floors the
-  division, so past a fold of 3 the chunk stops shrinking, and the score grows
+  division, so past a fold of 3 the chunk stops shrinking. The score grows
   with `u` in any case: `2.67×` at `u = 8`, where a fixed width gives exactly
   `1×` (§8.8).
 
@@ -480,7 +492,7 @@ pathways. The reference does the same with `mamba3.py` + `mamba3_siso_fwd.py`
 - The bias–rotation boundary changes the behaviour (§4.7 vs §4.8). To move the
   bias after the rotation replaces a locality prior with a flat one.
 - The norm–bias boundary matters for the same reason that BCNorm and the
-  biases are one change (§3): a bias of size 1 is calibrated against an
+  biases are one change (§3). A bias of size 1 is calibrated against an
   operand of RMS 1.
 
 ### 9.2 The ones-init is a mechanism, not a placeholder
@@ -505,17 +517,19 @@ rows, and nothing here argues for it.
 
 ### 9.4 The chunk schedule divides by `mimo_rank`, and only subdivides by `micro_steps`
 
-See §8. `Mamba3ScanOptions::optimal_chunk_len` divides the square-root rule by the
-rank, rounds it up to a multiple of 32, and then rounds it *up* to a whole
-number of tokens. The rank half is the advice of the source (its kernels
-carry it as a comment on `chunk_size`). The different treatment of
-`micro_steps` is from this crate. It follows because the chunk has a read
-axis that the rank widens and `u` does not (§8). For a SISO, `u = 1` block,
-the default path is the same byte for byte.
+See §8. `Mamba3ScanOptions::optimal_chunk_len` divides the square-root rule
+by the rank and rounds it up to a multiple of 32. Then it rounds it *up* to a
+whole number of tokens.
+
+The rank half is the advice of the source (its kernels carry it as a comment
+on `chunk_size`). The different treatment of `micro_steps` is from this crate.
+It follows because the chunk has a read axis that the rank widens and `u`
+does not (§8). For a SISO, `u = 1` block, the default path is the same byte
+for byte.
 
 This is the one place where the note changed behaviour instead of describing
 it. It is a heuristic that changes a heuristic: the exact values do not
-change, and the cost moves. `bench.sh` can confirm the direction on a given
+change, and the cost moves. `bench.sh` can check the direction on a given
 backend.
 
 ### 9.5 What belongs to the caller, not to this crate
@@ -533,8 +547,8 @@ records them:
   them toward the zero init, which ablates worst. The source does not comment
   on this.
 - The kernels that the latency tables measure are fused
-  Triton/TileLang/CuTe. That is the axis that this crate intentionally gives
-  up (`docs/adr/0001-no-custom-kernels.md`).
+  Triton/TileLang/CuTe. This crate intentionally does not use that axis
+  (`docs/adr/0001-no-custom-kernels.md`).
 
 ### 9.6 What does not follow
 

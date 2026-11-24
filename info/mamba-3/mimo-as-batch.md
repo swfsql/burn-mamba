@@ -32,10 +32,10 @@
 In one common reading, the state of a linear RNN is a fast weight that is fit
 online. In that reading, a micro-step of Mamba-2 is one gradient step on an
 isotropic ridge, pulled toward a rank-one target. Mamba-3 introduces its MIMO
-extension for a hardware reason: decoding is memory-bound, and to widen the
-outer product to a matrix product raises the arithmetic intensity at almost no
-added memory traffic. After that, MIMO is usually put aside as orthogonal to
-the modelling story.
+extension for a hardware reason: decoding is memory-bound. To widen the outer
+product to a matrix product raises the arithmetic intensity at almost no added
+memory traffic. After that, MIMO is usually not studied further, as
+orthogonal to the modelling story.
 
 It is orthogonal, and this note makes the orthogonality precise, not assumed.
 Five results:
@@ -47,7 +47,7 @@ Five results:
 2. **The batch is `M` free keys and one value.** Only `B`/`C` are widened
    projections. The `M` values are `M` *fixed diagonal images* of a single
    vector. The tying costs exactly `(M−1)P − M² + 1` dimensions of the
-   rank-`M` write manifold, and `micro_steps` gives that back exactly.
+   rank-`M` write manifold, and `micro_steps` restores them exactly.
 3. **"MIMO = `R²` SISO SSMs" is isotropy again, not a property of MIMO.** The
    decomposition into standalone SISO models needs a transition that is a
    function of *no* sample. The transition of Mamba is such a function. The
@@ -71,9 +71,9 @@ converse fails by the dimension count of result 2.
 
 Like its companions, this note is about the *state update* only. The gate,
 the skip, the normalisations and the read are outside the classified object.
-That exclusion costs more here than in the other two notes, and §10.6 says
-how much: `M` buys `M` reads as well as `M` writes, and the reads never enter
-any objective.
+That exclusion costs more here than in the other two notes. `M` buys `M`
+reads as well as `M` writes, and the reads never enter any objective. §10.6
+says how much.
 
 | § | claim |
 |---|---|
@@ -176,7 +176,7 @@ for any `M`. Two consequences:
   (isotropic curvature ⟹ commuting per-micro-step factors ⟹ `u` can change
   only the write) holds with MIMO on. This makes §9 possible.
 - The one-line summary *"MIMO does not change the objective"* is half
-  correct, in the same way as the summary of the trapezoid: the **quadratic
+  correct, in the same way as the summary of the trapezoid. The **quadratic
   term** does not change. The objective changes, and its target gets more
   rank.
 
@@ -269,8 +269,8 @@ pairs or solve them jointly. MIMO only **sums** them.
 
 ## 6. Initialisation: a MIMO block starts as its SISO block
 
-The masks are initialised to `mimo_x = mimo_o = 1/M`, `mimo_z = 1`. Then every
-value is `x_t/M`, so:
+The initialisation sets the masks to `mimo_x = mimo_o = 1/M`, `mimo_z = 1`.
+Then every value is `x_t/M`, so:
 
 $$V_tB_t^\top=\frac{1}{M}\,x_t\Big(\sum_m b_t^{(m)}\Big)^{\!\top}=x_t\,\bar B_t^\top,
 \qquad \bar B_t=\operatorname{mean}_m b_t^{(m)}$$
@@ -303,11 +303,13 @@ The `M` ranks share **one** state `S ∈ ℝ^{P×N}`, and the rotation acts on t
 `N` axis of that state. So there is exactly one rotation per micro-step, for any
 number of ranks that write into it. The rotation is a property of the
 *coordinates of the state*, and the rank index is a property of the
-*samples*. The two cannot meet. The implementation shows the same thing in
-its operations: the cumulative angles are per (head, plane), and they are
-**broadcast** over the rank axis. What the block *projects* is per plane at
-`Complex2D` (shared by the heads, then `Δ`-scaled per head), and per (head,
-block) at the quaternion kinds. Neither carries a rank index.
+*samples*. The two cannot meet.
+
+The implementation shows the same thing in its operations: the cumulative
+angles are per (head, plane), and they are **broadcast** over the rank axis.
+What the block *projects* is per plane at `Complex2D` (shared by the heads,
+then `Δ`-scaled per head), and per (head, block) at the quaternion kinds.
+Neither carries a rank index.
 
 The same-position read/write Gram makes this checkable. For any transition of the
 form `α ×` isometry, `R̄^\top R̄ = I` gives:
@@ -402,11 +404,12 @@ with:
 $$A(x_i)=\Big(\textstyle\prod_{j=1}^{u}\alpha_{i,j}\Big)R_{i,u}\cdots R_{i,1}$$
 
 The script verifies `A(x_i)` on the homogeneous token map (which is what it
-*is*): it does not depend on `λ`, on the keys, on the values, or on `M`. That
-is isotropy stated as a normal form. It is why **the rank dial cannot enter
-`A`, as the trapezoid cannot**. `B(x_{i−1}, x_i)` collects `(u+1)·M` outer
-products, `M` of which carry the previous token. Where the shape permits, it
-has exactly that rank (measured: `6` at `u = M = 2`, `P = N = 16`).
+*is*). `A(x_i)` does not depend on `λ`, on the keys, on the values, or on
+`M`. That is isotropy stated as a normal form. It is why **the rank dial
+cannot enter `A`, as the trapezoid cannot**. `B(x_{i−1}, x_i)` collects
+`(u+1)·M` outer products, `M` of which carry the previous token. Where the
+shape permits, it has exactly that rank (measured: `6` at `u = M = 2`,
+`P = N = 16`).
 
 **The containment.** With free values, `u` micro-steps can reproduce what `M`
 ranks do, by construction:
@@ -422,9 +425,9 @@ Verified over a whole trajectory:
 > submanifold, short by `(M−1)P − M² + 1`.
 
 So the two are **one dial with different things tied**. This is the content
-behind their shared cell at `Real1D`: with a real, commuting step-size algebra, `u`
-can change only the write, and the write is what `M` widens. They stop
-agreeing in two places:
+behind their shared cell at `Real1D`. With a real, commuting step-size
+algebra, `u` can change only the write, and the write is what `M` widens. They
+stop agreeing in two places:
 
 - Upward, at the non-abelian kinds: there `u` also multiplies factors in `A`,
   and `M` still cannot.
@@ -436,8 +439,8 @@ agreeing in two places:
 **Under the rotation, the two interleave and do not mix.** The `u·M` keys of a
 token form `u` **rigid groups of `M`**. Within a micro-step, the Gram of the
 `M` keys is invariant (§7). The accumulated product `R_{i,j}⋯R_{i,1}` staggers
-the successive groups. Both are verified. MIMO ranks are rotation-synchronous,
-and micro-steps are rotation-staggered.
+the successive groups. The script verifies both. MIMO ranks are
+rotation-synchronous, and micro-steps are rotation-staggered.
 
 ---
 
@@ -448,10 +451,11 @@ and micro-steps are rotation-staggered.
 MIMO is a minibatch of `M` samples per token. The samples share one step size
 and one transition. They have `M` free keys, and `M` values tied to one vector
 through fixed diagonal masks (§3, §4). "Extra write rank" is an accurate
-description. "Extra data" is not. Keep the hardware motive attached, and do
-not treat it as an aside. To raise the batch for arithmetic intensity is the
-same trade that batch size makes in ordinary SGD. It carries the same
-expectation of diminishing returns in `M`.
+description. "Extra data" is not.
+
+Keep the hardware motive attached, and do not treat it as an aside. To raise
+the batch for arithmetic intensity is the same trade that batch size makes in
+ordinary SGD. It carries the same expectation of diminishing returns in `M`.
 
 ### 10.2 The initialisation identity is worth knowing
 
@@ -473,10 +477,10 @@ at different rates") is the natural first guess.
 ### 10.4 The `Δ̃` collapse is rank-blind, and that is a constraint
 
 The composite key scale of `single_ssd` is a `[b, n, l, h]` tensor because
-`γ`/`β` are per-head scalars (§8). A future change that makes the per-sample
-weight of the write depend on the rank index must carry that index into the
-scale tensor and into the diagonal correction. Otherwise it must give up the
-pathway.
+`γ`/`β` are per-head scalars (§8). Suppose that a future change makes the
+per-sample weight of the write depend on the rank index. That change must
+carry the index into the scale tensor and into the diagonal correction.
+Otherwise the change cannot use the pathway.
 
 ### 10.5 `micro_steps` contains MIMO on the write
 

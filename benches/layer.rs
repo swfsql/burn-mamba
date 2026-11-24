@@ -1,7 +1,7 @@
 //! # Single-block benchmarks (`cargo bench`)
 //!
-//! Each case is one SSM block, with no `Layer`/`Layers`/network wrapper. It is
-//! measured in the three modes of every block:
+//! Each case is one SSM block, with no `Layer`/`Layers`/network wrapper. The
+//! bench measures it in the three modes of every block:
 //!
 //! | Group | What it runs |
 //! |-------|--------------|

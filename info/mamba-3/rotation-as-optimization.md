@@ -22,7 +22,7 @@ Linear RNNs have a reading in which the state is a fast-weight
 matrix that is fit online, one gradient step per token. The transition is the
 quadratic term of a local objective, and the write is its linear term. Under
 that reading, the complex ("rotational") transition of Mamba-3 is usually
-declared out of scope: a rotation has complex eigenvalues, and no objective in
+declared out of scope. A rotation has complex eigenvalues, and no objective in
 any metric makes one.
 
 We show that this declaration comes from the assumption that the step size is
@@ -34,8 +34,8 @@ approximation:
    objective of Mamba-2. Its real part is the descent. Its imaginary part is
    circulation, tangent to the level sets. `|μ| ≤ 1` guarantees
    `Re η > 0` (descent).
-2. **The goal is a saddle, not a minimum**: descent in the real part of the
-   state and *ascent* in the imaginary part, on a harmonic potential.
+2. **The goal is a saddle, not a minimum.** That is descent in the real part
+   of the state and *ascent* in the imaginary part, on a harmonic potential.
    Harmonic functions have no minima, so this is forced, not chosen. The
    rotation is the standard cycling of gradient descent–ascent.
 3. **The method is momentum**: heavy ball on the *same* Mamba-2 objective,
@@ -133,7 +133,7 @@ $$\langle a, b\rangle := \operatorname{Re}(\bar a\, b) \quad\text{(the Euclidean
 
 the read is the honest pairing `y_t = ⟨q_t, S_t⟩`, and the inner model is
 `f_S(k) = Re(S k̄)`. That is exactly why the *real* read vector of the source
-paper is `[C; −Ĉ]`, and its real write vector is `[B; +B̂]`: the read is
+paper is `[C; −Ĉ]`, and its real write vector is `[B; +B̂]`. The read is
 conjugated, and the write is not. If you invert this, you get a sign error in
 `y` and nowhere else.
 
@@ -204,11 +204,13 @@ escapes that do not work:
   cell the interesting extrapolation.
 - **A change of metric does not help.** An SPD preconditioner `P` gives a
   symmetric `G = (I−M)P^{-1}` only when `M` is diagonalizable over `ℝ`, and a
-  rotation is not. Preconditioned DeltaNet is this corollary, built. It
-  approximates the key Gram by a diagonal and preconditions the write key
-  with it. So `I − βPkkᵀ` is similar to a symmetric PSD perturbation, and the
-  spectrum stays real. It sharpens the curvature on which the delta rule
-  descends. It does not leave the real column of the table of §8.
+  rotation is not.
+
+  Preconditioned DeltaNet is this corollary, built. It approximates the key
+  Gram by a diagonal and preconditions the write key with it. So `I − βPkkᵀ`
+  is similar to a symmetric PSD perturbation, and the spectrum stays real. It
+  sharpens the curvature on which the delta rule descends. It does not leave
+  the real column of the table of §8.
 
 So Proposition 1 is the correct frame: it says precisely which premise must
 break. It has four premises, and the note gives one section to each.
@@ -221,7 +223,7 @@ break. It has four premises, and the note gives one section to each.
 | one gradient step per token | a composition of `u` gradient steps | 7 |
 
 The third is the loosest fit, and §6 says so. Heavy ball does not contradict
-Proposition 1 at all: it makes its rotation by *enlarging the state space*,
+Proposition 1 at all. It makes its rotation by *enlarging the state space*,
 not by a rotation on the given one. It gets its section because it lands on
 the same transition, not because it escapes the same statement. This note
 also does not claim that the list is exhaustive. These are four constructions
@@ -314,10 +316,10 @@ For Mamba-3 it costs nothing:
 origin is outside that circle, and the tangent lines from the origin subtend
 `arcsin α`. ∎
 
-Verified over the whole closed disc. So **every admissible Mamba-3 parameter
-gives a real descent step**, with an exact accounting. This holds for the
-abelian kind here, and for all four kinds by Proposition 2′ in §8, which needs
-only a transition of the form `α ×` an isometry:
+The script verifies this over the whole closed disc. So **every admissible
+Mamba-3 parameter gives a real descent step**, with an exact accounting. This
+holds for the abelian kind here. It holds for all four kinds by Proposition 2′
+in §8, which needs only a transition of the form `α ×` an isometry:
 
 $$\text{descent fraction} = \cos\psi = \frac{1-\alpha\cos\varphi}{|1-\alpha e^{i\varphi}|},
 \qquad \text{circulation fraction} = \sin\psi$$
@@ -371,9 +373,10 @@ $$F_t(S) = \operatorname{Re}\Big(-\tfrac12\operatorname{tr}\big(S\,\mathrm{D}(\t
 
 and run **descent in `Re S`, ascent in `Im S`**. That field is exactly the
 complex flow of Mamba-3, and its exponential over one interval is exactly the
-transition. Both are verified. The script verifies the second with a
-real-form generator built from the field and then exponentiated, so it shares
-no subexpression with the transition that it is compared against.
+transition. The script verifies both. It verifies the second with a
+real-form generator that it builds from the field and then exponentiates. So
+the generator shares no subexpression with the transition that the script
+compares it against.
 
 The sign is the part that needs care, because a reader who does this by hand
 gets it wrong. For `F = Re(φ)` with `φ` holomorphic, Cauchy–Riemann gives
@@ -441,12 +444,13 @@ Two precisions, so that this is not overclaimed:
   Proposition 3 excludes those values. The map does not degrade there.
   Instead, a companion matrix is **non-derogatory** (its minimal polynomial
   is its characteristic polynomial). So it is never similar to a scalar pair
-  `diag(α, α)`, and that is exactly a *non-rotating* Mamba-3 pair. At `φ = 0`,
-  the parameters above give a defective Jordan block, `rank(C − αI) = 1`,
-  with transient growth to `2.84` before the decay. The Mamba-3 pair is
-  diagonal and monotone. So momentum is a reading of the *rotating* channels
-  only. It does not extend along `rotation_fraction` to the unrotated channels,
-  which never enter the correspondence.
+  `diag(α, α)`, and that is exactly a *non-rotating* Mamba-3 pair.
+
+  At `φ = 0`, the parameters above give a defective Jordan block,
+  `rank(C − αI) = 1`, with transient growth to `2.84` before the decay. The
+  Mamba-3 pair is diagonal and monotone. So momentum is a reading of the
+  *rotating* channels only. It does not extend along `rotation_fraction` to
+  the unrotated channels, which never enter the correspondence.
 
 Views I, II and III are three readings of one recurrence. I and II are the
 same mechanism (`Im η` is the ascent direction). III is really a different
@@ -471,10 +475,11 @@ Two verified facts pin down when this works:
 
 - **Rank-one curvature rotates, and sharply.** At `u = 2`, `d_k = 6`,
   `β ∼ U(0,2)`, ~16–18% of random draws have a complex spectrum. In **every**
-  rotating draw, both `β_j > 1` (4000 draws, zero counterexamples). A factor
-  `I − βkk^⊤` has the eigenvalue `1 − β` along `k`. So `β > 1` means that
-  the micro-step *overshoots its own minimizer*. **Two overshoots make the
-  rotation.** This is the same coordinate that §4.4 uses, reached by a
+  rotating draw, both `β_j > 1` (4000 draws, zero counterexamples).
+
+  A factor `I − βkk^⊤` has the eigenvalue `1 − β` along `k`. So `β > 1` means
+  that the micro-step *overshoots its own minimizer*. **Two overshoots make
+  the rotation.** This is the same coordinate that §4.4 uses, reached by a
   different construction.
 - **Isotropic curvature never rotates.** With `∇²L = ρI`, every factor is
   `(1 − η_jρ_j)I`, a scalar. Scalars commute, so the product is a scalar:
@@ -541,14 +546,15 @@ linear isometry `P`, so it is true without change for the non-abelian kinds.
 It has one **side** condition, which is invisible over `ℂ` but not over `ℍ`:
 
 - The gauge acts on the left (`v ↦ qv`, or `v ↦ qvp̄`). So the step size must
-  multiply on the *opposite* side of the key, `v − kβ⟨k,v⟩`. Then `β` never
-  has to commute with `q`, the right factor of the two-sided kind cancels
-  against its own inverse, and the identity is exact for both quaternion
-  kinds.
-- If `β` is on the same side as the gauge, it comes back conjugated, `q̄βq`:
+  multiply on the *opposite* side of the key, `v − kβ⟨k,v⟩`. With `β` on
+  that side:
+  - `β` never has to commute with `q`,
+  - the right factor of the two-sided kind cancels against its own inverse,
+  - the identity is exact for both quaternion kinds.
+- If `β` is on the same side as the gauge, it returns conjugated, `q̄βq`:
   the same key, a different step size.
 
-All three statements are verified.
+The script verifies all three statements.
 
 That is **not** sufficient to conclude "no new chunkwise algorithm". That
 conclusion is true of only one of the two orderings. The recurrence is
@@ -584,13 +590,15 @@ $$M = I - (aI + bJ)KK^\top \;=\; \begin{bmatrix}1-a & 0\\ -b & 1\end{bmatrix}
 \quad\text{on } \operatorname{span}\{K, JK\}$$
 
 This is triangular, with the eigenvalues `1−a` and `1`, both **real**. It is
-non-normal: a shear, without the norm bound. Verified: `0%` of draws rotate
-with a real target (`max‖M‖₂ = 1.41`), and `100%` with a complex one
-(`‖M‖₂ = 1`). So to tie the imaginary half of the target to its real half, or
-to set it to zero, is not a cheaper variant of this cell. It deletes the
-mechanism. The value `x` of Mamba-3 is real, and this has no effect on it,
-because the isotropic `ρI` is `ℂ`-Hermitian free. The precondition is
-specific to the rank-one column.
+non-normal: a shear, without the norm bound. The script verifies it: `0%` of
+draws rotate with a real target (`max‖M‖₂ = 1.41`), and `100%` with a complex
+one (`‖M‖₂ = 1`).
+
+So consider two changes: to tie the imaginary half of the target to its real
+half, or to set it to zero. Neither is a cheaper variant of this cell. Each
+deletes the mechanism. The value `x` of Mamba-3 is real, and this has no
+effect on it, because the isotropic `ρI` is `ℂ`-Hermitian free. The
+precondition is specific to the rank-one column.
 
 A block in that cell also carries **two** step sizes, so two phases, at two
 different rates. This answers the question whether "the" rotation belongs
@@ -625,10 +633,12 @@ change over `ℍ`.
 The two-sided row does not fit the pattern. `v ↦ qvp̄` is not a
 multiplication by a scalar in any algebra, and its symmetric part is not a
 multiple of `I`. So `Re(η) > 0` has nothing to attach to. Its normalised trace
-is `Re(q)Re(p)`, which is negative about half the time. It is tempting to read
-that as a descent failure that needs a sign constraint. **It is not**: the
-trace is the *average* of `⟨Tv, v⟩` over directions, not the condition. The
-condition is a statement about eigenvalues, and it holds uniformly:
+is `Re(q)Re(p)`, which is negative about half the time.
+
+It is tempting to read that as a descent failure that needs a sign
+constraint. **It is not**: the trace is the *average* of `⟨Tv, v⟩` over
+directions, not the condition. The condition is a statement about
+eigenvalues, and it holds uniformly:
 
 > **Proposition 2′ (descent, all four kinds).** Let `M = αT`, with `T` any
 > isometry and `α ∈ (0,1)`. Then `sym(I − M) = I − α·T_sym ≽ (1−α)I ≻ 0`.
@@ -648,11 +658,12 @@ larger "the preconditioner does not have to be symmetric" is vacuous alone,
 because any `M` is `I − GP` for a symmetric `G` and a general `P`:
 
 - **Every kind is `α × isometry`, so it is normal, so `‖M‖₂ = ρ(M) = α`
-  exactly.** This includes `Rotor4D`, whose `v ↦ qvp̄` is in `SO(4)`. For a
-  general non-symmetric preconditioner, the gap between the norm and the
-  spectral radius is not only present but *unbounded*. Conjugate a rotation
-  by an ill-conditioned `D`: the spectrum stays on the unit circle, and
-  `‖M‖₂` grows with `cond(D)` (verified: `‖M‖₂/ρ(M) = 35` at
+  exactly.** This includes `Rotor4D`, whose `v ↦ qvp̄` is in `SO(4)`.
+
+  For a general non-symmetric preconditioner, the gap between the norm and
+  the spectral radius is not only present but *unbounded*. Conjugate a
+  rotation by an ill-conditioned `D`: the spectrum stays on the unit circle,
+  and `‖M‖₂` grows with `cond(D)` (verified: `‖M‖₂/ρ(M) = 35` at
   `cond(D) = 50`). That loses the bound that a *time-varying* product needs.
   The per-factor spectral radius does not bound `M_t⋯M_1`, but a
   submultiplicative `‖M_t‖₂ ≤ 1` does. Conformality makes the state-tracking
@@ -661,6 +672,7 @@ because any `M` is `I − GP` for a symmetric `G` and a general `P`:
   only a transition of the form *scalar × group element*. `α` is a scalar, so
   it commutes with everything. The cumulative rotation telescopes as
   `R_{i+1..t} = R̄_t R̄_i^{-1}`, by associativity and invertibility.
+
   Commutativity collapses that telescoping scan into a closed-form **cumsum of
   angles**. Without commutativity, the non-abelian kinds need a scan with a
   cross-chunk accumulator. The carry exists *because* the factors do not
@@ -685,12 +697,12 @@ It is the same construction with the other dial turned:
 > isotropic, so `micro_steps` builds one from the **step size**. Same
 > equation, orthogonal dial.
 
-The name `micro_steps` is accurate. "Product" is also accurate (at the
-quaternion kinds, the per-token transition really is a product of `u`
-non-commuting factors), on the condition that it is not read as "product of
-Householders". Cite DeltaProduct as the source of the *dial* (`u` first-order
-gradient steps per token, for the expressiveness of the transition, not for memory),
-not of the *mechanism*.
+The name `micro_steps` is accurate. "Product" is also accurate, on the
+condition that it is not read as "product of Householders". At the quaternion
+kinds, the per-token transition really is a product of `u` non-commuting
+factors. Cite DeltaProduct as the source of the *dial*, not of the
+*mechanism*. The dial is `u` first-order gradient steps per token, for the
+expressiveness of the transition, not for memory.
 
 ### 9.2 The reach claim needs no external attribution
 
@@ -702,12 +714,13 @@ plus one fact: a single rotation *at* the `rotation_range` bound is on the
 asymptote of `tanh`, where the f32 gradient is exactly zero.
 
 State the mechanism honestly. The token gets `u` full-size micro-steps: its
-effective interval becomes longer, not subdivided. The consistent alternative
-(`Δ_j = Δ/u`: the same per-token transition, which buys only the staggered
-writes and the non-abelian order) is inside the reachable set of the model,
-because `dt_limit` has no lower floor by default. So this is a superset, not
-an error. (`dt_limit` is a configurable clamp. A run that raises the floor
-above `Δ/u` loses that alternative.)
+effective interval becomes longer, not subdivided.
+
+The consistent alternative is `Δ_j = Δ/u`: the same per-token transition,
+which buys only the staggered writes and the non-abelian order. It is inside
+the reachable set of the model, because `dt_limit` has no lower floor by
+default. So this is a superset, not an error. (`dt_limit` is a configurable
+clamp. A run that raises the floor above `Δ/u` loses that alternative.)
 
 ### 9.3 `micro_steps` against `mimo_rank`
 
@@ -819,10 +832,16 @@ Rust test suites assert, separately, that it agrees with the implementation
   §7.
 
 **Note on novelty.** Nothing in §§3–7 is a new result in optimization. Each
-is a standard fact: the symmetry of Hessians, Wirtinger calculus, the
-harmonicity of `Re` of a holomorphic function, GDA cycling, the complex
-eigenvalues of heavy ball, products of symmetric matrices. The contribution of
-this note is the assembly:
+is a standard fact:
+
+- the symmetry of Hessians,
+- Wirtinger calculus,
+- the harmonicity of `Re` of a holomorphic function,
+- GDA cycling,
+- the complex eigenvalues of heavy ball,
+- products of symmetric matrices.
+
+The contribution of this note is the assembly:
 
 - these four constructions each break a different premise of Proposition 1
   (§3),
