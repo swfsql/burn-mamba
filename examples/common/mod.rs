@@ -25,6 +25,10 @@
 //! [`long_stories`] (the bits of whole long stories). They read a model only
 //! through a logits closure.
 //!
+//! The two messages that the examples of this crate print are here too, each
+//! one once: [`print_nothing_to_run`] for a launcher and
+//! [`print_budget_reached`] for a training loop.
+//!
 //! With the Dispatch-based architecture, no module here has a generic backend
 //! type. `Tensor`/`Device`/`Module` are pinned to the global `Dispatch`
 //! backend, and the device selects the concrete runtime backend.
@@ -55,6 +59,19 @@ pub const ARTIFACT_PREFIX: &str = concat!(
     std::env!("CARGO_BIN_NAME"), // e.g. reset-majority
     "-"
 );
+
+/// Print that the flags enable neither training nor inference, and then the
+/// `--help` text. A launcher calls it when its flags select no run.
+pub fn print_nothing_to_run() {
+    println!("the flags enable neither training nor inference");
+    println!("{}", cli::HELP);
+}
+
+/// Print that the training reached its budget. A training loop calls it when
+/// the session is exhausted, before it stops.
+pub fn print_budget_reached() {
+    println!("the training reached its budget, so it stops");
+}
 
 /// A `--rotation complex|quaternion|rotor` value (`quat` and `so4` are
 /// aliases), for `pico_args::Arguments::opt_value_from_fn`.

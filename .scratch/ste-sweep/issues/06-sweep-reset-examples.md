@@ -271,3 +271,31 @@ one after the other. This change holds the fixes of their findings:
   [Other word changes](#other-word-changes)).
 - The claim about the near copies covers only the sets that it lists. The LR
   comments of the other rungs are different texts.
+
+### The decisions of the user
+
+1. Docs that disagree, item 1: the two sentences change, so that they agree
+   with the table.
+   - `README.md:392` gives "On `random`, it gets more than the twin (71.3%
+     against 60.6%), for the reason that `reset-swap` gives. It stays just
+     below the counts ceiling (71.4%)."
+   - `README.md:442` gives "It does better on `random`: 71.3%, close to the
+     71.4% of a table given the exact counts."
+2. Docs that disagree, item 2: `cli.rs` joins the file list of the handoff.
+   The heading stays.
+3. Terms: the handoff takes "micro-step" for one transition of a crate kind,
+   and "training step" for one step of the optimiser. In the probe, one step
+   of the recurrence reads one token (`M[tok]`). So the probe table says
+   "per-token transition". These uses of `step` stay, because each one has a
+   different sense:
+   - `real step` and `step algebra` (lines 147 and 148), the step size of
+     `info/mamba-3/rotation-as-optimization.md`,
+   - the verb `steps` (line 43),
+   - the heading `Next steps (B), in order` and `step B2` of the plan,
+   - the `step` method of the block in "Forward/`step`/gradient parity tests".
+     It is a code span now.
+4. Follow-ups: `examples/common/mod.rs` holds each message once.
+   `print_nothing_to_run` prints the message and the `--help` text.
+   `print_budget_reached` prints the other message. The 11 launchers and the
+   11 training loops call them, and the output of each example stays the
+   same.

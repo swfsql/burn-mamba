@@ -106,8 +106,7 @@ pub fn launch(app_args: &AppArgs) {
     }
 
     if !app_args.inference && !app_args.training {
-        println!("the flags enable neither training nor inference");
-        println!("{}", common::cli::HELP);
+        common::print_nothing_to_run();
     }
 }
 

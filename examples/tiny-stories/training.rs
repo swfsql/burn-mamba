@@ -149,7 +149,7 @@ pub fn train(
         );
 
         if session.is_exhausted() {
-            println!("the training reached its budget, so it stops");
+            crate::common::print_budget_reached();
             break;
         }
     }
