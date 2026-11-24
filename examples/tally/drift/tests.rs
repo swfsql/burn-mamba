@@ -4,9 +4,9 @@
 //! 1. A **hand-built** block solves the task exactly. The Kalman gain *is* the
 //!    filter that gives the labels, so the block computes the optimal estimate,
 //!    and does not approximate it.
-//! 2. The **same block with `κ = 0`** (the scaled member, whose decay is
-//!    projected) cannot, at any gap decay on a grid: a geometric discount is
-//!    not a hyperbolic one.
+//! 2. The **same block with `κ = 0`** (the scaled member, with a projected
+//!    decay) cannot, at any gap decay on a grid. A geometric discount is not a
+//!    hyperbolic one.
 //! 3. The **honest bound**: a stock block can use a second head for a count and
 //!    let its per-token gate cross-multiply. It then decides `v·n − Σ > 0`
 //!    without a division. That is a linear state with a nonlinear readout, and
@@ -46,9 +46,9 @@ const A_HOLD_RAW: f64 = -20.0;
 /// Class-logit gain.
 const OUT_GAIN: f64 = 3.0;
 
-/// The symbol embeddings: the 33 values on a circle of radius `√2` at height
-/// `1` (so the value is an affine read), and the gap at the far pole. Their
-/// norm is `√3`, so the pre-`RmsNorm` of the layer does not change them.
+/// The symbol embeddings. The 33 values are on a circle of radius `√2` at
+/// height `1`, so the value is an affine read. The gap is at the far pole.
+/// Their norm is `√3`, so the pre-`RmsNorm` of the layer does not change them.
 fn embeddings() -> Vec<Vec<f64>> {
     let r = 2.0f64.sqrt();
     let mut out: Vec<Vec<f64>> = (0..NUM_VALUES)
@@ -68,7 +68,7 @@ enum Arm {
     /// The construction of the rung: the gain computes the discount.
     Kalman,
     /// The join at `κ = 0`: the same block, the same read of `η/Λ`, but the
-    /// decay is projected. The gap discounts geometrically by `alpha_gap`.
+    /// block projects the decay. The gap discounts geometrically by `alpha_gap`.
     Scaled { alpha_gap: f64 },
 }
 
@@ -143,7 +143,8 @@ fn handmade(device: &Device, arm: Arm) -> MambaLatentNet {
     block.b_norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([1]), device));
     block.c_norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([1]), device));
     block.b_bias_hmr = Param::from_tensor(Tensor::zeros(Shape::new([3, 1, 1]), device));
-    // `C = −1` on the estimator: its estimate is subtracted from the value.
+    // `C = −1` on the estimator: the block subtracts that estimate from the
+    // value.
     block.c_bias_hmr = param(&[-2.0, 0.0, 0.0], [3, 1, 1], device);
     // `κ`: one, or zero, the join where the block has the stock decay again.
     block.kalman_log_kappa_h = Some(param(
@@ -230,7 +231,7 @@ fn no_projected_decay_solves_the_task() {
     // and the bound says so: the rung claims exactness, not a large margin.
     assert!(
         best_worst < 0.98,
-        "a projected decay reached {best_worst:.4} — the task does not need the gain"
+        "a projected decay reached {best_worst:.4}, so the task does not need the gain"
     );
 }
 
@@ -239,15 +240,15 @@ fn no_projected_decay_solves_the_task() {
 // ---------------------------------------------------------------------------
 
 /// What a stock block can still do without a division. It holds a **sum** and
-/// a **count** in two heads, each with its own decay on a gap, and the
-/// per-token gate forms `v·n − Σ`, whose sign is the comparison. The test
+/// a **count** in two heads, each with its own decay on a gap. The per-token
+/// gate forms `v·n − Σ`, whose sign is the comparison. The test
 /// sweeps both gap decays and the value decay, in f64. This is a *lower* bound
 /// on stock, because it is one family of readouts, not all of them.
 ///
 /// It lands a few points below the gain. That is the true size of the rung. The
 /// Kalman gain is exact where this is not. But a decision needs only the ratio,
-/// cross-multiplied, and a geometric discount is close to a hyperbolic one over
-/// the range of gap lengths in a 32-token sequence.
+/// cross-multiplied. Also, over the range of gap lengths in a 32-token
+/// sequence, a geometric discount is close to a hyperbolic one.
 #[test]
 fn a_cross_multiplying_linear_state_comes_close() {
     let task = task();
@@ -306,7 +307,7 @@ fn a_cross_multiplying_linear_state_comes_close() {
     // them, and even there, the difference is about two points.
     assert!(
         knife < 0.99,
-        "the linear state matched the gain on knife ({knife:.4}) — this rung has no content"
+        "the linear state matched the gain on knife ({knife:.4}), so this rung has no content"
     );
 }
 

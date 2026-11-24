@@ -10,8 +10,8 @@
 //!   (`forward` with no cursors cannot serve as the contrast: it covers the
 //!   whole sequence in one call, so it also splices the latents.)
 //! - After each opening, teacher-forced `step`s over the continuation give the
-//!   logits of one `forward` over the prompt and the continuation (the path of
-//!   the training and the validation loss).
+//!   logits of one `forward` over the prompt and the continuation. That
+//!   `forward` is the path of the training and the validation loss.
 //!
 //! [`the_latents_run_before_the_prompt`] runs it on the tiny network of
 //! [`test_net`](crate::test_net). [`a_checkpoint_decodes_as_it_scores`] runs
@@ -98,10 +98,10 @@ fn bits(logits: &[Tensor<2>], targets: &[u8]) -> f64 {
     total / targets.len() as f64 / std::f64::consts::LN_2
 }
 
-/// The checks of the header for one prompt and one continuation. `windowed` is
-/// held across calls, as `infer` holds it. Returns the bits per character of
-/// the continuation, through the prefill and the decode, and through one
-/// `forward`.
+/// The checks of the header for one prompt and one continuation. The caller
+/// holds `windowed` across calls, as `infer` does. Returns the bits per
+/// character of the continuation, through the prefill and the decode, and
+/// through one `forward`.
 #[allow(clippy::too_many_arguments)]
 fn check_decode(
     net: &MambaVocabNet,

@@ -9,8 +9,8 @@ use burn::tensor::Int;
 use serde::{Deserialize, Serialize};
 
 /// Placeholder target for a position whose class is not a function of the
-/// history (a reset, a tie, a symbol that fixes the answer by itself). The loss
-/// and the accuracy leave it out.
+/// history. Such a position is a reset, a tie or a symbol that fixes the answer
+/// by itself. The loss and the accuracy exclude it.
 pub const IGNORE: i64 = -1;
 /// Number of output classes on every rung.
 pub const NUM_CLASSES: usize = 2;

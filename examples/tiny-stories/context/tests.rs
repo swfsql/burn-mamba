@@ -1,9 +1,10 @@
 //! [`score`] reads the right rows. Its bits equal those of a reference that
-//! scores each character of each continuation with its own `forward` (over the
-//! prompt and the continuation up to that character, the last row), across
-//! more than one batch. With no prompt, the reference reads the first
-//! character from `prime`. The reference boosts each character by itself, the
-//! id and the case apart. The check is per story, on cased text.
+//! scores each character of each continuation with its own `forward`. That
+//! `forward` reads the prompt and the continuation up to that character, and
+//! the reference reads its last row. With no prompt, the reference reads the
+//! first character from `prime`. The reference boosts each character by itself,
+//! the id and the case apart. The check is per story, on cased text, across
+//! more than one batch.
 
 use super::{BATCH, Bits, remention_marks, score};
 use crate::dataset::{FIRST_LETTER, UPPER, VOCAB, VOCAB_SIZE, pair};

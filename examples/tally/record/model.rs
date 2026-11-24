@@ -13,14 +13,16 @@
 //! (`Δ ≈ 0`), and that is the rung: only the register moves.
 //!
 //! `d_model = 3` is the load-bearing width, against both routes of a stock
-//! block. It is *not* the floor for a thirteen-symbol alphabet (that is 12). It
-//! is the width at which the values still fit, on a circle, so that one
-//! function of the symbol is an affine read of the embedding. But twelve
-//! *independent* channels do not fit, and that closes the **latch** route (one
-//! state scalar per value, selected by the gate). The other route, a sum in the
-//! exponential domain, needs a single channel but a span of `e^{45.8}`. Every
-//! channel reads the same 3-D embedding, so the block gets only the seven
-//! digits of f32, however many heads it uses. See `tests.rs` and the README.
+//! block. It is *not* the floor for a thirteen-symbol alphabet (that is 12). At
+//! this width, the values still fit on a circle, so one function of the symbol
+//! is an affine read of the embedding.
+//!
+//! Twelve *independent* channels do not fit at this width, and that closes the
+//! **latch** route (one state scalar per value, selected by the gate). The
+//! other route, a sum in the exponential domain, needs a single channel but a
+//! span of `e^{45.8}`. Every channel reads the same 3-D embedding, so the block
+//! gets only the seven digits of f32, however many heads it uses. See
+//! `tests.rs` and the README.
 
 use crate::dataset::NUM_SYMBOLS;
 use burn_mamba::prelude::{

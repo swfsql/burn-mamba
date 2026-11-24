@@ -79,14 +79,14 @@ const TEMPERATURES: &[f64] = &[0.5, 0.8, 1.0];
 /// Characters generated per sample by [`infer`].
 const SAMPLE_CHARS: usize = 600;
 
-/// Prompts [`infer`] continues when no `--prompt` is given.
+/// Prompts that [`infer`] continues without a `--prompt` flag.
 const PROMPTS: &[&str] = &[
     "Once upon a time, there was a little girl named Lily. She",
     "Tom and his dog went to the park. They",
 ];
 
-/// The temperature of the prompted continuations when no `--temperature` is
-/// given.
+/// The temperature of the prompted continuations without a `--temperature`
+/// flag.
 pub const PROMPT_TEMPERATURE: f64 = 0.8;
 
 /// The prompted continuations of [`infer`] (`--prompt`, `--continuations`,

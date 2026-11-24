@@ -3,7 +3,7 @@
 //! The validation loss of a windowed or packed run scores the first characters
 //! of each story (the window). Most stories end inside that window, so the
 //! loss tells little about the end of a long story. There, the model must keep
-//! the names, the objects and the events of the start in its state, and it
+//! the names, the objects and the events of the start in its state. It also
 //! reads positions past the training window.
 //!
 //! The measure does not depend on the model. As [`super::context`], it reads
@@ -14,11 +14,11 @@
 //! characters, from the whole validation split (not only the stories of the
 //! validation loss). About 1.5% of the stories are that long. It scores each
 //! story over its whole length in one `forward`, from a fresh state, with the
-//! lead positions in front (the last lead position predicts the first
-//! character). It
-//! reports the bits per character of the segments that [`BOUNDS`] cut, and of
-//! each [`BIN`] characters (the position profile). The bits are those of the
-//! cased text, as the validation scores it ([`cased_log_probs`]).
+//! lead positions in front. The last lead position predicts the first
+//! character. It reports the bits per character of the segments that
+//! [`BOUNDS`] cut, and of each [`BIN`] characters (the position profile). The
+//! bits are those of the cased text, as the validation scores it
+//! ([`cased_log_probs`]).
 //!
 //! **The whole valid.** The validation loss of a windowed or packed run cuts
 //! each story at its window (the first 1024 characters in the 1M searches).
@@ -38,7 +38,7 @@ use super::tiny_stories::dataset::{FIRST_LETTER, Split, VOCAB, VOCAB_SIZE, pair,
 use burn::prelude::*;
 use std::path::Path;
 
-/// A story is scored if it has more characters than this.
+/// The measure scores a story if it has more characters than this.
 pub const MIN_CHARS: usize = 2048;
 
 /// The segment bounds. The segments are `0..1024`, `1024..2048` and `2048..`
@@ -62,8 +62,9 @@ pub fn score(logits_of: &LogitsFn, device: &Device, tokens: &[Vec<u8>], batch: u
     for rows in order.chunks(batch) {
         let b = rows.len();
         let len = rows.iter().map(|&i| tokens[i].len()).max().unwrap().div_ceil(BIN) * BIN;
-        // Per position: the input pair, the column of its id, the column of its
-        // case, whether it is real, and whether its case counts (a letter).
+        // Per position: the input pair, the column of its id and the column of
+        // its case. Also two flags: whether the position is real, and whether
+        // its case counts (a letter).
         let (mut pairs, mut id_cols, mut case_cols, mut real, mut letter) =
             (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
         for &i in rows {
@@ -118,8 +119,8 @@ fn story_lines(indices: &[usize], lens: &[usize], bits: &[Vec<f64>]) -> String {
 /// Score the long stories of the validation split (see the module header),
 /// `batch` stories per `forward`. Print the bits per character of each
 /// segment and of each bin. Then score the stories of the validation loss
-/// (the first `valid_stories`) in full: the bits per character of the whole
-/// text, of its chars `0..1024` and of the rest. Save the summary as
+/// (the first `valid_stories`) in full. Print the bits per character of the
+/// whole text, of its chars `0..1024` and of the rest. Save the summary as
 /// `long-stories.json` in `artifacts` (the artifacts directory), and the bits
 /// of each bin of each story in `long-stories.jsonl` and `whole-valid.jsonl`.
 pub fn long_stories(logits_of: &LogitsFn, device: &Device, artifacts: &Path, valid_stories: usize, batch: usize) {
@@ -237,7 +238,7 @@ pub fn long_stories(logits_of: &LogitsFn, device: &Device, artifacts: &Path, val
     let (whole_first, whole_past) = (first / first_chars as f64, past / past_chars as f64);
     println!(
         "whole valid: the first {m} validation stories in full ({whole_chars} characters, {longer} stories \
-         longer than {cut}): bits/char {whole_all:.4}; chars 0..{cut} {whole_first:.4}, past {cut} {whole_past:.4}",
+         longer than {cut}). Bits/char {whole_all:.4} (chars 0..{cut} {whole_first:.4}, past {cut} {whole_past:.4})",
         cut = BOUNDS[0]
     );
 

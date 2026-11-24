@@ -10,19 +10,19 @@
 //!
 //! A running maximum is `cₜ = max(cₜ₋₁, vₜ)`: the (max, +) recursion with
 //! `a = 0`, `b = v`. So one tropical register holds it, whatever the alphabet.
-//! A linear state can hold it only as a sum in the exponential domain, and that
-//! route runs out of range (see the crate docs). Otherwise, the best that a
-//! linear state can do is to compare against a decaying average. [`gen_plateau`]
-//! defeats that: it sets the maximum early, and then it never comes near it
-//! again.
+//! A linear state can hold it only as a sum in the exponential domain. That
+//! route needs more range than f32 has (see the crate docs). Otherwise, the
+//! best that a linear state can do is to compare against a decaying average.
+//! [`gen_plateau`] defeats that: it sets the maximum early, and then it never
+//! comes near it again.
 //!
-//! The *width* argument is why the values are read from a circle, not one-hot.
-//! A linear state can hold one **latch** per threshold ("was a value ≥ k
-//! seen?"), and the per-token gate can select the latch that the current value
+//! The *width* argument is why the block reads the values from a circle, not
+//! one-hot. A linear state can hold one **latch** per threshold ("was a value
+//! ≥ k seen?"). The per-token gate can select the latch that the current value
 //! names. So at `d_model ≥ 12`, a stock block solves this exactly. At
-//! `d_model = 3`, it cannot. Every in-projection channel is an affine function
-//! of a 3-D embedding. The twelve indicators `[v ≥ k]` are not affine in one,
-//! but the `b = S·v` of the register is.
+//! `d_model = 3`, it cannot, because every in-projection channel is an affine
+//! function of a 3-D embedding. The twelve indicators `[v ≥ k]` are not affine
+//! in one, but the `b = S·v` of the register is.
 
 use crate::shared::data::{Generator, IGNORE, Rng};
 
@@ -79,11 +79,11 @@ pub fn gen_random(rng: &mut Rng, len: usize) -> Vec<usize> {
         .collect()
 }
 
-/// **The plateau family.** A high value early, then a run of 4 to 10 values
-/// that never exceed it (ties occur, and they are *not* records), then a climb
-/// of one or more records above it. Any comparison against a decaying average
-/// drifts down to the run, and then it calls the ordinary values of the run
-/// records.
+/// **The plateau family.** First a high value early. Then a run of 4 to 10
+/// values that never exceed it. Ties occur in the run, and they are *not*
+/// records. Last, a climb of one or more records above the high value. Any
+/// comparison against a decaying average falls to the level of the run, and
+/// then it calls the ordinary values of the run records.
 pub fn gen_plateau(rng: &mut Rng, len: usize) -> Vec<usize> {
     let mut out = Vec::with_capacity(len);
     while out.len() < len {

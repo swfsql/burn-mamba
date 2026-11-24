@@ -16,13 +16,16 @@
 //! block-generic version cannot dispatch. The decode loop itself is shared
 //! ([`decode`](burn_stack::examples::tiny_stories::sample::decode)). It draws
 //! every character on the device. After its first few steps, it replays one
-//! recording of the step and its draw, instead of a new launch. The
-//! prefill ([`prefill`]) also replays a recording. The prompt follows the
+//! recording of the step and its draw, instead of a new launch.
+//!
+//! The prefill ([`prefill`]) also replays a recording. The prompt follows the
 //! latents in right-padded fixed-shape windows, and one recording serves every
-//! window of every prompt across which the prefill is held. `--eager`
-//! disables both captures, and the text is the same either way. [`infer`]
-//! loads the checkpoint and prints a few stories at different temperatures,
-//! and a few continuations of fixed prompts (or of the `--prompt` texts).
+//! window of every prompt across which the prefill is held. `--eager` disables
+//! both captures, and the text is the same either way.
+//!
+//! [`infer`] loads the checkpoint and prints a few stories at different
+//! temperatures, and a few continuations of fixed prompts (or of the
+//! `--prompt` texts).
 //!
 //! One call is one story. A second call starts from a **zero** cache and
 //! primes again. This is the only place where these examples really reset a
@@ -46,15 +49,15 @@ const TEMPERATURES: &[f64] = &[0.5, 0.8, 1.0];
 /// Characters generated per sample by [`infer`].
 const SAMPLE_CHARS: usize = 800;
 
-/// Prompts [`infer`] continues when no `--prompt` is given.
+/// Prompts that [`infer`] continues without a `--prompt` flag.
 const PROMPTS: &[&str] = &[
     "once upon a time, there was a little girl named lily. she",
     "tom and his dog went to the park. they",
     "the sun was hot, so the kids",
 ];
 
-/// The temperature of the prompted continuations when no `--temperature` is
-/// given.
+/// The temperature of the prompted continuations without a `--temperature`
+/// flag.
 pub const PROMPT_TEMPERATURE: f64 = 0.8;
 
 /// The prompted continuations of [`infer`] (`--prompt`, `--continuations`,
@@ -79,7 +82,7 @@ pub fn infer(
 ) {
     let model: MambaVocabNet = app_args
         .load_model(&model_config, &infer_device)
-        .expect("no trained model in the artifacts directory; run with --training first");
+        .expect("no trained model in the artifacts directory. Run with --training first");
 
     let out_dir = app_args.artifacts_path.join("inference");
     std::fs::create_dir_all(&out_dir).expect("failed to create the inference directory");

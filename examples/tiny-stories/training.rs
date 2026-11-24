@@ -53,7 +53,7 @@ pub fn train(
     println!("Number of parameters: {}", model.num_params());
     let muon_plan = ModelConfigExt::muon_plan(&model_config);
     if config.training.optimizer.muon.is_some() {
-        // Which weights Muon took over (and where the fused ones split).
+        // The weights that Muon trains (and where the fused ones split).
         print!("{}", muon_plan.describe(&model));
     }
     let (mut optim, progress) =

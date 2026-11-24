@@ -50,22 +50,28 @@
 - **`tiny-stories`** (work in progress): a tiny character-level Mamba-3
   language model on the cleaned
   [TinyStories](https://huggingface.co/datasets/karpathy/tinystories-gpt4-clean)
-  corpus, with a tied 48-character embedding at both ends and a binary case
-  channel. Its README covers the case-folded alphabet and the case flag, the
-  download, the class latents that mark the
-  start of a story (and that `prime()` replays for seedless sampling), the
-  prefill-`forward()` / decode-`step()` sampler, the runs of windows that
-  carry the state across a story, the packed rows of whole stories
-  (`-- --pack`), a measure of how much a trained model uses the earlier
-  part of a story (`-- --context-use`), and the bits of whole long stories
-  (`-- --long-stories`).
+  corpus. It has a tied 48-character embedding at both ends and a binary case
+  channel. Its README covers these topics:
+  - the case-folded alphabet and the case flag,
+  - the download,
+  - the class latents that mark the start of a story, and that `prime()`
+    replays for seedless sampling,
+  - the prefill-`forward()` / decode-`step()` sampler,
+  - the runs of windows that carry the state across a story,
+  - the packed rows of whole stories (`-- --pack`),
+  - a measure of how much a trained model uses the earlier part of a story
+    (`-- --context-use`),
+  - the bits of whole long stories (`-- --long-stories`).
 - **`hnet-stories`** ([`hnet-stories/README.md`](hnet-stories/README.md), work
   in progress): a character-level H-Net of Mamba-3 stacks on the same corpus.
   The model learns where its chunks start: the stages run on the characters,
-  and the main stack runs on the chunks. Its README covers the stages, the
-  start embeddings that open a story, the ratio loss and the learning rate of
-  each stage, and the chunk view of a sample (`-- --show-chunks`). It also takes
+  and the main stack runs on the chunks. The example also takes
   `-- --context-use` and `-- --long-stories`, the measures of `tiny-stories`.
+  Its README covers these topics:
+  - the stages,
+  - the start embeddings that open a story,
+  - the ratio loss and the learning rate of each stage,
+  - the chunk view of a sample (`-- --show-chunks`).
 
 #### Examples Structure
 
@@ -94,14 +100,15 @@ see below). Training usually validates every few batches. The README of each
 example gives the training goal.
 
 `common/mod.rs` holds the shared definitions, imported as an outside module by
-each example. It is a thin shim. The CLI, the runtime device selection, the
-training config, and both datasets with their epoch loops (sequential-MNIST
-classification, character-level TinyStories language modelling) are in
-**`burn_stack::examples`** (feature `examples-common`, dev-only), shared with
-`burn-deltanet`. The `config → module` seam is
-`burn_stack::modules::ModelConfigExt`, which the network configs of this crate
-implement. `common/mod.rs` re-exports those under the `common::*` paths, and
-adds:
+each example. It is a thin shim. The CLI, the runtime device selection and the
+training config are in **`burn_stack::examples`** (feature `examples-common`,
+dev-only). Both datasets and their epoch loops are there too: sequential-MNIST
+classification and character-level TinyStories language modelling.
+`burn-deltanet` also uses these parts.
+
+The `config → module` seam is `burn_stack::modules::ModelConfigExt`, which the
+network configs of this crate implement. `common/mod.rs` re-exports these
+items of `burn-stack` under the `common::*` paths, and adds:
 
 - `ARTIFACT_PREFIX`, which must expand in the example crate,
 - `parse_rotation`, the `--rotation` value of the rotating `reset-*` rungs,

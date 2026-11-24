@@ -24,9 +24,11 @@
 //! That discount is hyperbolic in `k` and **saturating** in `Λ`. After a long
 //! run, the past is worth `1/(k·q)` votes, however long the run was. A linear
 //! recurrence can discount only geometrically (`αᵏ·Λ`, a product of the two).
-//! That is why the Kalman gain computes this. It is also why the difference
-//! between the arms is a few points, not a large margin: over a narrow range
-//! of `k`, the two curves are close. See `examples/tally/README.md`.
+//! That is why the Kalman gain computes this.
+//!
+//! The geometric discount also explains why the difference between the arms is
+//! a few points, not a large margin. Over a narrow range of `k`, the two curves
+//! are close. See `examples/tally/README.md`.
 
 use crate::shared::data::{Generator, IGNORE, Rng};
 
@@ -55,13 +57,13 @@ pub const Q_GAP: f64 = 0.5;
 pub const JUMP: f64 = 0.8;
 /// Positions closer than this to the estimate are unscored: a near-tie tests
 /// calibration, not memory. It is well below the probe offset of
-/// [`gen_knife`], but a probe can still land inside it. The aim is quantised
-/// onto the `1/8` value grid, and that moves it by up to `1/16`.
+/// [`gen_knife`], but a probe can still land inside it. The generator quantises
+/// the aim onto the `1/8` value grid, and that moves it by up to `1/16`.
 pub const MARGIN: f64 = 0.005;
 
 /// The distance between the probes of [`gen_knife`] and the estimate that they
-/// test. It is small enough that an estimator must be *right*, not only close:
-/// after a gap, the error of a geometric discount is larger than this.
+/// test. It is small enough that an estimator must be *right*, not only close.
+/// After a gap, the error of a geometric discount is larger than this.
 pub const PROBE_OFFSET: f64 = 0.06;
 
 /// The value a symbol carries (`GAP` carries none): `−2, −1.875, … , +2`.
@@ -169,9 +171,11 @@ pub fn gen_straddle(rng: &mut Rng, len: usize) -> Vec<usize> {
 ///
 /// The order is the whole construction. A gap scales `η` and `Λ` by the same
 /// factor. So it changes how much the past is **worth**, but not the estimate
-/// itself: every arm agrees right after a gap. The disagreement appears when
-/// new evidence is blended in. `S = (w·S_prev + x)/(w + 1)` moves by an amount
-/// that only the weight `w` of the prior sets. The Kalman gain computes that
+/// itself: every arm agrees right after a gap.
+///
+/// The disagreement appears when the estimate mixes the prior with new
+/// evidence. `S = (w·S_prev + x)/(w + 1)` moves by an amount that only the
+/// weight `w` of the prior sets. The Kalman gain computes that
 /// weight, and a projected decay only approximates it. The probes then land
 /// between the two answers.
 pub fn gen_knife(rng: &mut Rng, len: usize) -> Vec<usize> {
@@ -208,9 +212,9 @@ pub fn gen_knife(rng: &mut Rng, len: usize) -> Vec<usize> {
         // Fresh evidence first: the weight of the prior decides how far it
         // moves the estimate, so this is where the arms differ.
         observe_into(&mut out, quantize(level + rng.normal()), &mut lambda, &mut eta);
-        // Then a **burst** of probes, each at the edge of the current estimate
-        // (every probe is itself evidence, so the next probe is aimed again).
-        // The burst makes the *scored* positions the positions that the
+        // Then a **burst** of probes, each at the edge of the current estimate.
+        // Every probe is itself evidence, so the generator aims the next probe
+        // again. The burst makes the *scored* positions the positions that the
         // estimate decides. An ordinary observation lands far enough from the
         // mean that every arm agrees on it, and a family of those measures
         // nothing.

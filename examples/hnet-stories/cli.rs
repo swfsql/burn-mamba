@@ -1,8 +1,11 @@
-//! The example's own flags, forwarded after the trailing `--`: the corpus knobs
-//! (`Overrides`, shared with `tiny-stories`), the flags of a training step
-//! (`TrainingStepFlags`: the profiler, the VRAM cap, the gradient
-//! checkpointing), the scan options, the shape of a new model, the sampling,
-//! and the context-use measure.
+//! The example's own flags, forwarded after the trailing `--`:
+//! - the corpus knobs (`Overrides`, shared with `tiny-stories`),
+//! - the flags of a training step (`TrainingStepFlags`: the profiler, the VRAM
+//!   cap, the gradient checkpointing),
+//! - the scan options,
+//! - the shape of a new model,
+//! - the sampling,
+//! - the context-use measure.
 
 use crate::common::cli::{AppArgs, TrainingStepFlags, finish_extra};
 use crate::common::context::BATCH;

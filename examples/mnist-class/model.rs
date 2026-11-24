@@ -30,9 +30,9 @@ pub const N_CLASS_LATENTS: usize = 0;
 /// at index `784 - 1`.
 pub const OUTPUT_SEQUENCE_EXTRA: usize = N_CLASS_LATENTS;
 
-/// A 954-parameter classifier. With the training config in `main.rs` (batch
-/// 16, fp32, one cosine LR schedule over 4 epochs), it reaches ~90% validation
-/// accuracy by the end of the 4th epoch.
+/// A 954-parameter classifier. The training config in `main.rs` is batch 16,
+/// fp32 and one cosine LR schedule over 4 epochs. With it, the classifier
+/// reaches ~90% validation accuracy by the end of the 4th epoch.
 pub fn model_config() -> MambaLatentNetConfig {
     let d_model = 6;
     let mamba_block = Mamba3Config::new(d_model)
@@ -42,8 +42,8 @@ pub fn model_config() -> MambaLatentNetConfig {
         // per_head_dim = 6
         // nheads = d_inner/per_head_dim = 12/6 = 2
         .with_per_head_dim(6)
-        // B/C are projected once per group. With ngroups = nheads, every head
-        // writes and reads its state through its own B/C.
+        // The block projects B/C once per group. With ngroups = nheads, every
+        // head writes and reads its state through its own B/C.
         .with_ngroups(2)
         .with_mimo_rank(1)
         // The rotation of the transition: Real1D | Complex2D | Quaternion4D |
@@ -53,9 +53,9 @@ pub fn model_config() -> MambaLatentNetConfig {
         .with_has_proj_bias(false)
         .with_has_outproj_norm(true)
         .with_rotation(RotationKind::Quaternion4D)
-        // Held once per virtual layer, not shared by all of them: the per-head
-        // tail of the in-projection (Δ, A, λ and the rotation), and the small
-        // per-head and norm tensors.
+        // Each virtual layer holds its own copy of these tensors:
+        // - the per-head tail of the in-projection (Δ, A, λ and the rotation),
+        // - the small per-head and norm tensors.
         .with_untied(vec![
             Mamba3Untied::InProjTail,
             Mamba3Untied::DtBias,

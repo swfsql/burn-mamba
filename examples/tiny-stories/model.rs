@@ -31,7 +31,7 @@ const GRAD_HORIZON: Option<GradHorizon> = None;
 /// They make seedless generation honest. During training, the last of them is
 /// scored against the **first** character of the story. So `prime` replays them
 /// and returns the distribution of that character, with no input. A separator
-/// character as a seed would be out of distribution: in a joined stream it
+/// character as a seed would be out of distribution. In a joined stream, it
 /// occurs only *between* two stories, so always on a state that carries the
 /// previous story.
 const N_CLASS_LATENTS: usize = 4;

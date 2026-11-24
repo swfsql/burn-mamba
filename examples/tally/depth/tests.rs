@@ -1,12 +1,12 @@
 //! The three claims this rung rests on, measured.
 //!
-//! 1. A **hand-built** block solves the task exactly. Every weight is written
-//!    in closed form, nothing is fitted, and the state of the plant is unused:
+//! 1. A **hand-built** block solves the task exactly. The test writes every
+//!    weight in closed form and fits nothing. The state of the plant is unused:
 //!    one tropical register per head is the whole solution.
 //! 2. The **same block without the register** cannot, for any selective decay
 //!    on a grid. A linear recurrence has no floor. A multiplicative decrement (a
 //!    trick that a stock block can find) never reaches zero, so it fails
-//!    exactly where the depth comes back to zero.
+//!    exactly where the depth returns to zero.
 //! 3. The current symbol does not solve the task. The *unclamped* sum (what any
 //!    linear state computes) is wrong where the floor has an effect.
 
@@ -265,7 +265,7 @@ fn no_stock_decay_solves_the_task() {
     println!("best worst-family accuracy over the whole sweep: {:.2}%", 100.0 * best_worst);
     assert!(
         best_worst < 0.95,
-        "a selective decay reached {best_worst:.4} — the task does not need the register"
+        "a selective decay reached {best_worst:.4}, so the task does not need the register"
     );
 }
 
@@ -273,10 +273,11 @@ fn no_stock_decay_solves_the_task() {
 // 3. the task itself
 // ---------------------------------------------------------------------------
 
-/// The memoryless ceiling (the best result of a model that sees only the
-/// current symbol), and the share of scored positions where the **unclamped**
-/// sum (what a linear state holds) disagrees with the clamped depth. The
-/// `floor` family exists for the second number.
+/// Measure the memoryless ceiling and the share of scored positions where the
+/// **unclamped** sum disagrees with the clamped depth. The memoryless ceiling
+/// is the best result of a model that sees only the current symbol. A linear
+/// state holds the unclamped sum. The `floor` family exists for the second
+/// number.
 #[test]
 fn the_floor_is_what_the_task_tests() {
     let task = task();

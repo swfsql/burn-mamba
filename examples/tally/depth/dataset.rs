@@ -9,7 +9,7 @@
 //! ```
 //!
 //! Only `)` positions are scored. After a `(`, the depth is at least one
-//! whatever the history, so that target is one bit of the token class, and a
+//! whatever the history. So that target is one bit of the token class, and a
 //! model can collect it without any memory at all. `R` is unscored for the same
 //! reason.
 //!
@@ -91,8 +91,8 @@ pub fn gen_random(rng: &mut Rng, len: usize) -> Vec<usize> {
         .collect()
 }
 
-/// **The floor family.** A run of `)` that goes past zero (where it has no
-/// effect, so the clamp forgets it, but a running sum does not), then a
+/// **The floor family.** First a run of `)` that goes past zero. There it has
+/// no effect, so the clamp forgets it, but a running sum does not. Then a
 /// matching `(`…`)` group. The clamp says `inside` until the last close of the
 /// group. The sum is still negative from the surplus, so it says `empty` for
 /// the whole group.

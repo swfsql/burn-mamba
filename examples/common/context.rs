@@ -9,17 +9,20 @@
 //!
 //! The validation loss mixes two kinds of prediction. The local one
 //! (spelling, grammar, stock phrases) is most of it. The use of the earlier
-//! story (who is in it, what was asked, what happened) is a small part, and it
-//! is what keeps a continuation coherent. This measure isolates the second.
+//! story (who is in it, what was asked, what happened) is a small part. But
+//! this small part keeps a continuation coherent. This measure isolates the
+//! second.
 //!
 //! Each validation story with at least [`PROMPT`] + [`CONTINUATION`]
 //! characters gives a prompt `P` (its first [`PROMPT`] characters) and a
 //! continuation `C` (the next [`CONTINUATION`] characters). [`score`] scores
-//! `C` as the validation scores it (one `forward`, the lead positions in front):
-//! after its own `P`, and after the `P` of another story (story `i`
-//! reads the prompt of story `i + 1`, and in a second pairing of story
-//! `i + 2`, whose spread is the noise). The use is the difference, in bits
-//! per character of `C`:
+//! `C` as the validation scores it: one `forward`, with the lead positions in
+//! front. It scores `C` after its own `P`, and after the `P` of another story.
+//! In the first pairing, story `i` reads the prompt of story `i + 1`. In a
+//! second pairing, it reads the prompt of story `i + 2`. The spread of the two
+//! pairings is the noise.
+//!
+//! The use is the difference, in bits per character of `C`:
 //!
 //! `use = bits(C | other P) − bits(C | own P)`
 //!
@@ -27,9 +30,9 @@
 //! apart:
 //! - The join, the first [`JOIN`] characters: mostly the local syntax across
 //!   the cut (the rest of a word or a sentence).
-//! - The far part, the rest: there, only the information that the model
-//!   carries over from the prompt (names, objects, events) makes `C` cheaper
-//!   after its own prompt.
+//! - The far part, the rest. There, only the information that the model keeps
+//!   from the prompt (names, objects, events) makes `C` cheaper after its own
+//!   prompt.
 //!
 //! **Coherence boosting** (Malkin et al. 2022) shows whether the readout gives
 //! the prompt too little weight. [`score`] also scores `C` with no prompt (the
@@ -43,16 +46,19 @@
 //! full. If no α > 0 does, the limit is what the state holds.
 //!
 //! **Re-mentions** ([`remention_marks`]) isolate the recall of names and
-//! objects. They are the words of the far part that also occur in the own
-//! prompt (the case does not matter), and that only few stories hold (so not
-//! the function words). Their bits after the own prompt, with no prompt, and
-//! after the other prompts show how well the model recalls an entity of the
-//! prompt when the story names it again. The overall far use hides this part.
+//! objects. A re-mention is a word of the far part with two properties:
+//! - It also occurs in the own prompt. The case does not matter.
+//! - Only few stories hold it. So the function words are not re-mentions.
+//!
+//! [`score`] gives the bits of the re-mentions in three cases: after the own
+//! prompt, with no prompt, and after the other prompts. These bits show how
+//! well the model recalls an entity of the prompt when the story names it
+//! again. The overall far use hides this part.
 //!
 //! **The case.** The bits of a character are those of the cased text, as the
-//! validation scores it: the bits of its id, plus the bits of its case flag
-//! when it is a letter. A position gives two softmaxes: the ids, and the case
-//! (lower, upper) over `[0, z]`, with `z` the case logit
+//! validation scores it. They are the bits of its id, plus the bits of its case
+//! flag when it is a letter. A position gives two softmaxes: the ids, and the
+//! case (lower, upper) over `[0, z]`, with `z` the case logit
 //! ([`cased_log_probs`]). The boost acts on each of them.
 
 use super::tiny_stories::dataset::{FIRST_LETTER, Split, VOCAB, VOCAB_SIZE, pair, stories};
@@ -76,12 +82,14 @@ pub const CONTINUATION: usize = 256;
 /// The characters of the join segment, at the start of the continuation.
 pub const JOIN: usize = 64;
 
-/// Sequences per `forward` when no `--context-batch` is given. Small, so the
+/// Sequences per `forward` with no `--context-batch` flag. Small, so the
 /// measure can run on the GPU beside a training. Run it on the GPU: on flex,
-/// 2048 stories take ~36 min (h16), too slow to be useful. On the GPU beside
-/// the training of h16 × g2, a batch of 8 kept the card total at 4.7 GiB or
-/// less (at most ~0.9 GiB above the training alone), at 85–200 s per
-/// checkpoint. The training then ran ~1.8× slower.
+/// 2048 stories take ~36 min (h16), too slow to be useful.
+///
+/// On the GPU beside the training of h16 × g2, a batch of 8 kept the card
+/// total at 4.7 GiB or less. The card total was at most ~0.9 GiB above the
+/// training alone. The measure took 85–200 s per checkpoint, and the training
+/// then ran ~1.8× slower.
 pub const BATCH: usize = 4;
 
 /// The coherence boosting strengths α of `--context-use`. α = 0 is the plain
@@ -94,9 +102,9 @@ pub const REMENTION_LEN: usize = 3;
 
 /// A word counts as a re-mention only if fewer than this share of the scored
 /// stories hold it (in the prompt or the continuation). On the validation
-/// stories, the names and the objects are below it (lily 0.15, tom 0.11, ball
-/// 0.09, dog 0.16), and the function words and the common words are above it
-/// (the 0.99, she 0.48, mom 0.28).
+/// stories, the names and the objects are below it: lily 0.15, tom 0.11, ball
+/// 0.09, dog 0.16. The function words and the common words are above it: the
+/// 0.99, she 0.48, mom 0.28.
 pub const REMENTION_DF: f64 = 0.2;
 
 /// The mean bits per character of the two segments of a continuation (or of
@@ -202,11 +210,13 @@ fn log_probs(
 /// After a prompt, score it at each boost strength of `alphas` (see the module
 /// header). The lead positions are in front, as the validation scores it. All
 /// prompts have one length, and all continuations another. One call of
-/// `logits_of` takes `batch` sequences. Each [`Bits`] holds the mean bits per character of
-/// the first `join` characters of one continuation, and of the rest. For each
-/// mark set of `marks` (`marks[m][i][k]`: character `k` of continuation `i` is
-/// in set `m`), the scores also hold the summed bits over the marked
-/// characters ([`Scores::marked`]).
+/// `logits_of` takes `batch` sequences.
+///
+/// Each [`Bits`] holds the mean bits per character of the first `join`
+/// characters of one continuation, and of the rest. For each mark set of
+/// `marks` (`marks[m][i][k]`: character `k` of continuation `i` is in set `m`),
+/// the scores also hold the summed bits over the marked characters
+/// ([`Scores::marked`]).
 #[allow(clippy::too_many_arguments)]
 pub fn score(
     logits_of: &LogitsFn,
@@ -352,13 +362,13 @@ fn words(tokens: &[u8]) -> Vec<(usize, String)> {
     out
 }
 
-/// The re-mention marks of the continuations. Mark set 0 holds every letter,
-/// and mark set 1 the first letter, of each word of the far part (from `join`
-/// on) that also occurs in the own prompt. A word has [`REMENTION_LEN`]
-/// letters or more, and fewer than [`REMENTION_DF`] of the stories hold it
-/// (in the prompt or the continuation). So the data selects the names and the
-/// objects, with no word list. A word cut by the start of the continuation
-/// starts before `join`, so it does not count.
+/// The re-mention marks of the continuations. The marked words are the words
+/// of the far part (from `join` on) that also occur in the own prompt. Mark
+/// set 0 holds every letter of each marked word, and mark set 1 holds its first
+/// letter. A marked word has [`REMENTION_LEN`] letters or more, and fewer than
+/// [`REMENTION_DF`] of the stories hold it (in the prompt or the continuation).
+/// So the data selects the names and the objects, with no word list. A word cut
+/// by the start of the continuation starts before `join`, so it does not count.
 pub fn remention_marks(prompts: &[Vec<u8>], continuations: &[Vec<u8>], join: usize) -> [Vec<Vec<bool>>; 2] {
     let n = prompts.len();
     let prompt_words: Vec<HashSet<String>> =
@@ -433,9 +443,9 @@ pub fn context_use(logits_of: &LogitsFn, device: &Device, artifacts: &Path, n_st
     let [own, other, other2] =
         [0, 1, 2].map(|j| scores.pairings[j].iter().map(|s| Bits::mean(s)).collect::<Vec<_>>());
     let none = Bits::mean(&scores.none);
-    // The far part of each story at α = 0 (pairing i + 1): the gain of the own
-    // prompt over no prompt, the penalty of the other prompt, and the use
-    // (their sum).
+    // The code below measures the far part of each story at α = 0, with
+    // pairing i + 1. It gives the gain of the own prompt over no prompt, the
+    // penalty of the other prompt and the use (their sum).
     let story = |j: usize, i: usize| scores.pairings[j][0][i];
     let far = |f: &dyn Fn(usize) -> f64| mean_se(&(0..n).map(f).collect::<Vec<_>>());
     let gain = far(&|i| scores.none[i].far - story(0, i).far);
@@ -481,8 +491,8 @@ pub fn context_use(logits_of: &LogitsFn, device: &Device, artifacts: &Path, n_st
     let counts = marks.each_ref().map(|set| set.iter().map(|row| row.iter().filter(|&&x| x).count()).collect::<Vec<_>>());
     let rem_stories = counts[0].iter().filter(|&&k| k > 0).count();
     println!(
-        "re-mention: far-part words of {REMENTION_LEN}+ letters of the own prompt, held by < {REMENTION_DF} of the \
-         stories: {} letters ({} words) in {rem_stories} stories",
+        "re-mention: {} letters ({} words) in {rem_stories} stories. The words are far-part words of \
+         {REMENTION_LEN}+ letters, in the own prompt and in < {REMENTION_DF} of the stories",
         counts[0].iter().sum::<usize>(),
         counts[1].iter().sum::<usize>()
     );

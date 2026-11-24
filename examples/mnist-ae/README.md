@@ -70,8 +70,9 @@ next to the reconstruction).
 
 On CUDA, each validation pass captures its forward as one captured step at its
 first batch (burn-stack's `CapturedStep`), as in `mnist-class`. The
-reconstruction PNGs run eagerly. The loss is the same in both modes. The
-recording holds its own memory.
+reconstruction PNGs run eagerly.
+
+The loss is the same in both modes. The recording holds its own memory.
 `--eager` runs the forward eagerly. Under `--sgd` (plain SGD instead of AdamW,
-see `mnist-class`), the training step replays in the same way: the forward, the
-backward and the update, captured at the first batch.
+see `mnist-class`), the training step replays in the same way. The first batch
+records the forward, the backward and the update.

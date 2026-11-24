@@ -31,7 +31,7 @@ pub fn param<const D: usize>(v: &[f64], shape: [usize; D], device: &Device) -> P
 }
 
 /// Least-squares solve of `rows · w = rhs` (normal equations, Gaussian
-/// elimination with partial pivoting). It asserts that the fit is **exact**: a
+/// elimination with partial pivoting). It asserts that the fit is **exact**. A
 /// channel that is not an affine function of the embedding is a bug in the
 /// construction, not an approximation to accept.
 pub fn solve_affine(rows: &[Vec<f64>], rhs: &[f64]) -> Vec<f64> {

@@ -1,11 +1,12 @@
 //! Training loop for the MNIST autoencoder. It builds the dataloaders, runs the
 //! train and validation epochs, and saves the model and the optimizer. The
 //! objective is pixel reconstruction (binary cross-entropy on the normalized
-//! image, computed from raw logits). A `Trainer` trains it. Under plain SGD (and
-//! without `--eager`), the whole training step is a captured step, recorded
-//! at the first batch. Under any other optimizer, it runs eagerly. The
-//! validation side is [`Valid`], which replays the forward as a captured
-//! step.
+//! image, computed from raw logits).
+//!
+//! A `Trainer` trains the model. Under plain SGD (and without `--eager`), the
+//! whole training step is a captured step, recorded at the first batch. Under
+//! any other optimizer, it runs eagerly. The validation side is [`Valid`],
+//! which replays the forward as a captured step.
 
 pub use crate::common::{
     model::ModelConfigExt,
@@ -45,7 +46,7 @@ pub fn train(
     println!("Number of parameters: {}", model.num_params());
     let muon_plan = ModelConfigExt::muon_plan(&model_config);
     if training_config.optimizer.muon.is_some() {
-        // Which weights Muon took over (and where the fused ones split).
+        // The weights that Muon trains (and where the fused ones split).
         print!("{}", muon_plan.describe(&model));
     }
     let (mut optim, progress) =
@@ -176,8 +177,8 @@ pub fn epoch_train(
     let mut loss_metric = burn::train::metric::LossMetric::new();
     let mut iteration_speed_metric = burn::train::metric::IterationSpeedMetric::new();
 
-    // A fixed set of test images (on the validation backend), reconstructed at
-    // every small validation check, to show the reconstruction quality over
+    // A fixed set of test images (on the validation backend). Each small
+    // validation reconstructs them, to show the reconstruction quality over
     // time.
     let (sample_imgs, sample_labels) = sample_images(NUM_SAMPLES, &valid_device);
 
@@ -311,16 +312,16 @@ fn train_loss(model: &AeModel, input_bhw1: Tensor<4>) -> (Tensor<1>, Tensor<2>) 
     (output.loss, output.output.inner())
 }
 
-/// The validation-side autoencoder: the trained model on the inner backend. Its
-/// forward is captured at the shape of the first batch, and it replays the
+/// The validation-side autoencoder: the trained model on the inner backend. It
+/// captures its forward at the shape of the first batch, and it replays the
 /// recording for every later batch of that shape. Any other shape (a short last
 /// batch) runs eagerly. `--eager` disables the capture.
 ///
 /// There is one capture per validation pass, because the weights change
 /// between passes. Each capture costs the 3 forwards that
 /// `CapturedStep::capture` runs before it records. On a backend that cannot
-/// record (flex), the capture falls back to eager, and the recording runs too: that
-/// costs only 4 forwards per pass.
+/// record (flex), the capture runs eagerly instead, and the recording runs too.
+/// That costs only 4 forwards per pass.
 pub struct Valid {
     model: AeModel,
     captured: RefCell<Option<CapturedLogits>>,

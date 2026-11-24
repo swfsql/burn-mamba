@@ -47,7 +47,7 @@ pub fn train(
     println!("Number of parameters: {}", model.num_params());
     let muon_plan = ModelConfigExt::muon_plan(&model_config);
     if training_config.optimizer.muon.is_some() {
-        // Which weights Muon took over (and where the fused ones split).
+        // The weights that Muon trains (and where the fused ones split).
         print!("{}", muon_plan.describe(&model));
     }
     let (mut optim, progress) =
@@ -197,15 +197,15 @@ impl MnistModel for Wrap {
 }
 
 /// The validation-side classifier: the network of [`Wrap`] on the inner
-/// backend. Its forward is captured at the shape of the first batch, and it
+/// backend. It captures its forward at the shape of the first batch, and it
 /// replays the recording for every later batch of that shape. Any other shape
 /// (a short last batch) runs eagerly. `--eager` disables the capture.
 ///
 /// There is one capture per validation pass, because the weights change
 /// between passes. Each capture costs the 3 forwards that
 /// `CapturedStep::capture` runs before it records. On a backend that cannot
-/// record (flex), the capture falls back to eager, and the recording runs too: that
-/// costs only 4 forwards per pass.
+/// record (flex), the capture runs eagerly instead, and the recording runs too.
+/// That costs only 4 forwards per pass.
 pub struct Valid {
     net: MambaLatentNet,
     captured: RefCell<Option<CapturedLogits>>,

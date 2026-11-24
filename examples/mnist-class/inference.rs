@@ -2,7 +2,7 @@
 //!
 //! [`infer`] loads the trained model and classifies a few test digits. It
 //! prints each digit as ASCII art next to its 10-bin class-probability bar
-//! chart, and it writes one PNG per digit (the image plus the probability
+//! chart. It also writes one PNG per digit (the image plus the probability
 //! bars). The rendering itself is `burn_stack::examples::mnist::render`,
 //! shared with `burn-deltanet`. The Mamba part here is [`predict`]. The
 //! training loop also calls it at every small validation check, to write

@@ -63,7 +63,7 @@ fn cased(j: usize, id: usize) -> u8 {
 }
 
 /// The log-softmaxes of the predictions of `continuation` after `prompt`,
-/// from one `forward` over both (the class latents in front): the ids
+/// from one `forward` over both (the class latents in front). They are the ids
 /// `[1, n, VOCAB_SIZE]`, and the case `[1, n, 2]` (lower, upper: a softmax
 /// over `[0, z]`).
 fn reference_log_softmax(
@@ -106,7 +106,7 @@ fn reference_log_p(net: &MambaVocabNet, scan_options: &MambaScanOptions, prompt:
 /// The direction of the loss, apart from its formula and from its readouts:
 /// plain gradient descent on the contrast alone makes the own prompt win.
 /// The reference measures `Δ = log p(C_i | P_i) − log p(C_i | P_{i−1})`, and
-/// it must go up.
+/// it must rise.
 #[test]
 fn descent_on_the_contrast_raises_delta() {
     let device = test_device().autodiff();
@@ -262,9 +262,10 @@ fn profile_field(line: &str, name: &str) -> Vec<f32> {
     line[start..end].split(',').map(|v| v.parse().unwrap()).collect()
 }
 
-/// Each line of the profile holds the text of its row, the log-probabilities
-/// of [`pair_log_probs`] (with and without the roll), and the entropies of a
-/// forward over each pair.
+/// Each line of the profile holds three parts:
+/// - the text of its row,
+/// - the log-probabilities of [`pair_log_probs`], with and without the roll,
+/// - the entropies of a forward over each pair.
 #[test]
 fn profile_lines_hold_the_scores_of_each_character() {
     let device = test_device();

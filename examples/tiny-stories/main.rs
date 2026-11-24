@@ -1,10 +1,10 @@
 //! # TinyStories character-level language model
 //!
 //! An auto-regressive Mamba-3 LM over single **characters** of the
-//! [TinyStories-GPT4-clean] corpus: Mamba-3 blocks (cycled to a virtual stack
-//! over Multi-Gate residuals) between a **tied** 48-character embedding and its
-//! transpose. This example is a work in progress: its sizes and
-//! hyperparameters are placeholders until a parameter search.
+//! [TinyStories-GPT4-clean] corpus. Its Mamba-3 blocks (cycled to a virtual
+//! stack over Multi-Gate residuals) sit between a **tied** 48-character
+//! embedding and its transpose. This example is a work in progress: its sizes
+//! and hyperparameters are placeholders until a parameter search.
 //!
 //! [TinyStories-GPT4-clean]: https://huggingface.co/datasets/karpathy/tinystories-gpt4-clean
 //!
@@ -21,9 +21,10 @@
 //!   distribution of the first character). It prefills an optional prompt with
 //!   chunkwise `forward`s, then samples one character per `step`.
 //!
-//! The corpus knobs, the scan options, the training-step profiler and the VRAM cap
-//! ([`cli`]) go after the trailing `--`. The corpus knobs are written into the `training_config.json`
-//! of the artifacts, so a resumed run keeps them:
+//! The corpus knobs, the scan options, the training-step profiler and the VRAM
+//! cap ([`cli`]) go after the trailing `--`. The example writes the corpus knobs
+//! into the `training_config.json` of the artifacts, so a resumed run keeps
+//! them:
 //!
 //! ```bash
 //! # train and then sample (downloads the 673MB parquet once, if not cached yet)
@@ -103,10 +104,10 @@ pub fn launch(app_args: &AppArgs) {
         // and the cosine still finishes.
         //
         // One item is one story, and a batch runs the windows of its *longest*
-        // story. So the LR schedule uses that maximum, not the mean: ~1200
-        // characters is the expected longest of `batch_size = 8` draws (the mean
-        // of the corpus is ~820, its 90th percentile 1103, its longest story
-        // 4149).
+        // story. So the LR schedule uses that maximum, not the mean. The
+        // expected longest of `batch_size = 8` draws is ~1200 characters. The
+        // mean of the corpus is ~820, its 90th percentile 1103 and its longest
+        // story 4149.
         const CHARS_PER_LONGEST_STORY: usize = 1200;
         let batches_per_epoch = config.train_stories / config.training.batch_size;
         let training_steps_per_epoch =

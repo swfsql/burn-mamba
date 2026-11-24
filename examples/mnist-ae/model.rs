@@ -1,4 +1,4 @@
-//! The model for the `mnist-ae` example — a symmetric, fully **bidirectional**
+//! The model for the `mnist-ae` example: a symmetric, fully **bidirectional**
 //! **patch** autoencoder over MNIST (a ViT/MAE-style design with the attention
 //! blocks replaced by Mamba-3 blocks).
 //!
@@ -15,10 +15,11 @@
 //! Both halves are [`MambaBidiLayers`] stacks of Mamba-3 layers.
 //!
 //! - **Encoder**: `patchify → enc_in_proj → +patch_pos → bidi stack → mean-pool →
-//!   enc_to_z`. The pooled summary is projected to the small **latent** `z` (the
-//!   configurable bottleneck). With a bidi encoder every patch has seen the whole
-//!   image, so the mean is an order-agnostic summary. (A `Middle` [`ClassLatent`]
-//!   readout is available as an optional alternative to mean-pooling.)
+//!   enc_to_z`. `enc_to_z` projects the pooled summary to the small **latent**
+//!   `z` (the configurable bottleneck). With a bidi encoder, every patch sees
+//!   the whole image, so the mean is an order-agnostic summary. (A `Middle`
+//!   [`ClassLatent`] readout is available as an optional alternative to
+//!   mean-pooling.)
 //! - **Decoder**: reconstructs every patch in **one parallel pass, reading only
 //!   from `z`**. Each output position is a learned positional query
 //!   ([`dec_pos`](AeModel::dec_pos)) **modulated by `z` via FiLM**
@@ -47,15 +48,15 @@ use burn_stack::utils::BidiSchedule;
 /// How the decoder conditions its per-position queries on the latent `z`.
 ///
 /// A plain `Copy` enum (no `Module`/`Config` derive) usable both as a
-/// `#[derive(Module)]` constant field and a `#[derive(Config)]` field — same
-/// recipe as `RotationKind`.
+/// `#[derive(Module)]` constant field and a `#[derive(Config)]` field. It
+/// follows the recipe of `RotationKind`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DecoderCond {
-    /// FiLM: `dec_in = (1 + scale(z)) · query + shift(z)` — `z` multiplicatively
+    /// FiLM: `dec_in = (1 + scale(z)) · query + shift(z)`. `z` multiplicatively
     /// modulates and biases each positional query channel (recommended).
     Film,
-    /// Additive broadcast: `dec_in = query + project(z)` — `z` added identically
-    /// at every position (the original, weaker conditioning).
+    /// Additive broadcast: `dec_in = query + project(z)`. Each position gets the
+    /// same `project(z)` (the original, weaker conditioning).
     Add,
 }
 
@@ -131,9 +132,9 @@ impl AeModel {
         let h_bsd = h_bsd + self.enc_pos.val().unsqueeze_dim::<3>(0); // + patch position
         // The bidi stack may splice class latents (lengthening the sequence).
         let (enc_out, _caches) = self.enc_layers.forward(h_bsd, None, Self::scan_options(), None, None);
-        // Read the summary out of the class-latent position if configured (with a
-        // bidi encoder that token has seen the whole image), else mean-pool over
-        // the patches — both are order-agnostic image summaries.
+        // Read the summary from the class-latent position if the encoder stack
+        // has one. With a bidi encoder, that token sees the whole image. Else
+        // mean-pool over the patches. Both are order-agnostic image summaries.
         let pooled_bd = match self
             .enc_layers
             .class_latent_output_indices(self.npatch)
@@ -299,8 +300,8 @@ impl ModelConfigExt for AeConfig {
 /// **16-wide latent** bottleneck, its Mamba-3 block the one `mnist-class` uses.
 ///
 /// Each half is a single bidi pair (**2 real** layers) applied as **4 virtual
-/// layers** (`StridedStretched`), with the in-projection's per-head tail and the
-/// small per-head and norm tensors untied per application. `d_model = 6`,
+/// layers** (`StridedStretched`). The in-projection's per-head tail and the
+/// small per-head and norm tensors are untied per application. `d_model = 6`,
 /// `expand = 2` (`d_inner = 12`, `per_head_dim = 6` ⇒ `nheads = 2`, one group
 /// each), `state_rank = 8` with half of it turned by a non-abelian
 /// `Quaternion4D` rotation, `patch = 4` (length-49 sequence), FiLM decoder

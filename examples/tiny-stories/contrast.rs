@@ -44,7 +44,7 @@
 //!   `J`, where the classifier is not sure yet. A single sum over all of `C`
 //!   saturates.
 //! - The prompts and the first `J` characters of `C` get no contrast loss.
-//!   The gradient still goes back into every position of both prompts, through
+//!   The gradient still reaches every position of both prompts, through
 //!   the caches (they are not detached). So the loss trains what the model
 //!   writes into its state while it reads a prompt.
 //!
@@ -364,7 +364,8 @@ impl ContrastConfig {
     }
 }
 
-/// The `--contrast*` flags. Each one that is given replaces its saved value.
+/// The `--contrast*` flags. Each flag on the command line replaces its saved
+/// value.
 #[derive(Debug, Default)]
 pub struct ContrastOverrides {
     /// `--contrast K`.
@@ -731,7 +732,7 @@ pub struct Feed {
     /// The token ids of each story with `prompt_min + continuation`
     /// characters or more, truncated to `prompt_max + continuation`.
     stories: Vec<Vec<u8>>,
-    /// A shuffle of `stories`. A new one starts when it runs out.
+    /// A shuffle of `stories`. A new shuffle starts after its last entry.
     order: Vec<usize>,
     /// The next position in `order`.
     next: usize,
@@ -780,9 +781,9 @@ impl Feed {
             stories.len()
         );
         println!(
-            "contrast: {} of {train_stories} train stories, {} per training step, prompt {}..={}, \
-             {:?} cut, {:?} negative, continuation {}, skip {}, weight {} (0 before training step {}, \
-             then a ramp of {} training steps), lm {}, one-sided {}",
+            "contrast: {} of {train_stories} train stories, {} per training step. Prompt {}..={}, \
+             {:?} cut, {:?} negative, continuation {}, skip {}. Weight {} (0 before training step {}, \
+             then a ramp of {} training steps). lm {}, one-sided {}",
             stories.len(),
             config.stories,
             config.prompt_min,
@@ -924,9 +925,9 @@ impl Feed {
         }
     }
 
-    /// End the current training step: log the readouts of [`loss`] if the pass
-    /// ran (this reads them from the device), and move to the next training
-    /// step.
+    /// End the current training step. If the pass ran, log the readouts of
+    /// [`loss`] (this reads them from the device). Then move to the next
+    /// training step.
     pub fn end_training_step(&mut self, readouts: Option<Tensor<1>>) {
         let weight = self.weight();
         let training_step = self.training_step;

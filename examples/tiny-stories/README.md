@@ -31,8 +31,8 @@ answers both "which character is this" and "which character comes next".
 
 The case is a second, binary channel, not a part of the vocabulary. Each
 character is the pair (id, case flag), and the flag is 1 for `A-Z` only. The
-model adds a learned vector to the embedding where the flag is 1, and it
-predicts the flag of the next character with one more logit. The flag of a
+model adds a learned vector to the embedding where the flag is 1. It predicts
+the flag of the next character with one more logit. The flag of a
 symbol is always 0 at the input and is not scored at the output.
 
 Four learnable **class latents** mark the start of a story, not a character (see
@@ -79,21 +79,21 @@ Unconditional sampling uses exactly that. `prime()` replays the latents against 
 zero cache, with no input token, and returns the distribution of the first
 character. Generation then continues with plain `step()`s. The alternative is a
 separator character between stories, given as a seed. That seed is out of
-distribution: in a joined stream it occurs only *between* two stories, so always
-on a state that still carries the previous story.
+distribution. In a joined stream, it occurs only *between* two stories, so
+always on a state that still carries the previous story.
 
 So one `generate()` call is one story. A second story needs a second call
 against a **reset** cache. That is the one place where these examples really
 reset a cache.
 
 On CUDA, the decode `step`s replay from one recording (burn-stack's
-`CapturedStep`), and are not launched again. A model this small is bound by the
-host that enqueues its launches, not by the GPU. The prefill windows of a prompt
-also replay, from one recording that every prompt shares. The text is the same in
-both modes. `--eager` runs both eagerly.
+`CapturedStep`). The host does not enqueue their launches again. A model this
+small is bound by the host that enqueues its launches, not by the GPU. The
+prefill windows of a prompt also replay, from one recording that every prompt
+shares. The text is the same in both modes. `--eager` runs both eagerly.
 
 Every position is scored against its next character, so the reported accuracy is
-per character. A story is walked in windows (see
+per character. The loop walks a story in windows (see
 [Runs and the frontier](#runs-and-the-frontier)).
 
 - Stories differ in length. So a batch is padded to a whole number of windows of
@@ -118,8 +118,8 @@ training step per window, and **carries the final state into the next window**:
 - The length of the run is the length of the **story**. `--run-len` is only a
   cap. Its default (`usize::MAX`) sets no cap, and leaves the depth to the gate.
 - The carry is *earned*. After each window, the **frontier gate** scores it. A
-  window that fails ends the run: the rest of the story is discarded, and not
-  trained on a state where the model is lost.
+  window that fails ends the run. The loop discards the rest of the story, and
+  it does not train on a state where the model is lost.
   - The gate is on the trainer side. It reads one scalar and decides if a cache
     goes to the next window. No gradient goes through it.
   - The default is absolute: continue while the window scored at most
@@ -184,18 +184,18 @@ shared CLI, before the `--`, sets:
 | `--ssd-path <p>` | `recalc` | the SSD path of every chunkwise `forward`: `recalc`, `serial` or `minimal`. Not persisted |
 | `--ssd-chunk-len <l>` | from the block shape | the chunk length of every chunkwise `forward`, in write positions. Not persisted |
 | `--pathway <p>` | `single` | the pathway of every chunkwise `forward`: `single` or `double`. Not persisted |
-| `--pack-align <n>` | the chunk length | with `--pack`, start each story of a packed row at a multiple of `n` tokens. `n` must be a multiple of the chunk length (a reset must be at a chunk start), so a shorter chunk can train on the rows of a longer one. Not persisted |
+| `--pack-align <n>` | the chunk length | with `--pack`, start each story of a packed row at a multiple of `n` tokens. `n` must be a multiple of the chunk length (a reset must be at a chunk start). So a shorter chunk can train on the rows of a longer one. Not persisted |
 | `--prompt <text>` | the built-in prompts | at inference, continue `text` instead of the built-in prompts. Give the flag again for each prompt |
 | `--continuations <n>` | 1 | at inference, the number of continuations of each prompt, each with its own seed |
 | `--temperature <t>` | 0.8 | at inference, the sampling temperature of the prompted continuations |
 | `--context-use` | off | measure how much the trained model uses the earlier part of the validation stories (see `context.rs`) |
 | `--context-batch <n>` | 4 | with `--context-use` or `--long-stories`, the sequences per forward |
 | `--context-stories <n>` | the validation stories | with `--context-use`, read the first `n` validation stories |
-| `--long-stories` | off | score whole validation stories, each in one forward: the stories longer than 2048 characters (the bits per character of 0..1024, 1024..2048, the tail and a profile per 256 characters), and the stories of the validation loss in full (see `common/long_stories.rs`) |
+| `--long-stories` | off | score whole validation stories, each in one forward. It reads two sets: the stories longer than 2048 characters, and the stories of the validation loss in full (see `common/long_stories.rs`). For the long stories, it gives the bits per character of 0..1024, 1024..2048, the tail and a profile per 256 characters |
 | `--profile <n>` | off | print the mean ms of each training-step phase once per `n` windows (not persisted) |
 | `--profile-sync` | off | with `--profile`: also sync the device after each phase |
 | `--grad-checkpointing` | off | train with the balanced gradient checkpointing of Burn: the backward computes the memory-bound ops again and keeps the outputs of the compute-bound ops. Less vram, more time (not persisted) |
-| `--max-vram <MiB>` | off | stop the process with an error when the memory pools reserve more than this, checked after each backward. Also cleans up the memory before windows 0, 1, 2, 4, 8, … and before each 256th window, so that the pools hold the process (not persisted) |
+| `--max-vram <MiB>` | off | stop the process with an error when the memory pools reserve more than this, checked after each backward. Also cleans the memory before windows 0, 1, 2, 4, 8, … and before each 256th window. That way, the pools hold the process (not persisted) |
 
 - See `burn-mamba/Cargo.toml` for other features or backend information.
 - See `burn-mamba/examples/README.md` for the CLI usage overview.
@@ -208,8 +208,8 @@ other:
 1. One `prime()` replays the class latents. It has no input token, and it already
    returns the distribution of the first character.
 2. Chunkwise `forward()`s read a prompt, if there is one. This is the prefill:
-   right-padded 256-character windows after the latents. The latents run once, and
-   their state is kept.
+   right-padded 256-character windows after the latents. The latents run once,
+   and the cache keeps their state.
 3. Every generated character then costs one `step()` against that same cache:
    O(state) per token, with no growing KV cache.
 
@@ -229,14 +229,16 @@ noise to words to sentences. The checks are spaced in training steps (every
 
 ## Notes
 
-- The loss is reported in nats and as **bits per character** of the cased text:
-  the cross-entropy of the id, plus the binary cross-entropy of the case flag
-  of a letter. The validation also reports the two parts (`primary` and
-  `case`). The uniform baseline of the ids is `log2(48) = 5.58` bits.
+- The logs give the loss in nats and as **bits per character** of the cased
+  text. The loss is the cross-entropy of the id, plus the binary cross-entropy
+  of the case flag of a letter. The validation also reports the two parts
+  (`primary` and `case`). The uniform baseline of the ids is `log2(48) = 5.58`
+  bits.
 - The tied head starts *badly*. Burn initialises an `Embedding` from `N(0, 1)`. So
   at a `d_model` of 32, the initial logits have a variance of ~32, and the first
   batches score 25–40 bits/char instead of 5.58. This is a transient: the first
   training steps shrink the embedding. But it uses the start of the LR
-  schedule. An untied head (`missing_lm_head = false`) does not have this
-  problem. The correct fix
-  would be an initializer knob on the `VocabNetworkBuilder` of the library.
+  schedule.
+- An untied head (`missing_lm_head = false`) does not have this problem. The
+  correct fix would be an initializer knob on the `VocabNetworkBuilder` of the
+  library.

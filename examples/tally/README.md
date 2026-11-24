@@ -27,8 +27,9 @@ maximum itself:
 ## The shared shape
 
 Every rung reads a symbol stream and puts **every** position in one of two
-classes. A position whose class is not a function of the history (a reset, a
-tie, a symbol that fixes the answer by itself) is **not scored**.
+classes. A position is **not scored** when its class is not a function of the
+history. Such a position is a reset, a tie or a symbol that fixes the answer by
+itself.
 
 The three rungs share these settings:
 
@@ -45,9 +46,11 @@ The three rungs share these settings:
 `tally-record` and `tally-drift` run at `d_model = 3`. Each `model.rs` records
 why.
 
-Every rung closes the three shortcuts of the `reset` ladder: the label is not
-a function of the current symbol, Mamba-3 has no short convolution to widen a
-window with, and the residual is off.
+Every rung closes the three shortcuts of the `reset` ladder:
+
+- The label is not a function of the current symbol.
+- Mamba-3 has no short convolution to widen a window with.
+- The residual is off.
 
 ## What a classifier gets for free
 
@@ -57,12 +60,12 @@ of them than expected. The tests measure two, and each one removes or demotes
 a rung:
 
 - **The gate cross-multiplies.** A decision like "is `v` above the mean" never
-  needs a division: `sign(v·n − Σ)` is the same decision, and a sum head, a
-  count head and the per-token gate of the block give it. The `final_norm` of
-  the network does the same job another way: it turns `(Σ, n)` into a
+  needs a division, because `sign(v·n − Σ)` is the same decision. A sum head,
+  a count head and the per-token gate of the block give it. The `final_norm`
+  of the network does the same job another way: it turns `(Σ, n)` into a
   direction, that is a ratio. So the `C` port (read `η/Λ` instead of `η`) is a
   real capability, but a classifier gets it **for free**. That is why this
-  ladder has no "mean" rung. `tally-drift` is what survives: a discount
+  ladder has no "mean" rung, and `tally-drift` is what survives: a discount
   *inside* the recurrence, which no readout can undo.
 - **The embedding is free.** A block can make any one function of the symbol
   an affine channel, with a suitable placement of the embeddings. That is how
@@ -98,11 +101,11 @@ The conventions of the `reset` ladder apply, plus three of this ladder:
 - The sweeps are coarse, and each sweeps one *family* of readouts. So an
   ablation column is a **lower bound** on the ablated block. That is why every
   rung also has a **trained** `--stock` row at equal budget. On `tally-record`,
-  training finds an arm that the sweeps do not have (the exponential encoding),
-  and the alphabet is wide enough that this arm needs more range than f32 has.
-- An ablation that the block cannot express at all (for example, a second
-  head that cross-multiplies) is computed in `f64` from the same streams, and
-  its label says so.
+  training finds an arm that the sweeps do not have: the exponential encoding.
+  The alphabet is wide enough that this arm needs more range than f32 has.
+- The block cannot express some ablations at all, for example a second head
+  that cross-multiplies. The tests compute such an ablation in `f64` from the
+  same streams, and its label says so.
 - Short trained runs (for example, 1000 batches) are at equal budget. They
   compare arms, not ceilings. The hand-built row carries exactness.
 
@@ -231,16 +234,22 @@ The rung closes three more shortcuts:
   scored positions, and at 24% on `knife`.
 - **The estimate read as `η/Λ` alone.** A gap scales `η` and `Λ` together, so
   it does *not* change the estimate. Only the weight of the prior changes, and
-  that shows only when new evidence is blended in.
+  that shows only when the estimate mixes the prior with new evidence.
 - **A stream of ordinary observations.** They land far enough from the mean
   that every arm agrees, so a family of them measures nothing.
 
-The last two points give the construction of the `knife` family: a short run,
-a gap, one new observation (its pull depends on the weight of the prior, the
-disputed quantity), and then a **burst** of probes, each a sixteenth of a unit
-above or below the estimate of that moment. Every probe is itself evidence, so
-each next probe is aimed again. The burst makes the *scored* positions the ones
-that the estimate decides.
+The last two points give the construction of the `knife` family, in this
+order:
+
+1. a short run,
+2. a gap,
+3. one new observation, whose pull depends on the weight of the prior (the
+   disputed quantity),
+4. a **burst** of probes, each a sixteenth of a unit above or below the
+   estimate of that moment.
+
+Every probe is itself evidence, so the generator aims each next probe again.
+The burst makes the *scored* positions the ones that the estimate decides.
 
 </details>
 
@@ -252,8 +261,8 @@ that the estimate decides.
 | | random | straddle | chain | knife | worst |
 |---|---|---|---|---|---|
 | best per-symbol lookup (no memory) | 78.3% | 78.1% | 79.5% | 66.0% | 66.0% |
-| the join at **`κ = 0`** (the same block and read, projected decay; 11 gap decays) | 98.9% | 99.2% | 99.2% | 90.7% | **90.7%** |
-| best **linear (sum, count) + the cross-multiplication of the gate** (f64; 11 × 11 × 5) | 98.9% | 99.0% | 99.3% | 93.0% | **93.0%** |
+| the join at **`κ = 0`** (the same block and read, projected decay, 11 gap decays) | 98.9% | 99.2% | 99.2% | 90.7% | **90.7%** |
+| best **linear (sum, count) + the cross-multiplication of the gate** (f64, 11 × 11 × 5) | 98.9% | 99.0% | 99.3% | 93.0% | **93.0%** |
 | trained, gain off (`-- --stock`), 1000 batches | 95.1% | 94.6% | 95.0% | 83.8% | **83.8%** |
 | trained, 1000 batches | 98.7% | 98.2% | 98.2% | 91.8% | **91.8%** |
 | **hand-built** Kalman block, no training | **100%** | **100%** | **100%** | **100%** | **100%** |
@@ -318,9 +327,9 @@ A maximum is `max(cₜ₋₁, vₜ)`, so one register holds it for any alphabet
 size, and the hand-built block is exact.
 
 The interesting part is the route *without* a register. A maximum is also a
-**sum in the exponential domain**: at decay one, `Σ exp(S·vₛ)` exceeds
-`exp(S·vₜ)` exactly when an earlier value matched or beat `vₜ`, if `e^S` is
-larger than the sequence length. That test is linear in that domain, so no
+**sum in the exponential domain**. Let `e^S` be larger than the sequence
+length. Then at decay one, `Σ exp(S·vₛ)` exceeds `exp(S·vₜ)` exactly when an
+earlier value matched or beat `vₜ`. That test is linear in that domain, so no
 logarithm is necessary (`scripts/kalman/gate_as_positive_system.py` §5.4
 checks the identity in f64).
 

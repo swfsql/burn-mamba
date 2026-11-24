@@ -1,8 +1,8 @@
 //! The four claims this rung rests on, measured.
 //!
 //! 1. A **hand-built** block solves the task exactly. Every weight is in closed
-//!    form, and the state of the plant is unused: one tropical register per
-//!    head is the whole solution, at any alphabet size.
+//!    form. The state of the plant is unused: one tropical register per head is
+//!    the whole solution, at any alphabet size.
 //! 2. The **same block without the register** cannot, for any decaying
 //!    comparison on a four-dimensional grid (decay, write offset,
 //!    current-token gain, threshold). The best that it has is an average,
@@ -15,9 +15,9 @@
 //!    such a span (it uses `S = 12`, so `e^{132}`). That is why this rung has
 //!    twelve values, not six, where a trained stock block solves it (~100%).
 //! 4. The width closes the third route, the latches. At `d_model = 3`, a block
-//!    can make one function of the symbol an affine channel (the tests report
-//!    the residuals), but not the twelve threshold indicators that one latch
-//!    per value needs.
+//!    can make one function of the symbol an affine channel. But it cannot make
+//!    the twelve threshold indicators that one latch per value needs. The tests
+//!    report the residuals.
 
 use crate::dataset::{FAMILIES, NUM_SYMBOLS, NUM_VALUES, RESET, labels, task, value};
 use crate::model::{NUM_CLASSES, model_config};
@@ -58,7 +58,7 @@ const OUT_GAIN: f64 = 3.0;
 /// pre-`RmsNorm` of the layer (`γ = 1`) does not change it.
 ///
 /// **Which** coordinate spreads the values is the choice of the arm, and it is
-/// the interesting part. An embedding is a free 13×3 map, so a block can make
+/// the interesting part. An embedding is a free 13×3 map. So a block can make
 /// **one** function of the symbol an affine channel, and only about three
 /// independent ones. That denies the latch route (twelve indicators) at this
 /// width. The arm of the register spreads the values by the value
@@ -213,9 +213,9 @@ fn handmade(device: &Device, arm: Arm) -> MambaLatentNet {
             targets.push(vec![softplus_inv(1.0); NUM_SYMBOLS]); // Δ, head 0 = 1
             targets.push(off.clone()); // Δ, head 1
             targets.push(off); // Δ, head 2
-            // The sum is held (`α ≈ 1`) and wiped on a reset. A decay of one is
-            // the *only* growth rate of the plant, and that decides all that
-            // this arm can and cannot do.
+            // The plant holds the sum (`α ≈ 1`) and wipes it on a reset. A
+            // decay of one is the *only* growth rate of the plant, and that
+            // decides all that this arm can and cannot do.
             targets.push(per_symbol(&|s| {
                 if s == RESET { softplus_inv(20.0) } else { A_HOLD_RAW }
             }));
@@ -309,9 +309,10 @@ fn handmade_register_solves_every_family() {
 // 2. no decaying comparison reaches it
 // ---------------------------------------------------------------------------
 
-/// The same block **without** the register, and with head 0 as a decaying
-/// average of the values instead, compared against the current value:
-/// `y = gain·v − h + θ`, `h = α·h + (v + offset)`, and a reset wipes `h`.
+/// The same block **without** the register. Head 0 holds a decaying average of
+/// the values instead, and the block compares it against the current value.
+/// The read is `y = gain·v − h + θ`, with `h = α·h + (v + offset)`, and a reset
+/// wipes `h`.
 ///
 /// The test sweeps the whole grid and prints only the best point per decay. So
 /// the number bounds the ablated *architecture*, not one fitting of it.
@@ -358,7 +359,7 @@ fn no_decaying_comparison_solves_the_task() {
     println!("best worst-family accuracy over the whole sweep: {:.2}%", 100.0 * best_worst);
     assert!(
         best_worst < 0.95,
-        "a decaying comparison reached {best_worst:.4} — the task does not need the register"
+        "a decaying comparison reached {best_worst:.4}, so the task does not need the register"
     );
 }
 
@@ -397,7 +398,7 @@ fn the_exponential_domain_arm_costs_range() {
     }
     assert!(
         worst < 0.9,
-        "f32 held the whole exponential span ({worst}) — the range caveat is wrong"
+        "f32 held the whole exponential span ({worst}), so the range caveat is wrong"
     );
 }
 
@@ -405,9 +406,9 @@ fn the_exponential_domain_arm_costs_range() {
 // 3. the task, and what the width does and does not deny
 // ---------------------------------------------------------------------------
 
-/// The memoryless ceiling, and what `d_model = 3` actually rules out.
+/// The memoryless ceiling, and what `d_model = 3` actually excludes.
 ///
-/// An embedding is a free map, so the block can make **one** function of the
+/// An embedding is a free map. So the block can make **one** function of the
 /// symbol an affine channel (the value, or `u(v)`, or another), but not twelve
 /// independent ones. The residuals below are against the *value-spread*
 /// embedding. The value fits exactly, and every threshold indicator misses. So
@@ -479,7 +480,7 @@ fn the_width_denies_the_latches_but_not_one_nonlinear_channel() {
             .collect();
         let r = residual(&latch);
         println!("  channel '[v ≥ {k}]' residual {r:.3}");
-        assert!(r > 0.05, "a latch for {k} fits at this width — the rung is not about the register");
+        assert!(r > 0.05, "a latch for {k} fits at this width, so the rung is not about the register");
     }
 
     // The labels themselves: ties are not records, and a reset starts again.
