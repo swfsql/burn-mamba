@@ -125,7 +125,7 @@ pub fn train(
             validate_all(&valid_loaders, trainer.module().valid(), epoch, &mut session);
         }
         if session.is_exhausted() {
-            crate::common::print_budget_reached();
+            crate::common::session::print_budget_reached();
             break;
         }
     }

@@ -71,6 +71,6 @@ pub fn launch(app_args: &AppArgs, task: &Task, model_config: MambaLatentNetConfi
         inference::infer(task, model_config, device, app_args);
     }
     if !app_args.inference && !app_args.training {
-        crate::common::print_nothing_to_run();
+        crate::common::cli::print_nothing_to_run();
     }
 }

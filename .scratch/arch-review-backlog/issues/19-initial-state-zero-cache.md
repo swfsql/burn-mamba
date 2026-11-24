@@ -445,3 +445,19 @@ burn-mamba half, ticket 23. This ticket waits for ticket 23. After both:
 - That change also gives each slot of a hand-built mixed stack the zero cache of its
   own family. ADR-0009 says that such a stack panics at a `step` with no cache,
   because the first block sizes each zero cache. That consequence then changes.
+
+### The pin moves before this ticket
+
+The user asks for two messages of the examples in burn-stack (burn-stack ticket 07
+of `.scratch/ste-sweep/`, commit `2f0065d`). That needs the pin of burn-stack 0.46.0.
+So the pin moves in the follow-up of ticket 06 of `.scratch/ste-sweep/`, before this
+ticket:
+
+- The pin is burn-stack `2f0065d`, and the version of this crate is 0.88.0.
+- `block_forward_packed` of `Mamba2`, `Mamba3` and `MambaBlock` takes the origin
+  of burn-stack 0.46.0. It gives the origin to the family `forward_packed`.
+- The packed call of the `tiny-stories` example gives no origin (`None`). So each
+  layer starts from its zero cache, as before.
+
+So the pin part of step 2 is done. The first break of this ticket bumps the version
+to 0.89.0, and its commit message states the breaks of this ticket.

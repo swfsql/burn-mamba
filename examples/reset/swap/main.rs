@@ -106,7 +106,7 @@ pub fn launch(app_args: &AppArgs) {
     }
 
     if !app_args.inference && !app_args.training {
-        common::print_nothing_to_run();
+        common::cli::print_nothing_to_run();
     }
 }
 

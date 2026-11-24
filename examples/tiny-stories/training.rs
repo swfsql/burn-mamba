@@ -149,7 +149,7 @@ pub fn train(
         );
 
         if session.is_exhausted() {
-            crate::common::print_budget_reached();
+            crate::common::session::print_budget_reached();
             break;
         }
     }
@@ -336,9 +336,13 @@ impl Wrap {
             ..
         } = batch;
         if let Some(packed) = packed {
-            let (logits, caches) =
-                self.0
-                    .forward_packed(inputs, caches, self.1.scan_options.clone(), &packed.layout);
+            let (logits, caches) = self.0.forward_packed(
+                inputs,
+                caches,
+                None,
+                self.1.scan_options.clone(),
+                &packed.layout,
+            );
             return (lm::lm_output_packed(logits, targets, packed.score_bs), caches);
         }
         let (logits, caches) = self

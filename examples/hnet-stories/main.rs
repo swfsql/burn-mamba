@@ -138,7 +138,7 @@ pub fn launch(app_args: &AppArgs) {
     }
 
     if !app_args.inference && !app_args.training && !cli.context_use && !cli.long_stories {
-        common::print_nothing_to_run();
+        common::cli::print_nothing_to_run();
     }
 }
 

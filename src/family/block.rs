@@ -157,6 +157,7 @@ impl Block for MambaBlock {
         &self,
         x: Tensor<3>,
         cache: MambaCache,
+        origin: MambaCache,
         options: MambaScanOptions,
         reset: Tensor<2, Bool>,
     ) -> (Tensor<3>, MambaCache) {
@@ -164,19 +165,30 @@ impl Block for MambaBlock {
             #[cfg(feature = "mamba1")]
             Self::Mamba1(b) => {
                 check_mamba1_scan_options(options);
-                let (y, c) = b.block_forward_packed(x, mamba1_cache(cache), (), reset);
+                let (y, c) =
+                    b.block_forward_packed(x, mamba1_cache(cache), mamba1_cache(origin), (), reset);
                 (y, MambaCache::Mamba1(c))
             }
             #[cfg(feature = "mamba2")]
             Self::Mamba2(b) => {
-                let (y, c) =
-                    b.block_forward_packed(x, mamba2_cache(cache), mamba2_scan_options(options), reset);
+                let (y, c) = b.block_forward_packed(
+                    x,
+                    mamba2_cache(cache),
+                    mamba2_cache(origin),
+                    mamba2_scan_options(options),
+                    reset,
+                );
                 (y, MambaCache::Mamba2(c))
             }
             #[cfg(feature = "mamba3")]
             Self::Mamba3(b) => {
-                let (y, c) =
-                    b.block_forward_packed(x, mamba3_cache(cache), mamba3_scan_options(options), reset);
+                let (y, c) = b.block_forward_packed(
+                    x,
+                    mamba3_cache(cache),
+                    mamba3_cache(origin),
+                    mamba3_scan_options(options),
+                    reset,
+                );
                 (y, MambaCache::Mamba3(c))
             }
         }

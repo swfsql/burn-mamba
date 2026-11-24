@@ -299,3 +299,16 @@ one after the other. This change holds the fixes of their findings:
    `print_budget_reached` prints the other message. The 11 launchers and the
    11 training loops call them, and the output of each example stays the
    same.
+5. The two functions move to burn-stack, because they are not specific to
+   Mamba:
+   - Burn-stack ticket 07 of `../burn-stack/.scratch/ste-sweep/` adds
+     `examples::cli::print_nothing_to_run` and
+     `examples::session::print_budget_reached` (commit `2f0065d`, pushed).
+   - This crate pins that commit, so it takes burn-stack 0.46.0. Its version
+     goes to 0.88.0. Ticket 19 of `.scratch/arch-review-backlog/` planned this
+     pin move, and its `## Comments` records it.
+   - The adapters of `block_forward_packed` give the new origin to the family
+     `forward_packed`. The packed call of `tiny-stories` gives no origin.
+   - `examples/common/mod.rs` has no copy of the two functions. The 22 call
+     sites use `common::cli::print_nothing_to_run` and
+     `common::session::print_budget_reached`.

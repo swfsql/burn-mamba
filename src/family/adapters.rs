@@ -85,10 +85,11 @@ mod impl_mamba2 {
             &self,
             x: Tensor<3>,
             cache: Mamba2Cache,
+            origin: Mamba2Cache,
             options: Mamba2ScanOptions,
             reset: Tensor<2, Bool>,
         ) -> (Tensor<3>, Mamba2Cache) {
-            self.forward_packed(x, Some(cache), None, options, None, Some(reset))
+            self.forward_packed(x, Some(cache), Some(origin), options, None, Some(reset))
         }
         /// The chunk length of `options`, in tokens. `None` for
         /// [`SsdPath::Minimal`], which takes no resets.
@@ -150,10 +151,11 @@ mod impl_mamba3 {
             &self,
             x: Tensor<3>,
             cache: Mamba3Cache,
+            origin: Mamba3Cache,
             options: Mamba3ScanOptions,
             reset: Tensor<2, Bool>,
         ) -> (Tensor<3>, Mamba3Cache) {
-            self.forward_packed(x, Some(cache), None, options, None, Some(reset))
+            self.forward_packed(x, Some(cache), Some(origin), options, None, Some(reset))
         }
         /// The chunk length of `options`, in tokens: `chunk_len / micro_steps`.
         /// `None` for [`SsdPath::Minimal`], which takes no resets.

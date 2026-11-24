@@ -138,7 +138,7 @@ pub fn train(
         }
 
         if session.is_exhausted() {
-            crate::common::print_budget_reached();
+            crate::common::session::print_budget_reached();
             break;
         }
     }

@@ -99,7 +99,7 @@ pub fn train(
             &mut session,
         );
         if session.is_exhausted() {
-            crate::common::print_budget_reached();
+            crate::common::session::print_budget_reached();
             break;
         }
     }
