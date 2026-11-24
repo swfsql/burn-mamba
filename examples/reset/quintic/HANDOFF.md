@@ -66,7 +66,7 @@ numbers below are in the order random/shuffle/runs.
 ### Files and surface
 
 - Files:
-  - `examples/reset/quintic/{main,dataset,model,training,inference,tests}.rs`,
+  - `examples/reset/quintic/{main,cli,dataset,model,training,inference,tests}.rs`,
   - `Cargo.toml` `[[example]] reset-quintic`,
   - `examples/reset/README.md` `## reset-quintic` (task, "Why this task", "Measured",
     "Notes"),
@@ -164,16 +164,16 @@ Files: `tmp/reflections/notes.md` (fuller notes, § numbers match `check.py`),
 - Spin(5) ≅ Sp(2) (2×2 unit quaternion matrices), acting on ℝ⁵ by `X ↦ U X U*`,
   `X = [[a, b], [b̄, −a]]`, a ∈ ℝ, b ∈ ℍ. `diag(q,p)` acts as Rotor4D on b and fixes a.
   `tilt(θ) = [[cosθ, −sinθ],[sinθ, cosθ]]` rotates (a, b₀) by 2θ (check §4).
-- Per step, `diag(q,p)·tilt(θ)` = the channels of Rotor4D + **one angle** per block.
-  It reaches all of O(4) ↪ SO(5) with θ ∈ {0, π/2} (check §5), and its products
-  generate SO(5). A hand-built one-block Sp(2) scan tracks S₅ exactly over
+- Per micro-step, `diag(q,p)·tilt(θ)` = the channels of Rotor4D + **one angle** per
+  block. It reaches all of O(4) ↪ SO(5) with θ ∈ {0, π/2} (check §5), and its
+  products generate SO(5). A hand-built one-block Sp(2) scan tracks S₅ exactly over
   1000-symbol words (check §6).
-- **Naming caveat**: *not* the 5-D analogue of Rotor4D. One step of Rotor4D is all of
-  SO(4) (6 = dim). For Quaternion4D, it is SU(2) (3). One step of Rotor4D+tilt is
-  a 7-dim subset of SO(5) (dim 10). It generates the same group with a smaller
-  per-step set, and that set is enough for the generators of S₅. Full SO(5) per step
-  = Cartan form `diag(q,p)·tilt(θ)·diag(q',p')` (13 params, redundant) or `exp` on
-  sp(2).
+- **Naming caveat**: *not* the 5-D analogue of Rotor4D. One micro-step of Rotor4D is
+  all of SO(4) (6 = dim). For Quaternion4D, it is SU(2) (3). One micro-step of
+  Rotor4D+tilt is a 7-dim subset of SO(5) (dim 10). It generates the same group with
+  a smaller per-micro-step set, and that set is enough for the generators of S₅. Full
+  SO(5) per micro-step = Cartan form `diag(q,p)·tilt(θ)·diag(q',p')` (13 params,
+  redundant) or `exp` on sp(2).
 - **The "8-D ceiling" in the `src/mamba3/rotation/mod.rs` header** (SO(4) is the
   ceiling for k=4, and at k=8 "the scan itself breaks") is about the
   *representation*. Complex2D/Quaternion4D store one number per block, which needs an
@@ -207,16 +207,16 @@ of the head. In the probe (`o4sign`), the sign never crossed zero.
   the group from the in-projection).
 - Readout: per-head normalised states → concat → one linear layer.
 - Decay: `sigmoid(a_raw)` (init 0.95).
-- Optimiser: Adam, lr 3e-3, warmup 200, cosine to 0.1×, clip 1.0, 6000 steps.
+- Optimiser: Adam, lr 3e-3, warmup 200, cosine to 0.1×, clip 1.0, 6000 training steps.
 - Eval: train distribution @64 (with resets), reset-free words @256 and @1024
   ("tail" = last quarter).
 
-| kind | per-step transition | n |
+| kind | per-token transition | n |
 |---|---|---|
 | `rotor4` | `L_q R_p̄` (Rotor4D group) | 4 |
 | `so4` | `matrix_exp(W−Wᵀ)` | 4 |
 | `rotor5` | `(L_q R_p̄ ⊕ 1)·G(2·tilt)` on (a, b₀) — Rotor4D + tilt | 5 |
-| `so5` | `matrix_exp(W−Wᵀ)` — full SO(5) per step | 5 |
+| `so5` | `matrix_exp(W−Wᵀ)` — full SO(5) per token | 5 |
 | `o4sign` | `|a|·T·K^{[a<0]}`, `a = tanh σ` (§7) | 4 |
 | `o4hh` | `α·T·diag(tanh s, 1, 1, 1)` — non-orthogonal reference | 4 |
 
@@ -243,8 +243,8 @@ Control: A₅ on `rotor4`. 3 seeds each. ~22 min/run at len 192 on one CPU threa
 
   All fall at @1024 (A₅ control 33–45%, `rotor5` s1 27.5%).
 - **`s5-rotor5-s1`, head 0** is exactly `std⊕sign`: s eigen-angles (0,0,0,180,180),
-  c (0,72,72,144,144), decays 0.974 / 0.968. Found late: @256 3% at step 2000 → 16% at
-  2500 → 60% at 4000 → 96% at 5000.
+  c (0,72,72,144,144), decays 0.974 / 0.968. Found late: @256 3% at training step 2000
+  → 16% at 2500 → 60% at 4000 → 96% at 5000.
 - **Head-0 decode** (inline script, not saved, recreate it as below): nearest centroid
   on the normalised state of head 0. The centroids are fit on 256 reset-free
   48-symbol words (min gap 0.618).
@@ -275,7 +275,7 @@ the crate. Exactness at length needed a hand edit that stops the leak.
 ### Next steps (B), in order
 
 1. **Harden the probe** (cheap):
-   - more seeds for `rotor5` vs `so5` (+ a full-Sp(2) per-step variant),
+   - more seeds for `rotor5` vs `so5` (+ a full-Sp(2) per-token variant),
    - train longer / len 384–512 or a curriculum, so that training pays for the leak,
    - a readout per head (or MIMO-style several readouts of the state of one head), so
      that one group head suffices.
@@ -283,7 +283,7 @@ the crate. Exactness at length needed a hand edit that stops the leak.
    Target: exact @1024 without surgery.
 2. **Crate prototype** of Rotor4D+tilt as a `RotationKind` (see the costs in B§4–6,
    and the module headers of `src/mamba3/rotation/` and `src/mamba3/quat_scan/`).
-   Forward/step/gradient parity tests like the other kinds.
+   Forward/`step`/gradient parity tests like the other kinds.
 3. **reset-quintic with it**: a one-layer S₅ run (would replace the two-layer story in
    the README if it trains).
 4. Docs, only if wanted:

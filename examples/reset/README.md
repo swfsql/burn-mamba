@@ -389,9 +389,10 @@ The two middle rows bound an order-blind model from two directions:
 Both are ceilings for a block that writes its state at the reset and reads the
 rotation accumulated since. This construction does that under either rotation.
 The trained `--rotation complex` row is an abelian block that is free to do
-something different, so these ceilings do *not* bound it. It gets more than the
-counts ceiling on `random`, for the reason that [`reset-swap`](#reset-swap)
-gives. The ceilings above it are what bound the architecture.
+something different, so these ceilings do *not* bound it. On `random`, it gets
+more than the twin (71.3% against 60.6%), for the reason that
+[`reset-swap`](#reset-swap) gives. It stays just below the counts ceiling
+(71.4%). The ceilings above it are what bound the architecture.
 
 - `handmade_block_solves_every_family` writes every weight in closed form.
 - `abelian_rotation_loses_the_order` builds the same block with
@@ -438,8 +439,8 @@ gives. The ceilings above it are what bound the architecture.
   The meaningful number is the best-readout column next to it.
 - **`shuffle` is the wall, and everything abelian hits it.**
   - The hand-built twin reads parities and gets ~50–60% on every family.
-  - The trained model can wire itself in any way. It does better on `random`,
-    even more than the 71.4% of a table given the exact counts. A *trained*
+  - The trained model can wire itself in any way. It does better on `random`:
+    71.3%, close to the 71.4% of a table given the exact counts. A *trained*
     block can write at every token, not only at the reset. Then a decaying trace
     carries recency, and recency identifies short words with no group structure
     at all.
