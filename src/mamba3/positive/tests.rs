@@ -837,7 +837,7 @@ fn the_join_has_live_gradients_at_init() {
 ///
 /// Those heads read with `ω = 1`. They hold no evidence (`Λ ≈ 0`), so the
 /// read gain `(Λ + ε)^(−ω)` would be `1e6`, above the f16 range, on a readout
-/// of `0`. The cap of the gain keeps `0·∞ = NaN` out of the forward.
+/// of `0`. The cap of the gain prevents a `0·∞ = NaN` in the forward.
 #[test]
 fn a_vanished_step_keeps_the_block_gradient_finite() {
     let device = test_device();

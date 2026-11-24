@@ -51,15 +51,15 @@ The linter runs with `--enable history --parts docs,comments,messages` on the
 
 | Findings | Before | After |
 |---|---|---|
-| Hard | 101 | 3 |
+| Hard | 101 | 0 |
 | Hard, in messages | 1 | 0 |
 | Advisory | 127 | 40 |
 
 The ticket gives 120 advisory findings at the start. At `a33f7cc2`, the
 updated linter finds 127. Its count of hard findings agrees with the ticket.
 
-[The kept findings](#the-kept-findings) gives the 3 hard findings that stay.
-Each advisory finding that stays is one of these:
+No hard finding stays (see [The kept findings](#the-kept-findings)). Each
+advisory finding that stays is one of these:
 
 - an em dash in a heading, a section banner, or a list of terms or shapes,
 - a passive that tells a state, for example "is unchanged" or "is pinned",
@@ -75,24 +75,30 @@ warning and no failed test.
 
 ### The kept findings
 
-Each one is a false positive.
+No hard finding stays. The first commit of this ticket (`27b4f4d9`) keeps
+three false positives. The user then selects a rewrite of each one, because
+each rewrite is also better STE.
 
-1. `src/mamba3/positive/scan.rs:284`, synonym rotation of `start` and
-   `launch`. In this file, `launch` is only a noun: "a one-launch in-block
-   scan" (line 247) and "mostly launches, not bytes" (line 256). These are the
-   kernels that a round of the scan sends to the GPU. The verb `start` names
-   the first position of a segment or a product. Ticket 02 keeps the same pair
-   at `src/mamba3/double_ssd/ssd/serial.rs:263`.
-2. `src/mamba3/positive/tests.rs:840`, phrasal verb `keeps … out`. This is the
-   known false positive of the spec and the ticket. The linter reads the code
-   span `0·∞ = NaN` between the verb and "out" as a gap of spaces. In this
-   sentence, "out of the forward" is a phrase of place, not the particle of a
-   phrasal verb.
-3. `src/mamba3/rotation/mod.rs:490`, phrasal verb `keeps … away`. The linter
-   reads the code span `norm` between the verb and "away" as a gap of spaces,
-   as in item 2. In this sentence, "away from 0" is a phrase of place. It also
-   tells a margin: the next paragraph of the comment gives "a norm floor of
-   `√div_eps`". A rewrite to "above 0" loses the margin.
+| Location | Rule | Old words | New words |
+|---|---|---|---|
+| `src/mamba3/positive/scan.rs:247` and `:256` | synonym rotation of `start` and `launch` | "a one-launch in-block scan", "mostly launches" | "an in-block scan in one kernel", "mostly the fixed cost of each kernel" |
+| `src/mamba3/positive/tests.rs:840` | phrasal verb | `keeps … out of` | "prevents" |
+| `src/mamba3/rotation/mod.rs:490` | phrasal verb | `keeps … away from 0` | "sets a positive lower bound on" |
+
+The reasons:
+
+- The noun "launch" means the start of a kernel. So it hides an action, and
+  it shares a meaning with the verb `start`. The concrete thing is the kernel.
+- `keep … out of` is close to the phrasal verb `keep out`. STE has one verb
+  for it: "prevent".
+- A lower bound keeps the margin that "above 0" loses. The next paragraph of
+  the comment gives this margin as "a norm floor of `√div_eps`".
+
+For one form across the crate, the same commit changes the pair that ticket
+02 keeps at `src/mamba3/double_ssd/ssd/serial.rs:263`. On lines 245 and 246,
+"`3n` launches" and "The launches" become "`3n` kernels" and "The kernels".
+The hard findings of that file go from 1 to 0. The record of ticket 02 stays
+as it is.
 
 ### The messages
 
@@ -186,8 +192,9 @@ the word is a change of the term in many files, and the test name
 
 ### For the linter
 
-The kept findings suggest two changes to the linter. Each one agrees with
-STE.
+The three false positives at `27b4f4d9` suggest two changes to the linter.
+Each one agrees with STE. The rewrites clear these findings, but the same
+patterns can occur in other files.
 
 1. Suggestion 3 of ticket 02 also clears `scan.rs:284`: count the pair
    `start` and `launch` only when both words are verbs.

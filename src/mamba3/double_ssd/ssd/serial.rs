@@ -242,8 +242,8 @@ pub fn k3_ssd_chunk_state(
 /// is equally one masked matmul. [`minimal`](super::minimal) uses that form
 /// for it.
 ///
-/// That form trades `3n` launches for `O(n²)` work plus a
-/// `(b, n, h) → (b, h, n)` round-trip. The launches are the side that is
+/// That form trades `3n` kernels for `O(n²)` work plus a
+/// `(b, n, h) → (b, h, n)` round-trip. The kernels are the side that is
 /// already free: in a real pass they queue behind GPU work. Swapping the two
 /// moves `forward` by less than the run-to-run noise at 32 *and* 64 chunks
 /// (CUDA, `d_model = 1024`, sequence 256 and 2048) and costs `train` ~2%.

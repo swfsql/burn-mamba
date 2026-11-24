@@ -487,8 +487,8 @@ pub fn quat_normalize<const D: usize>(q: Tensor<D>) -> Tensor<D> {
     // forward `sqrt(0)=0` is fine, but the `sqrt` backward is `1/(2·0)=∞`, and
     // `∞·(2·0)=NaN`. A pre-`sqrt` clamp puts the degenerate point in the flat
     // region of `clamp_min`, so its gradient is a finite 0. A unit quaternion
-    // (sumsq=1) is unchanged. The floor also keeps `norm` away from 0 for the
-    // division.
+    // (sumsq=1) is unchanged. The floor also sets a positive lower bound on
+    // `norm` for the division.
     //
     // The floor is the dtype-aware `div_eps` on the *sum-of-squares* (a norm
     // floor of `√div_eps`). It must be a representable normal in the working
