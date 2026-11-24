@@ -106,8 +106,8 @@ impl Inputs {
             b_bnlmhr: self.b.val(),
             c_bntmhr: self.c.val(),
             initial_state_bhpr: self.initial_state.val(),
-            // The serial paths assert that this is None. See ssd_serial /
-            // ssd_serial_recalculated.
+            // The serial paths assert that this is None. See
+            // double_ssd_serial / double_ssd_serial_recalculated.
             init_state_hpr: None,
             read_stride: self.read_stride,
             resets: None,

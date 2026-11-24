@@ -164,8 +164,8 @@ fn build_single_ssd_cache(cfg: &Mamba3Config, batch: usize, random: bool) -> Mam
 }
 
 /// Per-run gradient bundle (a subset of params). It mirrors the equivalent
-/// struct in `mamba3::tests`, but it stays local to avoid cross-module
-/// visibility.
+/// struct in `double_ssd::double_ssd::tests`, but it stays local to avoid
+/// cross-module visibility.
 struct RunGrads {
     out: Tensor<3>,
     d_input: Tensor<3>,

@@ -49,7 +49,7 @@ impl Mamba3DoubleSsdInput {
 
         assert!(
             input.init_state_hpr.is_none(),
-            "ssd_serial does not support init_state_hpr yet. Use ssd_minimal instead."
+            "double_ssd_serial does not support init_state_hpr yet. Use double_ssd_minimal instead."
         );
         assert!(nchunks > 0, "sequence length must be at least 1");
 

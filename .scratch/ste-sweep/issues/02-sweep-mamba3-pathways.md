@@ -1,6 +1,6 @@
 # 02: Sweep: the Mamba-3 pathways
 
-Status: ready-for-agent
+Status: resolved
 
 Blocked by: 01, `.scratch/ste-lint-misses/` 01 and 02 (the linter)
 
@@ -94,11 +94,12 @@ string compares.
 
 | Location | New string |
 |---|---|
-| `src/mamba3/double_ssd/ssd/serial.rs:52` | `ssd_serial does not support init_state_hpr yet. Use ssd_minimal instead.` |
+| `src/mamba3/double_ssd/ssd/serial.rs:52` | `double_ssd_serial does not support init_state_hpr yet. Use double_ssd_minimal instead.` |
 | `src/mamba3/single_ssd/ssd/serial.rs:66` | `single_ssd_serial does not support init_state_hpr yet. Use single_ssd_minimal instead.` |
 
-The old strings are at `1b94af91`. Each new string keeps "yet", the names and
-the advice to use the `Minimal` path.
+The old strings are at `1b94af91`. Each new string keeps "yet" and the advice
+to use the `Minimal` path. The double-SSD string also names the functions of
+its pathway (see [The decisions of the user](#the-decisions-of-the-user)).
 
 ### The copies
 
@@ -162,6 +163,16 @@ that disagree with the code stay. The user decides each one.
    (`src/mamba3/double_ssd/ssd/serial_recalculated/serial_recalculated.rs:32`).
    The copy at `src/mamba2/ssd/ssd_path/tests.rs:115` names the functions of
    Mamba-2, so it agrees with its code.
+
+### The decisions of the user
+
+1. The doc of `RunGrads` names `double_ssd::double_ssd::tests`. The history
+   supports this choice. At `18a3feb3`, the tests of `src/mamba3/mamba3.rs`,
+   with their `struct RunGrads`, move to `src/mamba3/double_ssd/double_ssd.rs`.
+   Burn-stack has no `RunGrads`.
+2. The message names `double_ssd_serial` and `double_ssd_minimal`. No test of
+   either repo matches a part of it.
+3. The comment names `double_ssd_serial` and `double_ssd_serial_recalculated`.
 
 ### A term
 
