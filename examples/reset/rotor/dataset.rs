@@ -130,7 +130,7 @@ pub enum Family {
     Random,
     /// One reset, then a strongly biased walk. The turn count can reach `±31`,
     /// and it passes each detent many times at large magnitude. A **real**
-    /// state cannot follow this. It holds the count easily, but no readout that
+    /// state cannot follow this. It holds the count easily. But no readout that
     /// cuts the count axis into three intervals can report a residue that
     /// alternates across thirty count values.
     Drift,

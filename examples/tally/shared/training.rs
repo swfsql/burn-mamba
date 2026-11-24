@@ -125,7 +125,7 @@ pub fn train(
             validate_all(&valid_loaders, trainer.module().valid(), epoch, &mut session);
         }
         if session.is_exhausted() {
-            println!("reached the training budget; stopping training");
+            println!("the training reached its budget, so it stops");
             break;
         }
     }

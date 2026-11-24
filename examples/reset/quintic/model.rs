@@ -34,12 +34,13 @@ pub fn default_layers(group: Group) -> usize {
 /// trained block finds the icosahedral rotation (`180°` on one generator,
 /// `120°` on the other, the axes `20.9°` or `69.1°` apart) on **one head at a
 /// time**. The other heads find something smaller, a `Z₃` or a recency trace.
-/// A one-channel head then gives the class head a single projection of the
-/// group state. In the floor construction, every head reads the *same* state.
-/// MIMO instead gives the head that finds the group its own readouts:
-/// `per_head_dim` channels, each a different mix of the `mimo_rank`
-/// projections of one state under one transition. The second head leaves room
-/// for a head that misses the group.
+///
+/// With the group on one head, a one-channel head gives the class head a
+/// single projection of the group state. In the floor construction, every head
+/// reads the *same* state. MIMO instead gives the head that finds the group its
+/// own readouts. These are `per_head_dim` channels, each a different mix of the
+/// `mimo_rank` projections of one state under one transition. The second head
+/// leaves room for a head that misses the group.
 pub const DEFAULT_WIDTH: (usize, usize, usize) = (4, 2, 2);
 
 /// The narrowest width at which an exact solution exists: `(d_model, nheads)`
@@ -55,9 +56,10 @@ pub const DEFAULT_WIDTH: (usize, usize, usize) = (4, 2, 2);
 ///   affine function of it. The write must be zero except on `R`. The turn must
 ///   be zero on `s` and take two non-parallel values on the two `c`s. Four
 ///   points of `ℝ²` are affinely dependent, and those three constraints leave
-///   the dependency nowhere to live. The third head then has a use on the
-///   output side: it tracks the sign in the second layer, so the first layer
-///   must send the sign only on `c`.
+///   the dependency nowhere to live.
+///
+///   The third head then has a use on the output side. It tracks the sign in
+///   the second layer, so the first layer must send the sign only on `c`.
 pub fn floor_width(group: Group) -> (usize, usize) {
     match group {
         Group::Alternating => (2, 2),
@@ -76,10 +78,10 @@ pub fn floor_width(group: Group) -> (usize, usize) {
 /// With `p = q`, the second is **conjugation**. It fixes the real axis and
 /// turns the imaginary 3-space by `SO(3)`, where the rotations of the
 /// icosahedron (`A₅`) live. Training does not always find that solution. It
-/// also finds the *four*-dimensional representation of `A₅`: `q` and `p` run
-/// in the two Galois-twin copies of the binary icosahedral group (axes `69.1°`
-/// apart on one side, `20.9°` on the other). Both are `SO(4)`, and neither is
-/// `SU(2)`.
+/// also finds the *four*-dimensional representation of `A₅`, where `q` and `p`
+/// run in the two Galois-twin copies of the binary icosahedral group. The axes
+/// are `69.1°` apart on one side and `20.9°` on the other. Both solutions are
+/// `SO(4)`, and neither is `SU(2)`.
 ///
 /// These config choices are load-bearing:
 ///

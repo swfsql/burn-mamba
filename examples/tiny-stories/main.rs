@@ -183,7 +183,7 @@ pub fn launch(app_args: &AppArgs) {
         && !cli.long_stories
         && cli.contrast_eval.is_none()
     {
-        println!("neither training nor inference were enabled");
+        println!("the flags enable neither training nor inference");
         println!("{}", common::cli::HELP);
     }
 }

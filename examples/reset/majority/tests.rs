@@ -251,7 +251,7 @@ const FAMILIES: [(&str, Family); 3] = [
 // 1. the hand-built solution
 // ---------------------------------------------------------------------------
 
-/// Every weight is written in closed form. There is no training.
+/// The test writes every weight in closed form. There is no training.
 #[test]
 fn handmade_block_solves_every_family() {
     let device = test_device();
@@ -325,7 +325,7 @@ fn no_fixed_decay_solves_the_task() {
     println!("best worst-family accuracy over the whole sweep: {:.2}%", 100.0 * best_worst);
     assert!(
         best_worst < 0.9,
-        "a fixed decay reached {best_worst:.4} — the task does not need selectivity"
+        "a fixed decay reached {best_worst:.4}, so the task does not need selectivity"
     );
 }
 

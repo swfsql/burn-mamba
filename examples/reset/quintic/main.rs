@@ -89,9 +89,9 @@ pub fn launch(app_args: &AppArgs) {
     let (batch_size, num_epochs) = (64, 80);
     let mut training_config = app_args.load_training_config().unwrap_or_else(|| {
         println!("Initializing new training config");
-        // The LR schedule of the ladder: a large learning rate to leave the
-        // order-blind solutions, then a small one to settle the rotation onto
-        // the exact turns.
+        // The LR schedule of the ladder. It starts with a large learning rate,
+        // to leave the order-blind solutions. It ends with a small one, to
+        // settle the rotation onto the exact turns.
         let total_training_steps = num_epochs * dataset::NUM_TRAIN.div_ceil(batch_size);
         let optimizer = app_args.optimizer_or(common::training::OptimizerKind::AdamW);
         TrainingConfig::new(common::training::OptimizerConfig::of(optimizer, dtype))
@@ -119,7 +119,7 @@ pub fn launch(app_args: &AppArgs) {
     assert_eq!(
         model_config.shape.output_size,
         group.num_classes(),
-        "the persisted model config was made for the other group — pass the matching --group"
+        "the persisted model config is for the other group. Pass the matching --group"
     );
     app_args.save_training_config(&training_config);
     app_args.save_model_config(&model_config);
@@ -140,7 +140,7 @@ pub fn launch(app_args: &AppArgs) {
     }
 
     if !app_args.inference && !app_args.training {
-        println!("neither training nor inference were enabled");
+        println!("the flags enable neither training nor inference");
         println!("{}", common::cli::HELP);
     }
 }

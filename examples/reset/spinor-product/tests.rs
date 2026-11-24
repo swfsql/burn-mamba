@@ -1,7 +1,7 @@
 //! The five claims this example rests on, measured.
 //!
 //! 1. A **hand-built `micro_steps = 2` block solves the task exactly.** There
-//!    is no fitting: every weight is written in closed form. It is the
+//!    is no fitting: the test writes every weight in closed form. It is the
 //!    construction of `reset-spinor` with one micro-step per symbol. The two
 //!    symbols of a token are two micro-steps, so its transition is the
 //!    group product.
@@ -16,14 +16,14 @@
 //!    ([`one_step_generators_add_and_cannot_reach_k`]). The hold symbol is in
 //!    the alphabet, so a token can carry one turn alone. This pins the generator
 //!    of each slot to the axis of the unit that it turns by. Every sum of two of
-//!    those lies in their plane, and `exp` of a vector in a plane has **no
+//!    those lies in their plane. `exp` of a vector in a plane has **no
 //!    component** along the axis orthogonal to it. That axis is exactly where
 //!    the product of the pair (`ij = k`, and the five others) lives.
 //! 4. The obstruction is about **one block, not about depth**
 //!    ([`a_second_layer_only_helps_by_composing_the_pair`]). The same `u = 1`
 //!    block is exact when its input names the product of the pair, and a second
 //!    layer reads that input instead of the token. So depth is not blocked. But
-//!    it needs the layer below to compute that product, and a run finds only an
+//!    it needs the layer below to compute that product. A run finds only an
 //!    approximation of it there (the trained rows in the README).
 //! 5. **No order-blind model can** either, so the counts cannot cover the gap.
 //!
@@ -227,15 +227,16 @@ fn channels_product(u: usize) -> Vec<Ch> {
 ///   otherwise).
 /// - `B` writes the element on which the token ends: the identity when slot
 ///   `b` resets or holds, and `q_b` when slot `a` reset and slot `b` turned.
-///   This *compensates* for the turn that the write can no longer sit before.
-///   It is strictly better than the naive fold, and it makes every
-///   reset-containing token exact.
+///   This *compensates* for the turn, because in a single micro-step the write
+///   cannot sit before it. This `B` is strictly better than the naive fold,
+///   and it makes every reset-containing token exact.
 ///
 /// The fifth job is the rotation, and it cannot survive. The generator is
 /// `gen_scale · (v_a + w_b)`, a **sum**, where the token needs the **product**
-/// `exp(w_b) ⊗ exp(v_a)`. The caller sweeps `gen_scale`. No scale can fix the
-/// rotation (see [`one_step_generators_add_and_cannot_reach_k`]), but the sweep
-/// makes the measured number bound the construction, not one setting of it.
+/// `exp(w_b) ⊗ exp(v_a)`. The caller sweeps `gen_scale`. No scale can repair
+/// the rotation (see [`one_step_generators_add_and_cannot_reach_k`]), but the
+/// sweep makes the measured number bound the construction, not one setting of
+/// it.
 fn channels_single(gen_scale: f64) -> Vec<Ch> {
     let g = TURN_RAW * gen_scale;
     // Write if either slot resets. Wipe on the same condition.
@@ -406,9 +407,9 @@ fn handmade(device: &Device, micro_steps: usize, head: Head, gen_scale: f64) -> 
     net
 }
 
-/// Everything in the construction that does not depend on how a token is
-/// encoded: the per-head Δ/`D`/QK-norm weights, the readout selector and the
-/// class head. Shared by [`handmade`] and [`handmade_composed`].
+/// The parts of the construction that do not depend on the token encoding: the
+/// per-head Δ/`D`/QK-norm weights, the readout selector and the class head.
+/// [`handmade`] and [`handmade_composed`] share them.
 fn finish(net: &mut MambaLatentNet, head: Head, device: &Device) {
     let MambaBlock::Mamba3(block) = &mut net.layers.real_layers.last_mut().expect("one layer").block else {
         unreachable!("spinor-product configures the Mamba-3 family")
@@ -592,7 +593,7 @@ fn best_lookup(fit: (&[usize], &[i64]), eval: (&[usize], &[i64]), num_codes: usi
 
 /// Quantise each output channel into `LEVELS` equal-width bins over the range
 /// of the fit split, and pack the four into one code. That is a finite
-/// partition of the output space of the block, so the best table over it
+/// partition of the output space of the block. So the best table over it
 /// dominates every linear head that the model can carry.
 const LEVELS: usize = 5;
 const NUM_OUTPUT_CODES: usize = LEVELS * LEVELS * LEVELS * LEVELS;
@@ -665,11 +666,11 @@ const NUM_COUNT_CODES: usize = COUNT_BASE * COUNT_BASE * COUNT_BASE;
 // 1. the hand-built solution
 // ---------------------------------------------------------------------------
 
-/// Every weight is written in closed form. There is no training. One micro-step
-/// per symbol, so the transition of the token is the group product.
+/// Every weight has a closed form. There is no training. One micro-step per
+/// symbol, so the transition of the token is the group product.
 ///
 /// The test reports every length in [`EVAL_LENGTHS`], because that is the
-/// meaning of "composes the token": the block is a group tracker, so the word
+/// meaning of "composes the token". The block is a group tracker, so the word
 /// can have any length. An approximation of the same construction is not a
 /// group tracker, and the long column measures that for everything else.
 #[test]
@@ -752,7 +753,7 @@ fn one_step_cannot_compose_a_token() {
     );
     assert!(
         ceiling < 0.9,
-        "the `u = 1` twin reached {ceiling:.4} — the task does not need micro_steps"
+        "the `u = 1` twin reached {ceiling:.4}, so the task does not need micro_steps"
     );
 }
 
@@ -863,11 +864,14 @@ fn dist(p: [f64; 4], q: [f64; 4]) -> f64 {
 // `micro_steps = 2` is not the only way to get two rotations into one token. A
 // second **layer** applies one too. But it cannot apply it to the same state,
 // because each layer turns its own state. So the word must end in the state of
-// the *last* layer, and the per-token rotation of that layer must still be the
-// product of the whole pair. Its generator is affine in what the layer below
-// gives it, not in the token, so the axis pinning of §3 does not apply to it.
-// Depth is not blocked, but it *depends* on the layer below: that layer must
-// compute the product (a table with no additive form, see §3) and pass it on.
+// the *last* layer. The per-token rotation of that layer must still be the
+// product of the whole pair.
+//
+// The generator of that layer is affine in what the layer below gives it, not
+// in the token. So the axis pinning of §3 does not apply to it. Depth is not
+// blocked, but it *depends* on the layer below. That layer must compute the
+// product (a table with no additive form, see §3) and give it to the layer
+// above.
 //
 // This section builds the second half of that: the same `u = 1` block, given
 // exactly the feature that such a first layer must emit. It reaches 100%, so
@@ -936,8 +940,8 @@ fn functional_elem(vals: &[f64; NUM_CLASSES]) -> ([f64; D_MODEL], f64) {
 }
 
 /// The feature that a first layer must give a second one: the **effect** of the
-/// token (the group element by which it multiplies the word, and whether it
-/// resets), as one `d_model`-vector of RMS 1.
+/// token, as one `d_model`-vector of RMS 1. The effect is the group element by
+/// which the token multiplies the word, and whether the token resets.
 ///
 /// Both halves are necessary, and neither contains more than the pair implies.
 /// The element is `q_b ⊗ q_a` (the identity when slot `b` resets, `q_b` when
@@ -993,8 +997,8 @@ impl ChF {
     /// deviation from the mean shrinks by [`reset_scale`], and that does not
     /// matter for any channel of this shape. `B` is QK-normed, so only its
     /// direction counts. The *rotation* of a resetting token is not observable
-    /// at all: `h` is `α R h₋₁ + γ B x`, so the turn of the micro-step lands on
-    /// the state that the micro-step wipes, and the write comes after it.
+    /// at all. `h` is `α R h₋₁ + γ B x`, so the turn of the micro-step lands on
+    /// the state that the micro-step wipes. The write comes after it.
     fn elem(elem: [f64; NUM_CLASSES]) -> Self {
         ChF { elem, reset: 0.0 }
     }
@@ -1008,9 +1012,9 @@ impl ChF {
     }
 }
 
-/// The channels of the `u = 1` block **given the product of the token**: the
-/// `reset-spinor` construction, with the rotation read from the element instead
-/// of summed from the two slots.
+/// The channels of the `u = 1` block **given the product of the token**. This
+/// is the `reset-spinor` construction, with the rotation read from the element
+/// instead of summed from the two slots.
 ///
 /// Only two other things differ from [`channels_single`], and both follow from
 /// naming the product directly:
@@ -1060,9 +1064,13 @@ fn channels_composed() -> Vec<ChF> {
     chs
 }
 
-/// The generator whose exponential is the group element `e`: a half-turn about
-/// the axis of `±i` / `±j` / `±k`, nothing for the identity, and a whole turn
-/// (about any axis) for `−1`. The `Δ = 2` above is for that whole turn.
+/// The generator whose exponential is the group element `e`:
+///
+/// - a half-turn about the axis of `±i` / `±j` / `±k`,
+/// - nothing for the identity,
+/// - a whole turn (about any axis) for `−1`.
+///
+/// The `Δ = 2` above is for that whole turn.
 fn element_generator(e: usize) -> [f64; 3] {
     let mut g = [0.0; 3];
     match (e % 4, e < 4) {
@@ -1129,18 +1137,19 @@ fn handmade_composed(device: &Device, head: Head) -> MambaLatentNet {
 }
 
 /// The `u = 1` block solves the task **exactly** when its input names the
-/// product of the pair: at every length, like the `u = 2` block, and unlike
-/// every other `u = 1` row.
+/// product of the pair. It does so at every length, like the `u = 2` block, and
+/// unlike every other `u = 1` row.
 ///
 /// So the two dials are not the same dial. `micro_steps = 2` gives the
-/// recurrence the two rotations, and that is enough. A second layer must get a
-/// *feature*, so it needs a layer below that computes `q_b ⊗ q_a`. That is a
-/// function of the pair with no additive form
-/// ([`one_step_generators_add_and_cannot_reach_k`]), so a bilinear one, and the
+/// recurrence the two rotations, and that is enough.
+///
+/// A second layer must get a *feature*, so it needs a layer below that
+/// computes `q_b ⊗ q_a`. That is a function of the pair with no additive form
+/// ([`one_step_generators_add_and_cannot_reach_k`]), so a bilinear one. The
 /// second layer then reads a rotation affinely from it. Nothing forbids that.
-/// But at the LR schedule of the ladder, the `--layers 2 --micro-steps 1` run
-/// in `examples/reset/README.md` stays below the counts row, where `u = 2` is
-/// exact at every length.
+/// But at the LR schedule of the ladder, the
+/// `--layers 2 --micro-steps 1` run in `examples/reset/README.md` stays below
+/// the counts row, where `u = 2` is exact at every length.
 #[test]
 fn a_second_layer_only_helps_by_composing_the_pair() {
     let device = test_device();
@@ -1171,8 +1180,8 @@ fn a_second_layer_only_helps_by_composing_the_pair() {
 
 /// The best predictors that see only the current token, or only the symbol
 /// **counts** since the reset. The commutator subgroup of `Q₈` is `{±1}`, so
-/// the counts fix the element up to a sign, and the table must guess where both
-/// signs occur. `shuffle` is built to make that constant.
+/// the counts determine the element up to a sign, and the table must guess
+/// where both signs occur. `shuffle` is built to make that constant.
 #[test]
 fn counts_ceiling_is_the_order_blind_limit() {
     println!("order-blind ceilings, accuracy per family:");

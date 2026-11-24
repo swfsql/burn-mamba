@@ -23,9 +23,11 @@
 //! identity quaternion into the state at the current cumulative rotation. `i`
 //! and `j` turn that rotation by non-commuting half-turns. The state is then the
 //! relative quaternion: the group element itself. Two heads read it, along the
-//! two coordinates of a [`plane`] on which the eight elements of `Q₈` are eight
-//! directions `45°` apart, so the head decodes a sector. The ceilings in (2)
-//! still use all four components of the state (see [`probe`]).
+//! two coordinates of a [`plane`]. On that plane, the eight elements of `Q₈`
+//! are eight directions `45°` apart, so the head decodes a sector.
+//!
+//! The ceilings in (2) still use all four components of the state (see
+//! [`probe`]).
 
 use crate::common::model::ModelConfigExt;
 use crate::dataset::{
@@ -85,7 +87,7 @@ const RANK: usize = 4;
 /// be duplicates that the head cannot use.
 const NHEADS: usize = 2;
 
-/// `d_model`. Two, the floor for a three-symbol alphabet: the pre-`RmsNorm` of
+/// `d_model`. Two, the floor for a three-symbol alphabet. The pre-`RmsNorm` of
 /// the layer sends a token to the unit sphere, so a 1-D token carries only its
 /// sign. It equals `d_inner` here, so the `out_proj` of the block is the
 /// identity, and the two heads *are* the plane.
@@ -539,7 +541,7 @@ fn best_lookup(fit: (&[usize], &[i64]), eval: (&[usize], &[i64]), num_codes: usi
 
 /// Quantise each output channel into `LEVELS` equal-width bins over the range
 /// of the fit split, and pack the four into one code. That is a finite
-/// partition of the output space of the block, so the best table over it
+/// partition of the output space of the block. So the best table over it
 /// dominates every linear head that the model can carry.
 const LEVELS: usize = 5;
 const NUM_OUTPUT_CODES: usize = LEVELS * LEVELS * LEVELS * LEVELS;
@@ -596,7 +598,7 @@ const NUM_COUNT_CODES: usize = SEQ_LENGTH * SEQ_LENGTH;
 // 1. the hand-built solution
 // ---------------------------------------------------------------------------
 
-/// Every weight is written in closed form. There is no training.
+/// The test writes every weight in closed form. There is no training.
 #[test]
 fn handmade_block_solves_every_family() {
     let device = test_device();
@@ -627,7 +629,7 @@ fn handmade_block_solves_every_family() {
 /// `Q₈/{±1} ≅ Z₂×Z₂`. Half the group folds onto the other half, and no readout
 /// can unfold it. The second column shows this. It gives the block the best
 /// table over a fine partition of its whole output space (fitted on a separate
-/// split), and the result is still near the 50% of a guess of the sign of the
+/// split). The result is still near the 50% of a guess of the sign of the
 /// commutator.
 ///
 /// A `cumsum` of angles is a function of the symbol counts for any choice of
@@ -666,7 +668,7 @@ fn abelian_rotation_loses_the_order() {
     );
     assert!(
         best < 0.75,
-        "the abelian twin reached {best:.4} — the task does not need a non-abelian rotation"
+        "the abelian twin reached {best:.4}, so the task does not need a non-abelian rotation"
     );
 }
 
@@ -676,13 +678,13 @@ fn abelian_rotation_loses_the_order() {
 
 /// The best predictor that sees only the symbol **counts** since the reset.
 ///
-/// A block that writes its state at the reset and reads the rotation
-/// accumulated after it (this construction, under an abelian rotation) can see
-/// no more than this. An abelian accumulation is a `cumsum`, so it is a linear
-/// function of exactly these two numbers, whatever the angles and whatever the
-/// decoder. (A block that writes on every symbol can carry an order-dependent
-/// sum. The trained `--rotation complex` run in the README covers that case,
-/// and it does not clear this ceiling either.)
+/// When a block writes its state at the reset and reads the rotation
+/// accumulated after it, it can see no more than this. This construction is
+/// such a block, under an abelian rotation. An abelian accumulation is a
+/// `cumsum`, so it is a linear function of exactly these two numbers, whatever
+/// the angles and whatever the decoder. (A block that writes on every symbol
+/// can carry an order-dependent sum. The trained `--rotation complex` run in
+/// the README covers that case, and it does not clear this ceiling either.)
 ///
 /// The gap that the counts leave is the commutator. The counts fix the element
 /// only up to `{±1}`, so where both signs occur, the table must guess. In

@@ -323,10 +323,12 @@ fn handmade_a5(device: &Device, rotation: RotationKind, head: Head) -> MambaLate
 /// The two-layer `S₅` stack, by hand (`Rotor4D`, `d_model = 3`, three heads).
 ///
 /// **Layer 1: the sign, passed on `c`.** `s` is a half-turn about `x̂`. `c` does
-/// not turn. `R` writes `ŷ` and wipes. Head 0 reads `±ŷ`, and its gate opens on
-/// `c` alone (`silu(0) = 0` closes it elsewhere). The out-projection puts it on
-/// the third stream axis. `c` itself embeds as the zero vector. So after the
-/// residual and the pre-norm of the second layer, its four inputs are:
+/// not turn. `R` writes `ŷ` and wipes.
+///
+/// Head 0 reads `±ŷ`, and its gate opens on `c` alone (`silu(0) = 0` closes it
+/// elsewhere). The out-projection puts it on the third stream axis. `c` itself
+/// embeds as the zero vector. So after the residual and the pre-norm of the
+/// second layer, its four inputs are:
 ///
 /// ```text
 ///   s   √3·e₀        c, sign ±   ±√3·e₂        R   √3·e₁
@@ -335,18 +337,19 @@ fn handmade_a5(device: &Device, rotation: RotationKind, head: Head) -> MambaLate
 /// These are affinely independent in `ℝ³`, which is all that its in-projection
 /// needs. They are exactly these points at every length. The sign arrives
 /// scaled by the decay of the hold of layer 1 (`ᾱ = e^(−a_floor)` per micro-step),
-/// and the norm removes the scale. Next to a nonzero `c` embedding, the norm
-/// cannot remove it, and the turns drift.
+/// and the norm undoes the scale. Next to a nonzero `c` embedding, the norm
+/// cannot undo it, and the turns drift.
 ///
 /// **Layer 2: the even part, and a sign of its own.** With `σ = sᵉ ∘ a`, one
 /// micro-step is `a ← sᵉ' ∘ g ∘ sᵉ · a` (`e`, `e'` the sign before and after `g`). It
 /// is the identity on `s`. On `c`, it is either `c` (`e = 0`) or `s∘c∘s`
 /// (`e = 1`): the `72°` and the `144°` rotations, a pair that no conjugation
-/// relates. That is why this layer must read the sign. Heads 0–1 hold `a` as
-/// the `A₅` block does. Head 2 repeats the half-turn of layer 1 on `s`, so it
-/// carries the sign itself, and layer 1 never needs to deliver it on `s`. The
-/// output is `(orbit(a)ₓ, orbit(a)ᵧ, ±REFᵧ)`, a hundred and twenty distinct
-/// points.
+/// relates. That is why this layer must read the sign.
+///
+/// Heads 0–1 hold `a` as the `A₅` block does. Head 2 repeats the half-turn of
+/// layer 1 on `s`, so it carries the sign itself, and layer 1 never needs to
+/// deliver it on `s`. The output is `(orbit(a)ₓ, orbit(a)ᵧ, ±REFᵧ)`, a hundred
+/// and twenty distinct points.
 fn handmade_s5(device: &Device, head: Head) -> MambaLatentNet {
     const H: usize = 3;
     const K1: f64 = 1.5; // the sign's amplitude on the stream

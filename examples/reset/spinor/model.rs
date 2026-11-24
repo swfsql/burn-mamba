@@ -40,20 +40,23 @@ use burn_mamba::prelude::{
 /// - **Two heads read that element on a plane.** Both hold a copy of the same
 ///   quaternion (same `B`, same `ᾱ`, same rotation). They differ only in the `C`
 ///   from the per-head bias `c_bias_hmr`, so `nheads` here counts *readouts*.
+///
 ///   Two are enough. Under `e_k ↦ (cos kπ/4, sin kπ/4)`, the eight elements of
 ///   `Q₈` become eight **directions** `45°` apart: distinct, equidistant and in
 ///   convex position. Head `h` reads the `h`-th coordinate of that map.
-///   `(y₀, y₁) ∝` the direction of `q_rel`, and the eight-class head is a sector
-///   decoder over them: still `logit g = ⟨·, g⟩`, but read on the plane, not on
-///   the quaternion.
+///   `(y₀, y₁) ∝` the direction of `q_rel`, and the eight-class head is a
+///   sector decoder over them: still `logit g = ⟨·, g⟩`, but read on the
+///   plane, not on the quaternion.
 ///
 /// A half-turn is an ordinary interior point of the parameterisation, not a
 /// limit. The block bounds one micro-step to `rotation_range · π · Δ`, with a default
 /// of `range = 2`. That is a full traverse of the rotation group per unit `Δ`.
 /// For `SU(2)` that is every element, because its period is `4π` (`q` and `−q`
 /// turn the state differently). So `i` is at `tanh(‖ϑ‖) = 1/2`, with a live
-/// gradient. The bound is on the **magnitude** of the generator, so the axis is
-/// exactly the direction of the projection. The axis is projected **per head**,
+/// gradient.
+///
+/// The bound is on the **magnitude** of the generator, so the axis is exactly
+/// the direction of the projection. The block projects the axis **per head**,
 /// so the two heads could turn about two different axes. This construction sets
 /// them equal.
 ///

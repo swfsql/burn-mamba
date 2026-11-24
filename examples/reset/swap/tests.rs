@@ -1,17 +1,19 @@
 //! The claims this example rests on, measured.
 //!
 //! 1. A **hand-built `Rotor4D`** Mamba-3 block solves the task exactly. There
-//!    is no fitting: every weight is written in closed form. The rotation of
-//!    the block is set to conjugation (`p = q`), which is `SO(3)`, and the
+//!    is no fitting: the test writes every weight in closed form. The rotation
+//!    of the block is set to conjugation (`p = q`), which is `SO(3)`, and the
 //!    three swaps become three half-turns about three axes `60°` apart.
 //! 2. The **same construction one rung down** (`Quaternion4D`, one enum knob)
 //!    does not. It does not forget: a left-isoclinic state carries the *double
 //!    cover* `2D₃`, which has **more** information than the label. But the two
 //!    lifts `±W` of one permutation are **antipodal** state vectors with the
 //!    same target, and a linear readout cannot merge them. The test measures
-//!    this in three ways: through the identical head, through the best table
-//!    over its output space (which *does* recover it, and that is the point),
-//!    and by how completely the two lifts cancel.
+//!    this in three ways:
+//!    - through the identical head,
+//!    - through the best table over its output space (which *does* recover it,
+//!      and that is the point),
+//!    - by how completely the two lifts cancel.
 //! 3. **No order-blind model can**: the ceiling from the symbol counts. In
 //!    particular, the sign character `(−1)^(#l+#r)` cannot. It is all that a
 //!    *homomorphism* `S₃ → SU(2)` can carry, because `SU(2)` has exactly one
@@ -79,7 +81,7 @@ const RANK: usize = 4;
 /// (see [`PLANE_AXES`]).
 const NHEADS: usize = 2;
 
-/// `d_model`. Two, the floor for a three-symbol alphabet: the pre-`RmsNorm` of
+/// `d_model`. Two, the floor for a three-symbol alphabet. The pre-`RmsNorm` of
 /// the layer sends a token to the unit sphere, so a 1-D token carries only its
 /// sign. It equals `d_inner` here, so the `out_proj` of the block is the
 /// identity, and the two heads *are* the plane.
@@ -244,8 +246,8 @@ fn handmade(device: &Device, rotation: RotationKind, head: Head) -> MambaLatentN
     block.b_norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([RANK]), device));
     block.c_norm.gamma = Param::from_tensor(Tensor::ones(Shape::new([RANK]), device));
     // QK-Norm rescales B and C, but it cannot turn them. The bias of head h
-    // moves C from the shared (1,0,0,0) to twice one basis vector, and that
-    // aims the head at one component of the state. It is the only per-head
+    // moves C from the shared (1,0,0,0) to twice one basis vector. That aims
+    // the head at one component of the state. It is the only per-head
     // weight here, and it is the whole readout: `PLANE_AXES` for the decoder,
     // and the two components that a probe asks for.
     block.b_bias_hmr = Param::from_tensor(Tensor::zeros(
@@ -341,7 +343,7 @@ fn basis_channels() -> Vec<[f64; NUM_SYMBOLS]> {
 /// The four `B` channels: the vector that `R` writes into the state.
 ///
 /// For the two quaternion rotations, it is [`REF_POINT`]: a point of the
-/// imaginary 3-space of the rotation, on none of the axes of the group, so its
+/// imaginary 3-space of the rotation, on none of the axes of the group. So its
 /// orbit is six distinct points.
 ///
 /// The abelian twin gets `(1, 0, 1, 0)` instead: one unit in **each** rotated
@@ -502,9 +504,9 @@ fn best_lookup(fit: (&[usize], &[i64]), eval: (&[usize], &[i64]), num_codes: usi
     hits as f64 / eval.1.len() as f64
 }
 
-/// Accuracy of the **best linear readout** of the output of the block: a
-/// softmax regression on the four output channels plus a bias, fitted on one
-/// split and scored on another.
+/// Accuracy of the **best linear readout** of the output of the block. The
+/// readout is a softmax regression on the four output channels plus a bias,
+/// fitted on one split and scored on another.
 ///
 /// This is the fair version of "what a head like the head of this example can
 /// do". The head of the example is one linear map, and this searches over all
@@ -576,7 +578,7 @@ fn best_linear_readout(fit: (&[[f64; RANK]], &[i64]), eval: (&[[f64; RANK]], &[i
 
 /// Quantise each output channel into `LEVELS` equal-width bins over the range
 /// of the fit split, and pack the four into one code. That is a finite
-/// partition of the output space of the block, so the best table over it
+/// partition of the output space of the block. So the best table over it
 /// dominates every readout that the model can carry, linear or not.
 const LEVELS: usize = 5;
 const NUM_OUTPUT_CODES: usize = LEVELS * LEVELS * LEVELS * LEVELS;
@@ -638,7 +640,7 @@ const NUM_COUNT_CODES: usize = SEQ_LENGTH * SEQ_LENGTH;
 // 1. the hand-built solution
 // ---------------------------------------------------------------------------
 
-/// Every weight is written in closed form. There is no training.
+/// The test writes every weight in closed form. There is no training.
 #[test]
 fn handmade_rotor_solves_every_family() {
     let device = test_device();
@@ -661,13 +663,15 @@ fn handmade_rotor_solves_every_family() {
 ///
 /// The failure here is **not** the abelian failure. The left-isoclinic state
 /// carries the double cover `2D₃` (order 12), which is strictly *more* than the
-/// label: the best table over its output space recovers the permutation fully.
+/// label. The best table over its output space recovers the permutation fully.
 /// But it cannot present the permutation to a **linear** head. The two lifts
 /// `±W` of one permutation are antipodal vectors with the same target. So every
 /// linear functional of the state takes opposite values on the same class, and
-/// the average over a class cancels. The last column measures exactly that
-/// cancellation: `‖mean output‖ / rms output` per class. The conjugating block
-/// leaves it at 1, and the left-isoclinic block drives it to ~0.
+/// the average over a class cancels.
+///
+/// The last column measures exactly that cancellation:
+/// `‖mean output‖ / rms output` per class. The conjugating block leaves it at
+/// 1, and the left-isoclinic block drives it to ~0.
 #[test]
 fn left_isoclinic_carries_a_double_cover() {
     let device = test_device();
@@ -715,13 +719,13 @@ fn left_isoclinic_carries_a_double_cover() {
     );
     assert!(
         worst_cancel < 0.2,
-        "the two lifts did not cancel ({worst_cancel:.3}) — check the double cover"
+        "the two lifts did not cancel ({worst_cancel:.3}). Check the double cover"
     );
 }
 
 /// Per class, `‖mean of the output vectors‖ / rms of the output vectors`,
-/// averaged over classes: 1 when every position of a class lands on the same
-/// state, ~0 when they land on `±` the same state equally often.
+/// averaged over classes. It is 1 when every position of a class lands on the
+/// same state. It is ~0 when they land on `±` the same state equally often.
 fn mean_over_rms(channels: &[[f64; RANK]], targets: &[i64]) -> f64 {
     let mut sum = vec![[0.0f64; RANK]; NUM_CLASSES];
     let mut sq = vec![0.0f64; NUM_CLASSES];
@@ -773,7 +777,7 @@ fn abelian_rotation_loses_the_order() {
     }
     assert!(
         best < 0.85,
-        "the abelian twin reached {best:.4} — the task does not need order"
+        "the abelian twin reached {best:.4}, so the task does not need order"
     );
 }
 
@@ -789,8 +793,8 @@ fn abelian_rotation_loses_the_order() {
 /// homomorphism from `S₃` into `SU(2)` sends the three transpositions to `−1`:
 /// the parity, and nothing else. So the `parity` column bounds a left-isoclinic
 /// block whose rotation is a homomorphic image of the word. The hand-built twin
-/// gets past this bound, because it tracks the double cover instead. But the
-/// information that it gets is no longer linearly readable.
+/// escapes this bound, because it tracks the double cover instead. But the
+/// information that it gets is not linearly readable.
 #[test]
 fn counts_and_parity_ceilings() {
     println!("order-blind ceilings, accuracy per family:");
@@ -920,17 +924,18 @@ fn conjugate(q: [f64; 4], v: [f64; 4]) -> [f64; 4] {
 // ---------------------------------------------------------------------------
 
 /// The left-isoclinic block **solves** the task when the final `RmsNorm` of the
-/// network is on. That is why `model_config` keeps it off.
+/// network is on. That is why `model_config` disables it.
 ///
 /// The state is still `±W ⊗ B`. One head reads `y = ⟨C, W ⊗ B⟩ = ⟨u, W⟩`, and
 /// the out-proj bias of the block puts a constant `e` next to it.
 /// `RmsNorm(e, y)` then has the first coordinate `e / √((e² + y²)/2)`, which is
 /// **even** in `y`, so both lifts land on one point. `u` gives six distinct
 /// values of `|⟨u, W⟩|` (`15°` into both planes of `2D₃`, the odd one scaled),
-/// and the head cuts that one coordinate into six intervals. The same weights
-/// without the norm are near chance. Behind a linear head, the outputs of every
-/// class average to a point that depends only on the sign character, and three
-/// classes cannot share the point of a convex region.
+/// and the head cuts that one coordinate into six intervals.
+///
+/// The same weights without the norm are near chance. Behind a linear head, the
+/// outputs of every class average to a point that depends only on the sign
+/// character. Three classes cannot share the point of a convex region.
 #[test]
 fn left_isoclinic_with_final_norm() {
     let phi = 15.0f64.to_radians();

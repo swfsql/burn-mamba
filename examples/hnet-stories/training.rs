@@ -99,7 +99,7 @@ pub fn train(
             &mut session,
         );
         if session.is_exhausted() {
-            println!("reached the training budget; stopping training");
+            println!("the training reached its budget, so it stops");
             break;
         }
     }

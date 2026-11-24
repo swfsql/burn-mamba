@@ -52,12 +52,13 @@ use burn_mamba::prelude::{
 /// - `d_model = 2`, the floor for a three-symbol alphabet. The pre-`RmsNorm` of
 ///   the layer sends a token to the unit sphere, so `d_model = 1` would leave two
 ///   distinguishable symbols. Three points of `ℝ²` are affinely independent (a
-///   3×3 solve, see `tests.rs`). The two heads read the `x` and `y` of the
-///   rotation. There the six orbit points are on one circle, in six distinct
-///   directions, so the six-way head is a nearest-point decoder. (Conjugation
-///   fixes the real component, and a half-turn about an `xy` axis only flips
-///   `z`. So the other two components carry nothing that the counts do not
-///   already give.)
+///   3×3 solve, see `tests.rs`).
+///
+///   The two heads read the `x` and `y` of the rotation. There the six orbit
+///   points are on one circle, in six distinct directions, so the six-way head
+///   is a nearest-point decoder. (Conjugation fixes the real component, and a
+///   half-turn about an `xy` axis only flips `z`. So the other two components
+///   carry nothing that the counts do not already give.)
 /// - `TapPattern::None`: the construction pins `λ ≈ 1`, so the `β` tap is dead
 ///   weight. Switching it off is structural: no `λ` sub-projection in the
 ///   in-projection, no tap slot in the cache, one SSD call instead of two.
@@ -85,8 +86,8 @@ pub fn model_config(rotation: RotationKind) -> MambaLatentNetConfig {
         // No feed-forward interleave: these examples are block-only.
         .with_mlp(None);
     let shape = LatentShape::new(NUM_SYMBOLS, NUM_CLASSES, stack)
-        // no final norm, and this is load-bearing: a norm beside a constant is
-        // even in the state, which merges the two lifts `±W` and lets
+        // no final norm, and this is load-bearing. A norm beside a constant is
+        // even in the state. So it merges the two lifts `±W` and lets
         // `Quaternion4D` solve the task too (`left_isoclinic_with_final_norm`).
         .with_final_norm(false);
     MambaLatentNetConfig::new(shape, MambaBlockConfig::Mamba3(mamba_block))

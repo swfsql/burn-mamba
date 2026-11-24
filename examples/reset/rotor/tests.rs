@@ -7,14 +7,14 @@
 //!    not the turns.
 //! 3. **No real state can**, for any decay. Without the rotation, the block is
 //!    a selective SSM of Mamba-2 strength. The best readout that its head can
-//!    express cuts the count axis into three intervals, and that cannot report
-//!    a residue that alternates along the axis.
+//!    express cuts the count axis into three intervals. Such a readout cannot
+//!    report a residue that alternates along the axis.
 //!
 //! (2) and (3) are not grid sweeps of the readout. For each ablated block, the
 //! test computes the **best readout that the block admits** exactly, from its
-//! own outputs: every 3-interval cut of the scalar channel, and every 3-sector
-//! cut of the output plane. The sweep covers only the one knob that the
-//! ablation leaves free (the angle, the decay).
+//! own outputs. The candidates are every 3-interval cut of the scalar channel,
+//! and every 3-sector cut of the output plane. The sweep covers only the one
+//! knob that the ablation leaves free (the angle, the decay).
 //!
 //! The construction is the one that [`crate::model`] derives. `R` writes the
 //! zero detent of the rotor into the state at the current phase. `±` turn the
@@ -486,7 +486,7 @@ fn best_sector_accuracy(channels: &[[f64; NUM_CLASSES]], targets: &[i64]) -> f64
 // 1. the hand-built solution
 // ---------------------------------------------------------------------------
 
-/// Every weight is written in closed form. There is no training.
+/// The test writes every weight in closed form. There is no training.
 #[test]
 fn handmade_block_solves_every_family() {
     let device = test_device();
@@ -554,7 +554,7 @@ fn no_fixed_rotation_solves_the_task() {
     );
     assert!(
         best_worst < 0.6,
-        "a fixed rotation reached {best_worst:.4} — the task does not need a data-dependent one"
+        "a fixed rotation reached {best_worst:.4}, so the task does not need a data-dependent one"
     );
 }
 
@@ -606,7 +606,7 @@ fn no_real_state_solves_the_task() {
     );
     assert!(
         best_worst < 0.6,
-        "a real state reached {best_worst:.4} — the task does not need a rotation"
+        "a real state reached {best_worst:.4}, so the task does not need a rotation"
     );
 }
 

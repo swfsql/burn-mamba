@@ -37,9 +37,10 @@ pub const D_MODEL: usize = 8;
 /// slots, so `ϑ(a, b) = v_a + w_b`. Generators **add** where the group
 /// **multiplies**. The alphabet has the hold symbol, so `v_i` must lie along
 /// `±x̂` and `w_j` along `±ŷ` (the axes of `i` and `j`). Then `ϑ(i, j)` lies in
-/// the `xy`-plane, and its `exp` can never be the `±k` that the token needs. At
-/// `u = 2`, the token is two micro-steps, and its transition is exactly the product
-/// `exp(w_b) ⊗ exp(v_a)`.
+/// the `xy`-plane, and its `exp` can never be the `±k` that the token needs.
+///
+/// At `u = 2`, the token is two micro-steps, and its transition is exactly the
+/// product `exp(w_b) ⊗ exp(v_a)`.
 ///
 /// These config choices are load-bearing:
 ///
@@ -49,12 +50,13 @@ pub const D_MODEL: usize = 8;
 ///   carries five symbols affinely. `tests.rs` puts the symbols on a regular
 ///   4-simplex of norm 2. So every token has RMS 1 (the pre-`RmsNorm` of the
 ///   layer does not change it), and every in-projection channel has a
-///   closed-form weight. `per_head_dim = 2` then keeps `nheads = 4`, one head
-///   per quaternion component. The construction uses the first value channel
-///   of each head. Two heads are enough for the *readout*, and the five
-///   `reset-*` rungs run at two heads. But here, the same training config finds
-///   nothing with two heads: 61 / 52 / 53% with the trapezoid, 46 / 30 / 33%
-///   without it.
+///   closed-form weight.
+///
+///   `per_head_dim = 2` then keeps `nheads = 4`, one head per quaternion
+///   component. The construction uses the first value channel of each head.
+///   Two heads are enough for the *readout*, and the five `reset-*` rungs run
+///   at two heads. But here, the same training config finds nothing with two
+///   heads: 61 / 52 / 53% with the trapezoid, 46 / 30 / 33% without it.
 /// - The **trapezoid stays on** (the default
 ///   [`TapPattern::HorizontalCarryOver`](burn_mamba::prelude::TapPattern)). This
 ///   is the only rung that keeps it. The hand-built solution pins `λ ≈ 1` and
@@ -68,15 +70,17 @@ pub const D_MODEL: usize = 8;
 /// **The other dial of the example: `layers`.** `micro_steps = 2` is not the
 /// only way to put two rotations in a token. A second *layer* also applies one,
 /// and its generator reads the layer below, not the token. So the axis-pinning
-/// argument of `tests.rs` does not apply to it. But a second layer cannot turn
-/// the *same* state, because each layer carries its own state. So the word must
-/// end in the state of the last layer, and the per-token rotation of that layer
-/// is the product of the whole pair. The layer below must compute that product
-/// as a **feature**: a function of the pair with no additive form, so a
-/// bilinear one (its `C·B` term is bilinear). That is expressible, but a
-/// learned product is approximate. `u = 2` gives the two rotations to the
-/// recurrence instead, and stays exact. `examples/reset/README.md` has the
-/// measured rows.
+/// argument of `tests.rs` does not apply to it.
+///
+/// But a second layer cannot turn the *same* state, because each layer carries
+/// its own state. So the word must end in the state of the last layer. The
+/// per-token rotation of that layer is the product of the whole pair. The layer
+/// below must compute that product as a **feature**. This feature is a function
+/// of the pair with no additive form, so a bilinear one (its `C·B` term is
+/// bilinear). That is expressible, but a learned product is approximate.
+///
+/// `u = 2` gives the two rotations to the recurrence instead, and stays exact.
+/// `examples/reset/README.md` has the measured rows.
 pub fn model_config(micro_steps: usize, layers: usize) -> MambaLatentNetConfig {
     // d_inner = expand·d_model = 8, per_head_dim = 2 ⇒ nheads = 4 (one per
     // quaternion component). Each head has its own Δ, A and λ per micro-step,

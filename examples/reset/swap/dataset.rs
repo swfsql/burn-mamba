@@ -219,9 +219,8 @@ const WORDS: [&[usize]; NUM_CLASSES] = [
 ];
 
 /// The reference vector that the construction writes into the state. It is a
-/// point in the imaginary 3-space of the rotation, and its orbit under the
-/// group is **six distinct points** (it lies on none of the axes of the
-/// group).
+/// point in the imaginary 3-space of the rotation. Its orbit under the group is
+/// **six distinct points** (it lies on none of the axes of the group).
 pub const REF_POINT: [f64; 4] = [0.0, 1.0, 1.0, 1.0];
 
 /// Where the class `class` carries [`REF_POINT`]: `W v W*` for the lift `W` of

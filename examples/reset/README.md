@@ -21,7 +21,7 @@ splits:
 Every rung reads a stream of two "turn" symbols plus a reset `R`. At **every**
 position, it reports what the turns did since the last `R`. The alphabet and
 the readout change, but the skeleton does not. Each rung is one block, at the
-smallest size that allows an exact solution, with the residual switched off
+smallest size that allows an exact solution. The rung switches the residual off
 (`ignore_last_residual`), so the classification head sees only the block.
 
 `R` is a symbol of the input stream, as the other symbols are. No rung makes a
@@ -37,7 +37,7 @@ The four ladder rungs share three settings:
 - **`TapPattern::None`**. Every construction below pins `λ ≈ 1`, so the `β` tap
   does nothing useful. Switching it off is structural: no `λ` sub-projection in
   the in-projection, no tap slot in the cache, one SSD call instead of two.
-- **`nheads = 2`**. A head is a *readout*, not a piece of state: every head
+- **`nheads = 2`**. A head is a *readout*, not a piece of state. Every head
   holds its own copy of the same state, and differs only in the `C` that reads
   that copy. Each of these labels needs two projections.
 
@@ -53,7 +53,7 @@ The three shortcuts that every rung closes:
 |---|---|
 | read the current symbol | the label is not a function of it |
 | read a fixed window | Mamba-3 has no short convolution at all |
-| read the residual | `ignore_last_residual` — the head sees the block alone |
+| read the residual | `ignore_last_residual`: the head sees the block alone |
 
 Each rung then closes one more, and *that* is the point of the rung. It is the
 last row of each "Why this task" table below.
@@ -98,9 +98,12 @@ apply:
 
 - **Every ablation gets the best readout that it accepts.** So the number bounds
   the ablated *architecture*, not one fit of it. From `reset-rotor` up, a search
-  over all candidates computes that readout: every cut of a scalar channel into
-  intervals, every cut of an output plane into sectors, every table over a fine
-  partition. Only the knob that the ablation leaves free is swept. The block of
+  over all candidates computes that readout:
+  - every cut of a scalar channel into intervals,
+  - every cut of an output plane into sectors,
+  - every table over a fine partition.
+
+  The test sweeps only the knob that the ablation leaves free. The block of
   `reset-majority` has one scalar channel and one gain, and its test sweeps both
   on a grid.
 - From `reset-spinor` up, **every lookup table and linear probe is fitted on one
@@ -358,9 +361,9 @@ families test that with different pressure:
 <details> 
 <summary>Measured</summary>
 
-134 parameters. The abelian twin has 122: the quaternion block projects a
-rotation axis per head (six channels), and the abelian block projects two
-channels that the heads share. Chance is 12.5%.
+134 parameters. The abelian twin has 122. The gap is in the rotation channels.
+The quaternion block projects a rotation axis per head (six channels). The
+abelian block projects two channels that the heads share. Chance is 12.5%.
 
 | | random | shuffle | runs |
 |---|---|---|---|
@@ -427,11 +430,12 @@ gives. The ceilings above it are what bound the architecture.
   `tests.rs` runs the probe twice, with the two heads on two components each.
 - **The abelian twin gets the better `B`.** With `B = (1,0,0,0)`, its second
   rotated pair would multiply zero, and it would carry one parity instead of two.
-  It gets `(1,0,1,0)`, so its state is the *whole* abelianisation. Its "same
-  head" column is **0%**, and that number means nothing. The sector decoder
-  matches a quaternion, not a pair of parities. On this plane, a pair of parities
-  can land only on the four odd sectors, and its label is never there. The
-  meaningful number is the best-readout column next to it.
+  It gets `(1,0,1,0)`, so its state is the *whole* abelianisation.
+
+  Its "same head" column is **0%**, and that number means nothing. The sector
+  decoder matches a quaternion, not a pair of parities. On this plane, a pair of
+  parities can land only on the four odd sectors, and its label is never there.
+  The meaningful number is the best-readout column next to it.
 - **`shuffle` is the wall, and everything abelian hits it.**
   - The hand-built twin reads parities and gets ~50–60% on every family.
   - The trained model can wire itself in any way. It does better on `random`,
@@ -451,6 +455,7 @@ gives. The ceilings above it are what bound the architecture.
   `Complex2D` are **incomparable**: the quaternion state cannot express two
   independent per-pair angles. The full `SO(4)` kind (two-sided `q ⊗ v ⊗ p̄`,
   where `p = 1` gives this one) contains both, at twice the rotation channels.
+
   `Q₈` does not need that extra reach: the ladder asks for the *smallest* state
   that solves each rung. And the extra reach has a cost. The exact solution needs
   `p ≡ 1` on the turns, and the same LR schedule does not find it. In
@@ -524,9 +529,9 @@ nothing. That is why the counts come closest to deciding `runs`.
 <details> 
 <summary>Measured</summary>
 
-146 parameters. The left-isoclinic twin has 128: the rotor projects a left and a
-right axis per head (six channels each), and the twin projects one axis (three).
-Chance is 16.7%.
+146 parameters. The left-isoclinic twin has 128. The gap is in the rotation
+channels. The rotor projects a left and a right axis per head (six channels
+each). The twin projects one axis (three). Chance is 16.7%.
 
 | | random | shuffle | runs |
 |---|---|---|---|
@@ -544,10 +549,12 @@ Chance is 16.7%.
 The last three rows use the same model, the same data and the same training
 config. Only one enum changes. The two-sided run is exact on all three families
 (`16384/16384` each, every permutation at 100%, exact by epoch 20). Neither of
-the other two is close. The middle rung buys less than nothing over the bottom
-one: 71/43/51 against 75/46/71. The theory predicts that. On `S₃`, the only
-homomorphic image in `SU(2)` is the sign character, and the counts already
-contain it. So the extra structure only adds something more to get wrong.
+the other two is close.
+
+The middle rung buys less than nothing over the bottom one: 71/43/51 against
+75/46/71. The theory predicts that. On `S₃`, the only homomorphic image in
+`SU(2)` is the sign character, and the counts already contain it. So the extra
+structure only adds something more to get wrong.
 
 The trained abelian row gets more than the `(#l, #r)` ceiling on `random`. A
 *trained* block can write at every token, not only at the reset. Then a decaying
@@ -559,7 +566,7 @@ two-sided block is exact.
 The middle three rows are the finding:
 
 - The left-isoclinic state has all the information. A lookup table over a fine
-  partition of its output recovers the permutation *exactly*: `2D₃` has twelve
+  partition of its output recovers the permutation *exactly*. `2D₃` has twelve
   elements, and the map from words to them is injective.
 - The **linear** column collapses, and the same table shows why. Averaged over
   the positions of one label, that state cancels to nothing.
@@ -606,11 +613,13 @@ The tests:
   A half-turn about an axis of that plane flips `z`. So `z` carries only the
   parity that the counts already give. The rest is the six orbit points on one
   circle, in six distinct directions, and a nearest-point decoder over them is
-  exact. As in `reset-spinor`, `nheads` counts readouts, not state. Both heads
-  hold the same rotated vector, and differ only in the `C` that reads it. The
-  ceilings above are measured on all four components (`tests.rs` runs the probe
+  exact.
+
+  As in `reset-spinor`, `nheads` counts readouts, not state. Both heads hold
+  the same rotated vector, and differ only in the `C` that reads it. The tests
+  measure the ceilings above on all four components (`tests.rs` runs the probe
   twice). A table over four components is at least as good as every linear
-  readout of them, and the head of the model is such a readout.
+  readout of them. The head of the model is such a readout.
 - **Two heads are enough here only because the trapezoid is off.** With the `β`
   tap on, the same cut trained to 57 / 39 / 50%. So four heads looked necessary.
   Without the tap, it gets 100% by epoch 20. Remember this when you read an
@@ -619,15 +628,17 @@ The tests:
   46 / 30 / 33% without).
 - **The extra factor is not always free.** In `reset-spinor`, the same `Rotor4D`
   block trains *worse* than the quaternion one. `Q₈` needs `p ≡ 1` exactly, and a
-  spurious right rotation compounds with the word. Here the task needs the right
-  factor, tied to the left as conjugation. The same block, LR schedule and
-  optimiser get 100% by epoch 20. Extra capacity helps where the task needs it,
-  and costs where it does not. Read the two rungs together.
+  spurious right rotation compounds with the word.
+
+  Here the task needs the right factor, tied to the left as conjugation. The
+  same block, LR schedule and optimiser get 100% by epoch 20. Extra capacity
+  helps where the task needs it, and costs where it does not. Read the two rungs
+  together.
 - **This is the one rung whose ablation is not about lost information.** The real
   state of `reset-rotor` and the abelian state of `reset-spinor` cannot represent
   their targets. Here the left-isoclinic state *can*, and the wall is the readout.
-  That is the sharper statement about the block: the output of a Mamba block is
-  linear in its state, so the block cannot report a state that needs unfolding.
+  That is the sharper statement about the block: its output is linear in its
+  state, so it cannot report a state that needs unfolding.
 - **So `final_norm: false` is necessary.** A final `RmsNorm` over the output
   `(e, y)`, with `e` constant, is even in `y` and merges `±W`. With that norm,
   the same hand-built `Quaternion4D` block is exact on all three families (130
@@ -687,11 +698,13 @@ necessary:
   turn alone. So `(i, .)` forces `exp(v_i) = i`, and `(., j)` forces
   `exp(w_j) = j`. Inside the bound of the block
   (`‖ϑ‖ < rotation_range·π = 2π`), the only generators with those images are
-  along `±x̂` and `±ŷ`, the axes of `i` and `j`. Every sum of them is in the
-  `xy`-plane. `exp` of a vector in a plane has **zero** component along the axis
-  orthogonal to that plane. The token `(i, j)` needs `j·i = −k`, which is only
-  that component. No weights, no scale and no squash can change this: they change
-  `‖ϑ‖`, never its direction (`one_step_generators_add_and_cannot_reach_k`).
+  along `±x̂` and `±ŷ`, the axes of `i` and `j`.
+
+  Every sum of these generators is in the `xy`-plane. `exp` of a vector in a
+  plane has **zero** component along the axis orthogonal to that plane. The
+  token `(i, j)` needs `j·i = −k`, which is only that component. No weights, no
+  scale and no squash can change this: they change `‖ϑ‖`, never its direction
+  (`one_step_generators_add_and_cannot_reach_k`).
 - **The third unit keeps the pairs non-abelian.** Over `i`/`j` alone, every
   two-turn token composes into `⟨k⟩ ≅ Z₄`, which commutes. Then one rotation per
   token is enough to carry a whole word, and a `micro_steps = 1` model trains to
@@ -761,9 +774,10 @@ two blocks and two states against one. The rotation of a second layer is `exp` o
 an affine functional of the layer *below*, not of the token. So the axis pinning
 that closes `u = 1` does not apply to it. The second layer only needs the product
 of the pair as input (the hand-built rows above are exact at both lengths with
-it). The layer below must compute that product, as a learned feature. At the
-LR schedule of the ladder, the trained two-layer model stays below the counts
-row on every family. With `--max-lr 1e-2`, one seed of four gets
+it). The layer below must compute that product, as a learned feature.
+
+At the LR schedule of the ladder, the trained two-layer model stays below the
+counts row on every family. With `--max-lr 1e-2`, one seed of four gets
 100 / 99.99 / 100% at the training length and 99.95 / 89.37 / 75.79% at 96
 tokens. The other three seeds stay below the counts row.
 
@@ -912,10 +926,11 @@ cargo test --release --example reset-quintic -- --nocapture
 **`A₅` is the icosahedron.** `d` is a half-turn about an edge axis. `t` is a
 third-turn about a face axis `20.9°` from it (`cos = φ/√3`). Their product is a
 fifth-turn about a vertex: `⟨d, t | d² = t³ = (dt)⁵ = 1⟩`, which *is* `A₅`. So
-the construction of `reset-swap` applies without change. Conjugation
-`v ↦ q v q̄` is `SO(3)` inside a `Rotor4D` 4-block, `R` writes a reference
-vector, and the state is its orbit: sixty points instead of six. What changes is
-how much less every cheaper state can carry:
+the construction of `reset-swap` applies without change.
+
+Conjugation `v ↦ q v q̄` is `SO(3)` inside a `Rotor4D` 4-block, `R` writes a
+reference vector, and the state is its orbit: sixty points instead of six. What
+changes is how much less every cheaper state can carry:
 
 | shortcut | why it is closed |
 |---|---|
@@ -995,17 +1010,19 @@ At 288 symbols, the two trained rows fall to 76.3 / 12.7 / 23.4% and
 76.6 / 5.3 / 12.1%. Neither tracks the group. The two-layer model only carries
 more recency. The trained rows get more than the counts ceiling on `random` for
 the reason of `reset-swap`. A block that writes at every token keeps a decaying
-trace of the last few symbols, and that trace identifies short words with no
-group at all.
+trace of the last few symbols. That trace identifies short words with no group
+at all.
 
 - `handmade_a5_rotor_solves_every_family` and
   `handmade_s5_two_layers_solve_every_family` write every weight in closed form,
   and score both lengths.
 - `left_isoclinic_carries_the_binary_icosahedral_group` is the one-enum twin.
 - `s5_needs_a_reflection_one_layer_does_not_have` checks the facts of the
-  obstruction: `A₅` is simple and perfect, the normal subgroups of `S₅`, the
-  `72°`/`144°` pair is conjugate only in `S₅`, and two-sided conjugation keeps
-  both angles.
+  obstruction:
+  - `A₅` is simple and perfect,
+  - the normal subgroups of `S₅`,
+  - the `72°`/`144°` pair is conjugate only in `S₅`,
+  - two-sided conjugation keeps both angles.
 - `counts_and_sign_ceilings` needs no model.
 - `labels_are_the_alternating_and_symmetric_groups` and
   `a5_is_the_icosahedral_rotation_group` check the datasets and the embedding.
@@ -1038,10 +1055,12 @@ group at all.
 - **Why 96 symbols.** Trained on the 32 symbols of the ladder, the same model
   turns by the right angles and holds with `ᾱ ≈ 0.99` per micro-step. Over 32
   micro-steps that costs nothing. But the state shrinks slowly, and the head
-  (which has biases) misreads it on long words. At 96 symbols, training pays for the leak.
-  The rest (`ᾱ = 0.991` on `d`) costs half a point at 288. The hand-built head decodes *directions* with no bias, so the floor of
-  the block (`ᾱ = e^(−a_floor·Δ)`) never affects it. `REF_POINT` makes the
-  shadow of the orbit on the two readouts point in sixty distinct directions.
+  (which has biases) misreads it on long words. At 96 symbols, training pays
+  for the leak. The rest (`ᾱ = 0.991` on `d`) costs half a point at 288.
+
+  The hand-built head decodes *directions* with no bias, so the floor of the
+  block (`ᾱ = e^(−a_floor·Δ)`) never affects it. `REF_POINT` makes the shadow
+  of the orbit on the two readouts point in sixty distinct directions.
 - **The widths are floors, argued in `model::floor_width`.**
   - `A₅` at `d_model = 2`: that is the floor of the three-symbol alphabet, and
     two readouts are enough.
@@ -1081,8 +1100,8 @@ group at all.
     at the asymptote of `tanh`, where the f32 derivative is exactly zero and no
     optimiser can arrive. Both rungs use the same `TURN_RAW` constant.
   - The bound is on the *magnitude* of the generator, so the axis is exactly the
-    direction of the projection. The generators are projected per head, so the
-    heads do not have to agree on one axis.
+    direction of the projection. The block projects the generators per head, so
+    the heads do not have to agree on one axis.
 - **Each solution is a basin that training must find.** Every rung uses the same
   cosine LR schedule (warmup to 3e-2, annealed to 1e-4). Accuracy increases,
   falls, and then jumps to exact during the run. So a run below 100% at the

@@ -6,8 +6,8 @@
 //! **since the last `R`**.
 //!
 //! This is the bottom rung of the `reset-*` ladder. The rotation group is
-//! trivial, so the decay is all that the block has. The one requirement of the
-//! rung is that the decay is **data-dependent**: a reset must erase its past
+//! trivial, so the decay is all that the block has. The rung has one
+//! requirement: the decay is **data-dependent**. A reset must erase its past
 //! fully, and the votes after it must keep equal weights. Two adversarial
 //! families in the eval set test that from both sides (see
 //! [`dataset`](crate::dataset)).
@@ -97,7 +97,7 @@ pub fn launch(app_args: &AppArgs) {
     }
 
     if !app_args.inference && !app_args.training {
-        println!("neither training nor inference were enabled");
+        println!("the flags enable neither training nor inference");
         println!("{}", common::cli::HELP);
     }
 }
