@@ -687,6 +687,7 @@ impl Mamba2 {
     /// continue from `cache`, as in [`Self::forward`]. So a sequence can
     /// continue from the previous call.
     /// A segment can end with padded positions (`pad_bs`) up to the next start.
+    ///
     /// The result for each sequence is that of its own `forward` calls from
     /// `origin`. The returned cache is that of the last segment of each row.
     /// `origin` has no effect without resets. See [`crate::packing`].

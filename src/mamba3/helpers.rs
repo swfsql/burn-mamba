@@ -10,9 +10,11 @@
 //!    ([`build_v_with_mimo`]).
 //! 4. The rank-summed outer product `Σₘ v[m] ⊗ k[m]` that writes the state
 //!    ([`mimo_outer_sum`], SISO-branched).
-//! 5. The lag arithmetic of the trapezoid tap: the shift, the gap transport,
-//!    the decay that a cached slot carries across a call boundary, and the
-//!    positions where the tap of a tap pattern closes.
+//! 5. The lag arithmetic of the trapezoid tap:
+//!    - the shift,
+//!    - the gap transport,
+//!    - the decay that a cached slot carries across a call boundary,
+//!    - the positions where the tap of a tap pattern closes.
 //! 6. [`prefix_sum`]: the blocked inclusive scan that replaces
 //!    `Tensor::cumsum` for every cumulative sum over the write axis, and
 //!    [`sub_periods`], its reduction on the circle.
@@ -84,11 +86,11 @@ pub(crate) fn scan_block(len: usize) -> usize {
 ///
 /// In f16 and bf16, `k·period` would round `period` to the dtype. `2π`
 /// becomes `6.28125`, `1.9·10⁻³` short, so each reduction by `k` turns would
-/// leave `k·1.9·10⁻³`. A carry or a cache that is reduced again and again adds
-/// that up (a whole turn of error over a long scan, `1.9·10⁻³` per turn in a
-/// decode). So a half dtype subtracts `period` in two parts: a head with 8
-/// significant bits, which every float dtype holds exactly, and the small
-/// rest. f32 and f64 subtract `k·period` in one part.
+/// leave `k·1.9·10⁻³`. A carry or a cache that is reduced again and again sums
+/// these errors. The sum is a whole turn of error over a long scan, and
+/// `1.9·10⁻³` per turn in a decode. So a half dtype subtracts `period` in two
+/// parts: a head with 8 significant bits, which every float dtype holds
+/// exactly, and the small rest. f32 and f64 subtract `k·period` in one part.
 ///
 /// The fix removes only the error of the period. The half dtype still rounds
 /// the angle itself at each add, and with a constant increment that rounding
@@ -125,8 +127,8 @@ pub(crate) fn sub_periods<const D: usize>(x: Tensor<D>, k: Tensor<D>, period: f3
 /// It exists because Burn's `cumsum` is **quadratic in the scanned length** on
 /// the cubecl backends. Measured on CUDA over `[2, len, 32, 32]` along `dim 1`:
 /// 0.27 ms at `len = 256`, 143 ms at 4096, ≈4× per doubling. The same scan on
-/// the trailing, contiguous axis is only 2.6× cheaper and still ≈4× per
-/// doubling, so the cause is the scan, not the stride.
+/// the trailing, contiguous axis is only 2.6× cheaper, and it still grows ≈4×
+/// per doubling. So the cause is the scan, not the stride.
 ///
 /// Every other scan in this crate runs over `chunk_len`, `lag` or
 /// `micro_steps`, all bounded. The cumulative rotation angle is the one scan
@@ -138,9 +140,9 @@ pub(crate) fn sub_periods<const D: usize>(x: Tensor<D>, k: Tensor<D>, period: f3
 /// The non-abelian sibling ([`quat_scan`](crate::mamba3::quat_scan)) solves
 /// the same problem with a Hillis–Steele doubling, because it has no
 /// `cumprod` to block with. Doubling also works here, but blocking is faster
-/// at **every** measured length (256 … 8192): 4.8× → 6.6× on CUDA forward,
-/// 2.3× → 3.3× with the backward, and 15× → 41× on the CPU backend. On
-/// bandwidth- and launch-bound hardware, `O(len·log len)` work in
+/// at **every** measured length (256 … 8192). Blocking is 4.8× → 6.6× faster
+/// on CUDA forward, 2.3× → 3.3× with the backward, and 15× → 41× on the CPU
+/// backend. On bandwidth- and launch-bound hardware, `O(len·log len)` work in
 /// `3·⌈log₂ len⌉` full-tensor kernels loses to `O(len·∛len)` in six. So a
 /// runtime knob would have nothing to choose.
 ///
@@ -154,9 +156,9 @@ pub(crate) fn sub_periods<const D: usize>(x: Tensor<D>, k: Tensor<D>, period: f3
 /// then the prefix sum **modulo `p`**, not reduced into one range. What changes
 /// is the size of the partial sums:
 ///
-/// - the block totals are reduced mod `p`,
-/// - their exclusive prefix is this same scan one level up, so it is reduced
-///   too.
+/// - the scan reduces the block totals mod `p`,
+/// - their exclusive prefix is this same scan one level up, so the scan
+///   reduces it too.
 ///
 /// So each output is one in-block prefix plus a carry of at most `p/2`, for any
 /// `len`. With `None`, the carry grows with `len`, and so does its f32
@@ -164,13 +166,13 @@ pub(crate) fn sub_periods<const D: usize>(x: Tensor<D>, k: Tensor<D>, period: f3
 /// detached multiple of `p` ([`sub_periods`]), so the gradient is that of the
 /// plain sum.
 ///
-/// In f16, the rounding is at the size of the partial sums: an in-block prefix
-/// (`block` terms) and a carry-level prefix (up to 16 reduced totals, so up to
-/// `17π`). At the in-block size, the f16 spacing is already `0.03` for
-/// `|θ| ≥ 32`.
+/// In f16, the rounding is at the size of the partial sums. These are an
+/// in-block prefix (`block` terms) and a carry-level prefix (up to 16 reduced
+/// totals, so up to `17π`). At the in-block size, the f16 spacing is already
+/// `0.03` for `|θ| ≥ 32`.
 ///
 /// # Shapes
-/// - `t`    : any rank, scanned along `dim`; `DP1` is `D + 1`
+/// - `t`    : any rank, scanned along `dim` (`DP1` is `D + 1`)
 /// - `init` : `t`'s shape with `1` along `dim` (it broadcasts along it)
 /// - out    : `t`'s shape
 pub fn prefix_sum<const D: usize, const DP1: usize>(
@@ -191,7 +193,7 @@ pub fn prefix_sum<const D: usize, const DP1: usize>(
     let device = t.device();
 
     // Pad up to a whole number of blocks. Zero is the additive identity, so the
-    // padding contributes to no prefix, and it is narrowed off at the end.
+    // padding contributes to no prefix. The `narrow` at the end removes it.
     let nblocks = len.div_ceil(block);
     let pad = nblocks * block - len;
     let t = if pad == 0 {
@@ -214,9 +216,9 @@ pub fn prefix_sum<const D: usize, const DP1: usize>(
     split[dim + 2..].copy_from_slice(&dims[dim + 1..]);
 
     let inner = t.reshape(split).cumsum(dim + 1);
-    // Each block's total is its last in-block prefix; kept at width 1 on that
-    // axis so the carry broadcasts back over the block. `init` joins the carry
-    // here, for free — one add serves both.
+    // Each block's total is its last in-block prefix. It keeps width 1 on that
+    // axis, so the carry broadcasts over the block. `init` joins the carry
+    // here, for free: one add serves both.
     let totals = inner.clone().narrow(dim + 1, block - 1, 1);
     let carry = match period {
         None => {
@@ -259,11 +261,12 @@ pub fn prefix_sum<const D: usize, const DP1: usize>(
 // A chunk has two axes, and `micro_steps` widens only one of them. Each of the
 // `u` micro-steps of a token **writes** to the state, so the source axis is
 // the `chunk_len` of the write axis. The block **reads** the token once, at
-// its last micro-step, so the target axis is `chunk_len / u`: the positions
-// whose `y` survives (a zero gradient multiplies all the others). `read_stride` is that
-// `u`, or `1` where there is no fold (Mamba-2, `micro_steps = 1`), where both
-// helpers below are the identity. `step` also reads this axis: its token is a
-// block of `u` positions with one read position.
+// its last micro-step. So the target axis is `chunk_len / u`: the positions
+// whose `y` survives (a zero gradient multiplies all the others).
+// `read_stride` is that `u`, or `1` where there is no fold (Mamba-2,
+// `micro_steps = 1`), where both helpers below are the identity. `step` also
+// reads this axis: its token is a block of `u` positions with one read
+// position.
 //
 // The alignment keeps this a reshape, not a gather. `chunk_len` is a multiple
 // of `read_stride`
@@ -317,9 +320,9 @@ pub fn read_positions<const D: usize, const DP1: usize>(
 /// whose diagonal `ssd::diag` adds back with `γ`). `1` keeps it (the
 /// double-SSD inclusive mask).
 ///
-/// The mask is `−∞`, not a `0/1` multiply, because it is added *before* the
-/// `exp`. For a source after the row, the decay difference is positive and the
-/// `exp` would overflow.
+/// The mask is `−∞`, not a `0/1` multiply, because the caller adds it *before*
+/// the `exp`. For a source after the row, the decay difference is positive
+/// and the `exp` would overflow.
 ///
 /// # Shapes
 /// - out : `[chunk_len / stride, chunk_len]`
@@ -338,15 +341,15 @@ pub fn read_causal_mask(
 /// The **interior** of the gap of a lag-`lag` tap: `Πᵈ⁼¹..ˡᵃᵍ⁻¹ αₚ₋ᵈ`, or
 /// `None` at `lag = 1` (where the gap has no interior).
 ///
-/// A tap at lag `L` is transported across its own gap, `Πᵈ⁼⁰..ᴸ⁻¹ αₚ₋ᵈ`
-/// (`info/mamba-3/trapezoid-as-integration.md` §9). `β = (1−λ)Δα` already
-/// holds the `d = 0` factor, so this is the rest.
+/// The transport of a tap at lag `L` is the decay of its own gap,
+/// `Πᵈ⁼⁰..ᴸ⁻¹ αₚ₋ᵈ` (`info/mamba-3/trapezoid-as-integration.md` §9).
+/// `β = (1−λ)Δα` already holds the `d = 0` factor, so this is the rest.
 ///
 /// The front is **zero-padded** (in log space), not clamped to what the call
-/// holds. For `p < L`, the missing factors are exactly those that already
-/// scaled the `v` slots of the cache when they were stored (see
-/// [`tail_decay`]). A packed row (`segments`) pads the front of each segment
-/// the same way: the segment reads the cache slots there.
+/// holds. For `p < L`, the missing factors are exactly those that the `v`
+/// slots of the cache already carry (see [`tail_decay`]). A packed row
+/// (`segments`) pads the front of each segment the same way: the segment reads
+/// the cache slots there.
 ///
 /// # Shapes
 /// - `da_bsh` : `[batch, sequence, nheads]` (`Δ·A`, the log-decay)
@@ -378,9 +381,10 @@ pub fn interior_gap_decay(
 /// `Πᵣ₌q₊₁^{S−1} αᵣ` for the last `lag` positions `q` (oldest first). `None` at
 /// `lag = 1`: the one slot *is* the last position, so the product is empty.
 ///
-/// The `x` of the tap FIFO is stored pre-scaled by this, so a lag-`L` tap can
-/// cross a call boundary. The next call supplies the in-call part of the gap
-/// ([`interior_gap_decay`], front-zero-padded), and the slot carries the rest.
+/// The cache holds the `x` of the tap FIFO pre-scaled by this, so a lag-`L`
+/// tap can cross a call boundary. The next call supplies the in-call part of
+/// the gap ([`interior_gap_decay`], front-zero-padded), and the slot carries
+/// the rest.
 ///
 /// # Shapes
 /// - `da_bsh` : `[batch, sequence, nheads]`
@@ -408,10 +412,12 @@ pub fn tail_decay(da_bsh: Tensor<3>, lag: usize) -> Option<Tensor<3>> {
 /// each token (`p ≡ 0 mod u`), where a tap that does not cross tokens closes,
 /// and `1` elsewhere.
 ///
-/// It broadcasts against any `[batch, len, nheads]` stream, in `forward`
-/// (`len` is the write axis, which starts at a token boundary) and in
-/// `step` (`len` is `u`, so the closed position is its first entry). At
-/// `u = 1` every position is a token start, and the mask is all zeros. That
+/// It broadcasts against any `[batch, len, nheads]` stream:
+///
+/// - in `forward`, `len` is the write axis, which starts at a token boundary,
+/// - in `step`, `len` is `u`, so the closed position is its first entry.
+///
+/// At `u = 1` every position is a token start, and the mask is all zeros. That
 /// alone is why
 /// [`TapPattern::HorizontalInToken`](crate::mamba3::tap_pattern::TapPattern::HorizontalInToken)
 /// becomes [`None`](crate::mamba3::tap_pattern::TapPattern::None) there.
@@ -503,8 +509,8 @@ impl TrapezoidCoeffs {
 /// `lambda_raw` is `None` under
 /// [`TapPattern::None`](crate::mamba3::tap_pattern::TapPattern::None), whose block
 /// projects no `λ` channels. The coefficients then have their `λ ≡ 1` values
-/// *by construction*: no mass is formed, and `γ` **is** `Δ` (the same tensor,
-/// not a new `1 · Δ`). `mu_raw` is `None` unless the pattern
+/// *by construction*: the function forms no mass, and `γ` **is** `Δ` (the same
+/// tensor, not a new `1 · Δ`). `mu_raw` is `None` unless the pattern
 /// [`has_two_taps`](crate::mamba3::tap_pattern::TapPattern::has_two_taps).
 /// The same holds one level down: no `μ`, no second mass.
 ///
@@ -540,17 +546,17 @@ pub fn trapezoidal_coefficients(
     let dt = softplus(dt_raw.clone()).clamp(dt_limit.0, dt_limit.1);
     // `A = −max(softplus(·), a_floor) ∈ (−∞, −a_floor]`. Apply the floor to
     // the (positive) softplus *before* the negation. A method call binds
-    // tighter than unary minus, so `-softplus(x).clamp(NEG_INFINITY,
+    // tighter than unary minus. So `-softplus(x).clamp(NEG_INFINITY,
     // -a_floor)` would clamp the positive softplus to the constant `-a_floor`
-    // and give `A ≡ +a_floor`: a *growing* state (`α > 1`) with a dead
+    // and give `A ≡ +a_floor`. That is a *growing* state (`α > 1`) with a dead
     // `dd_a_raw` projection.
     let a = -softplus(dd_a_raw).clamp(a_floor, f64::INFINITY);
     let da = dt.clone() * a;
     let open_mask = |crosses: bool| {
         (!crosses).then(|| tap_open_mask(dt.dims()[1], spec.micro_steps, &dt.device()))
     };
-    // Where the tap at `tap_lag` is closed — read by `λ` below and by the
-    // masses of the gain.
+    // This mask gives the positions where the tap at `tap_lag` is closed. `λ`
+    // below and the masses of the gain read it.
     let tap_open_1s1 = lambda_raw
         .as_ref()
         .and_then(|_| open_mask(spec.pattern.tap_crosses_tokens()));
@@ -595,7 +601,7 @@ pub fn trapezoidal_coefficients(
             };
             (Some(nu), nu_interior, gamma)
         }
-        // λ ≡ 1: the left endpoint is unweighted and the right one takes Δ whole.
+        // λ ≡ 1: the left endpoint has no mass, and the right one takes Δ whole.
         None => (None, None, dt.clone()),
     };
     TrapezoidCoeffs {
@@ -639,10 +645,12 @@ pub fn qk_norm_expand_bias<const D: usize, const DP1: usize>(
 ///
 /// At `mimo_rank == 1` the contracted dimension is 1, so the GEMM is rank-1
 /// and the sum is one outer product. [`mimo_outer_sum_siso`] writes it as a
-/// broadcast multiply instead. The faster form depends on the backend, by a
-/// wide margin at these (tiny, decode-sized) shapes. The broadcast is faster
-/// on CUDA and *much* slower on the portable CPU backends, whose
-/// broadcast-elementwise path is more than 10× slower than their matmul here.
+/// broadcast multiply instead.
+///
+/// The faster form depends on the backend, by a wide margin at these (tiny,
+/// decode-sized) shapes. The broadcast is faster on CUDA and *much* slower on
+/// the portable CPU backends. Their broadcast-elementwise path is more than
+/// 10× slower than their matmul here.
 /// So the per-token flag
 /// [`Mamba3Config::siso_specialization_decode`](crate::mamba3::mamba3::Mamba3Config::siso_specialization_decode)
 /// selects it, not the chunkwise flag (whose trade-off is the opposite). Both
@@ -670,7 +678,8 @@ pub fn mimo_outer_sum_siso(v_bmhp: Tensor<4>, k_bmhr: Tensor<4>) -> Tensor<4> {
 
 /// General MIMO rank-summed outer product: a matmul contracting `mimo_rank`.
 pub fn mimo_outer_sum_mimo(v_bmhp: Tensor<4>, k_bmhr: Tensor<4>) -> Tensor<4> {
-    // v_bmhp [b, m, h, p] -> v_bhpm [b, h, p, m]; k_bmhr [b, m, h, r] -> k_bhmr.
+    // v_bmhp [b, m, h, p] -> v_bhpm [b, h, p, m].
+    // k_bmhr [b, m, h, r] -> k_bhmr.
     let v_bhpm = v_bmhp.permute([0, 2, 3, 1]);
     let k_bhmr = k_bmhr.swap_dims(1, 2);
     v_bhpm.matmul(k_bhmr)

@@ -33,7 +33,7 @@ fn mimo_rank_divides_the_chunk() {
     let opt = |m| Mamba3ScanOptions::optimal_chunk_len(128, 64, m, 1);
     assert_eq!(opt(1), 96);
     assert_eq!(opt(2), 64); // 90/2 = 45 -> 64
-    assert_eq!(opt(4), 32); // 90/4 = 23 -> 32, and the floor takes over
+    assert_eq!(opt(4), 32); // 90/4 = 23 -> 32, and the floor applies
     assert_eq!(opt(8), 32);
 }
 

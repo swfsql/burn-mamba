@@ -180,8 +180,8 @@ impl Mamba3 {
                 origin: origin.unwrap_or_else(fresh),
             }
         });
-        // Each "last samples" cache field is read at the row end of each row,
-        // on the write axis, where one token is `u` positions.
+        // The block reads each "last samples" cache field at the row end of
+        // each row, on the write axis, where one token is `u` positions.
         let row_end = RowEnd::new(
             pad_bs.as_ref(),
             packed.as_ref().map(|p| (&p.segments.reset_bn, p.segments.chunk_len)),
@@ -265,8 +265,8 @@ impl Mamba3 {
         // Per `RotationKind`: nothing (Real1D), the cumulative angle
         // (Complex2D), or the cumulative quaternion(s) (Quaternion4D, Rotor4D).
         // `C` turns at token resolution: it needs the cumulative rotation of
-        // the micro-step where it is read, a stride slice of the rotation of
-        // `B`.
+        // the micro-step where the block reads it, a stride slice of the
+        // rotation of `B`.
         let (b_bsmhr, c_btmhr, new_rotation) = rotate_bc_forward(
             rot_bsa,
             dt_bsh,
@@ -366,7 +366,7 @@ impl Mamba3 {
         san(&y_btmhp);
 
         // ── Gate (or gated norm) and rank aggregation ─────────────────────────
-        // When `out_norm` is set, a per-head gated RMSNorm replaces the SiLU
+        // When `out_norm` is `Some`, a per-head gated RMSNorm replaces the SiLU
         // gate: `RmsNormGated(y, z) = norm(y) * silu(z)`, with the norm over
         // `per_head_dim`.
         let z_bthp = z_bti.reshape([batch, tokens, nheads, per_head_dim]);

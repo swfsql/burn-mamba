@@ -102,9 +102,9 @@ impl Mamba3Cache {
 pub struct TapFifo {
     /// **The `B` of each slot**, after its bias and its rotation.
     ///
-    /// It is stored **as rotated**, at its own position. The relative-rotation
-    /// factoring `C̄ₜᵀB̄ₛ` then rebuilds the transport, so the next call
-    /// applies no rotation again.
+    /// The cache stores it **as rotated**, at its own position. The
+    /// relative-rotation factoring `C̄ₜᵀB̄ₛ` then rebuilds the transport, so
+    /// the next call applies no rotation again.
     ///
     /// Shape: `[batch, tap_slots, mimo_rank, nheads, state_rank]`
     pub b_bumhr: Tensor<5>,

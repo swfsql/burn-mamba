@@ -13,8 +13,8 @@ use burn::module::Param;
 use burn::tensor::{Distribution, FloatDType};
 use burn_stack::utils::test_helpers::{dtype_tol, test_device};
 
-/// `Σₘ v[m] ⊗ k[m]` computed elementwise from host data — the definition the
-/// tensor form has to reproduce.
+/// `Σₘ v[m] ⊗ k[m]`, computed elementwise from host data: the definition that
+/// the tensor form has to reproduce.
 fn reference(v: &[f32], k: &[f32], dims: [usize; 4]) -> Vec<f32> {
     let [batch, mimo_rank, nheads, per_head_dim] = dims;
     let state_rank = k.len() / (batch * mimo_rank * nheads);
@@ -42,7 +42,8 @@ fn mimo_outer_sum_matches_einsum() {
     let device = test_device();
     let (batch, nheads, per_head_dim, state_rank) = (2, 3, 4, 5);
 
-    // `1` is the SISO shape the block actually runs at; `3` exercises the sum.
+    // `1` is the SISO shape that the block actually runs at. `3` exercises the
+    // sum.
     for mimo_rank in [1, 3] {
         let v = Tensor::<4>::random(
             [batch, mimo_rank, nheads, per_head_dim],
@@ -81,9 +82,9 @@ fn mimo_outer_sum_matches_einsum() {
 // ---------------------------------------------------------------------------
 
 /// `out[i] = Σ_{j ≤ i} data[j]` along `dim`, summed **sequentially** on the
-/// host. This is the definition [`prefix_sum`] has to reproduce, and it owes
-/// nothing to `Tensor::cumsum` — so it keeps holding if the op `prefix_sum`
-/// replaced is ever dropped, deprecated, or changed.
+/// host. This is the definition that [`prefix_sum`] has to reproduce. It does
+/// not depend on `Tensor::cumsum`, so it stays valid if Burn ever drops,
+/// deprecates or changes that op.
 ///
 /// A row-major buffer collapses to `[outer, len, inner]` around the scanned
 /// axis, which is all the indexing needs.
@@ -115,21 +116,24 @@ fn reference_prefix_sum(data: &[f32], dims: &[usize], dim: usize) -> (Vec<f32>, 
 /// How far a prefix may drift between two summation orders, given its `peak`:
 /// the largest `|partial sum|` along the axis up to it.
 ///
-/// It has to **scale with the magnitude**: partial sums of standard normals
-/// random-walk to `~√len`, and f32 carries ~1e-7 relative, so any constant bound
-/// is a length away from flaking (`len = 2048` reaches ±60, where the observed
-/// drift is ~1e-4). The scale is the peak, not the prefix itself. A walk can
-/// come back near `0` after ±45, and the partial sums on its way (the block
-/// carries of the scan) are rounded at ±45: the f16 spacing there is `0.03`. A
-/// real scan defect is off by whole summands — `O(1)`, orders above either
-/// term here — so nothing is given up by scaling.
+/// It has to **scale with the magnitude**. Partial sums of standard normals
+/// random-walk to `~√len`, and f32 carries ~1e-7 relative. So any constant
+/// bound is a length away from flaking: `len = 2048` reaches ±60, where the
+/// observed drift is ~1e-4.
+///
+/// The scale is the peak, not the prefix itself. A walk can return to a value
+/// near `0` after ±45. The rounding of the partial sums on its way (the block
+/// carries of the scan) is at ±45. The f16 spacing there is `0.03`.
+///
+/// A real scan defect is off by whole summands: `O(1)`, orders above either
+/// term here. So the scaling loses nothing.
 fn prefix_tol(peak: f32) -> f32 {
     dtype_tol(1e-4) + dtype_tol(1e-5) * peak.abs()
 }
 
-/// One `(shape, dim)` case, run both without a carry-in and with one — the
-/// carry only shifts every output by a constant, so the same host reference
-/// serves for both once it is added back.
+/// One `(shape, dim)` case, run both without a carry-in and with one. The
+/// carry only shifts every output by a constant. So the same host reference
+/// serves for both, after the check adds the carry to it.
 fn check_prefix_sum<const D: usize, const DP1: usize>(dims: [usize; D], dim: usize) {
     let device = test_device();
     let t = Tensor::<D>::random(dims, Distribution::Normal(0.0, 1.0), &device);
@@ -206,11 +210,14 @@ fn the_padding_takes_the_dtype_of_the_input() {
 /// [`prefix_sum`] **is** the inclusive prefix sum, at every axis position, with
 /// and without a carry-in.
 ///
-/// The lengths straddle the two regimes: `≤ 16` takes the direct scan, above it
-/// the blocked one, and `17`/`100`/`999` are the cases whose last block is
-/// **partial** — the zero padding and the final `narrow` are where an off-by-one
-/// would live. `1` is the degenerate no-op; `2048` is the order the write axis
-/// reaches at `micro_steps = 8`, the length this function exists for.
+/// The lengths cover the two regimes and three special cases:
+///
+/// - `≤ 16` takes the direct scan, and a longer length takes the blocked one.
+/// - `17`/`100`/`999` are the cases whose last block is **partial**. An
+///   off-by-one would be in the zero padding or in the final `narrow`.
+/// - `1` is the degenerate no-op.
+/// - `2048` is the order that the write axis reaches at `micro_steps = 8`, the
+///   length that this function exists for.
 #[test]
 fn prefix_sum_matches_the_definition() {
     for len in [17, 100, 999] {
@@ -226,11 +233,11 @@ fn prefix_sum_matches_the_definition() {
     check_prefix_sum::<3, 4>([2, 2048, 3], 1);
 }
 
-/// Cross-check against the op [`prefix_sum`] replaced.
+/// Cross-check against the op that [`prefix_sum`] replaces.
 ///
 /// The two associate their additions differently, so they agree to rounding,
-/// not bit-for-bit. **This is the only test here that depends on `cumsum`; it is
-/// the one to delete if that op goes away.**
+/// not bit-for-bit. **This is the only test here that depends on `cumsum`. It
+/// is the one to delete if Burn drops that op.**
 #[test]
 fn prefix_sum_matches_cumsum() {
     let device = test_device();
@@ -249,12 +256,14 @@ fn prefix_sum_matches_cumsum() {
 
 /// The backward, against the definition: `∂/∂t[j] Σᵢ w[i]·out[i] = Σ_{i ≥ j} w[i]`.
 ///
-/// The cumulative rotation angle is trained through this scan, so its gradient
-/// is as load-bearing as its value — and the blocked form's backward runs
-/// through a *different* graph from a single scan's (a reshape, two short
-/// scans and a broadcast), not merely a re-association. `len = 100` is a
-/// partial last block. The scan on the circle has the same gradient, because
-/// its reductions subtract detached multiples of the period.
+/// In training, the gradient of the cumulative rotation angle goes through
+/// this scan. So the gradient is as load-bearing as the value. The backward of
+/// the blocked form also runs through a *different* graph from that of a
+/// single scan. The graph of the blocked form has a reshape, two short scans
+/// and a broadcast. The difference is more than a re-association.
+///
+/// `len = 100` is a partial last block. The scan on the circle has the same
+/// gradient, because its reductions subtract detached multiples of the period.
 #[test]
 fn prefix_sum_gradient_matches_the_definition() {
     let device = test_device();

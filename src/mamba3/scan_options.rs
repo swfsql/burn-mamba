@@ -124,9 +124,9 @@ impl Mamba3ScanOptions {
     }
 
     /// The chunk length of these scan options, or [`Self::optimal_chunk_len`]
-    /// for the dimensions of `block` when unset. In both cases the length is
-    /// rounded **up to a multiple of `micro_steps`**, so a chunk is a whole
-    /// number of tokens.
+    /// for the dimensions of `block` when unset. In both cases the function
+    /// rounds the length **up to a multiple of `micro_steps`**, so a chunk is a
+    /// whole number of tokens.
     ///
     /// With that rounding, the read axis is a plain reshape. With
     /// `chunk_len = T·u`, a chunk covers write positions `[cL, (c+1)L)`, that

@@ -1,8 +1,9 @@
 //! # The tap pattern of the trapezoid — which earlier sample the `β` tap reads
 //!
-//! The write of Mamba-3 is a two-tap filter on the samples: the current
-//! sample at `γₜ = λₜΔₜ`, and an earlier one at `βₜ = (1−λₜ)Δₜαₜ`, transported
-//! across the gap between them (`helpers::trapezoidal_coefficients`). At
+//! The write of Mamba-3 is a two-tap filter on the samples. It reads the
+//! current sample at `γₜ = λₜΔₜ`, and an earlier one at `βₜ = (1−λₜ)Δₜαₜ`,
+//! transported across the gap between them
+//! (`helpers::trapezoidal_coefficients`). At
 //! [`micro_steps`](crate::mamba3::mamba3::Mamba3Config::micro_steps) `= 1`,
 //! "earlier" can only mean the previous token, so there is no choice. At
 //! `u > 1`, the write axis has `u` positions per token
@@ -10,19 +11,24 @@
 //!
 //! [`TapPattern`] names the members of that lattice.
 //! `info/mamba-3/trapezoid-as-integration.md` §§8–9 derives it, prices each
-//! member, and proves the invariant that all members keep: each tap is
-//! transported across *its own* gap, which keeps the single-SSD `Δ̃` collapse.
+//! member, and proves the invariant that all members keep. The invariant is
+//! that each tap is transported across *its own* gap, which keeps the
+//! single-SSD `Δ̃` collapse.
 //! This module cites the note and does not restate it.
 //!
 //! ## One rule for every member
 //!
 //! A pattern says which earlier samples are **admissible** at each write
-//! position. Their *weight* is not a second decision. Two learned per-(head,
-//! micro-step) scalars split the mass `Δₚ` of the micro-step. A tap that is not
-//! admissible gives its mass back one level. The lag-1 tap of a two-tap
-//! member gives it to the lag-`u` tap. The tap at
-//! [`tap_lag`](TapPattern::tap_lag) gives it to `γ`. Under
-//! [`HorizontalInToken`](TapPattern::HorizontalInToken), that tap is a lag-1 tap.
+//! position. Their *mass* is not a second decision. Two learned per-(head,
+//! micro-step) scalars split the mass `Δₚ` of the micro-step.
+//!
+//! A tap that is not admissible returns its mass one level up:
+//!
+//! - the lag-1 tap of a two-tap member returns it to the lag-`u` tap,
+//! - the tap at [`tap_lag`](TapPattern::tap_lag) returns it to `γ`. Under
+//!   [`HorizontalInToken`](TapPattern::HorizontalInToken), that tap is a
+//!   lag-1 tap.
+//!
 //! The masses are:
 //!
 //! ```text
@@ -49,8 +55,8 @@
 //! - [`VerticalPlusHorizontalCarryOver`](TapPattern::VerticalPlusHorizontalCarryOver)
 //!   *contains* both implemented single-tap patterns, at `μ ≡ 1` and `μ ≡ 0`.
 //!
-//! If a closed tap dropped its mass instead of giving it back, both statements
-//! would be false, and the write would silently be weaker at `1/u` of the
+//! If a closed tap dropped its mass instead of returning it, both statements
+//! would be false. The write would then silently be weaker at `1/u` of the
 //! positions.
 
 /// Which earlier sample(s) the `β` tap of the trapezoid reads.
@@ -95,7 +101,7 @@ pub enum TapPattern {
     ///
     /// - the in-projection has no `λ` channels (so Muon sees no `λ`
     ///   sub-projection),
-    /// - no `β` is formed, and the tap FIFO of each cache is `None`,
+    /// - the block forms no `β`, and the tap FIFO of each cache is `None`,
     /// - `forward` makes **one** SSD call, and `step` has no second outer
     ///   product.
     ///
@@ -168,7 +174,7 @@ pub enum TapPattern {
     /// limit that `info/mamba-3/trapezoid-as-integration.md` §8 shows learning
     /// can reach under [`HorizontalCarryOver`](Self::HorizontalCarryOver). So
     /// this member is a constrained **submodel** of that pattern, not a rival.
-    /// That is also why the mass goes back instead of being dropped.
+    /// That is also why the tap returns its mass instead of dropping it.
     ///
     /// Caches like [`HorizontalCarryOver`](Self::HorizontalCarryOver): the same
     /// one-slot lag-1 buffer, ignored at the first micro-step of each token.
@@ -243,7 +249,7 @@ pub enum TapPattern {
 
 impl TapPattern {
     /// Whether the pattern has a second (`β`) tap. `false` only for
-    /// [`None`](Self::None). Every site branches on this predicate: no tap
+    /// [`None`](Self::None). Every site branches on this predicate. No tap
     /// means no `λ` channels, no `β` coefficient, no tap FIFO in the cache,
     /// and no previous-sample term in the recurrence.
     pub fn has_beta_tap(self) -> bool {
@@ -257,9 +263,10 @@ impl TapPattern {
     /// This is the one knob for the single-tap patterns:
     /// [`HorizontalCarryOver`](Self::HorizontalCarryOver) is `lag = 1` and
     /// [`Vertical`](Self::Vertical) is `lag = u`. Every site that touches the
-    /// tap (the double-SSD shift, the single-SSD key scale, the FIFO depth of
-    /// `step`, the cache) reads it instead of branching on the pattern. At
-    /// `u = 1` both return `1`, which is why the two are equal there.
+    /// tap reads it instead of branching on the pattern. These sites are the
+    /// double-SSD shift, the single-SSD key scale, the FIFO depth of `step` and
+    /// the cache. At `u = 1` both return `1`, which is why the two are equal
+    /// there.
     ///
     /// The tap must be transported across *its own* gap, so a lag-`L` tap
     /// carries `Πᵈ⁼⁰..ᴸ⁻¹ αₚ₋ᵈ`, not `αₚ`.
@@ -279,9 +286,9 @@ impl TapPattern {
     /// the lag-`u` tap at [`tap_lag`](Self::tap_lag). True for the two-tap
     /// members, and only when the two lags are different.
     ///
-    /// At `u = 1` the lags are equal: both taps read the same sample, so the
-    /// split is a decomposition of one coefficient, and the pair **folds** back
-    /// into one tap. The fold is structural, as the missing `λ` of
+    /// At `u = 1` the lags are equal, and both taps read the same sample. So
+    /// the split decomposes one coefficient, and the pair **folds** into one
+    /// tap. The fold is structural, as the missing `λ` of
     /// [`None`](Self::None) is: no `μ` channels in the in-projection, no `μ`
     /// sub-projection for Muon, one shift, one SSD pass. Thus a two-tap member
     /// at `u = 1` *is* [`HorizontalCarryOver`](Self::HorizontalCarryOver), not
@@ -335,9 +342,9 @@ impl TapPattern {
     }
 }
 
-/// Everything the discretisation needs from the block: the tap pattern, the
-/// micro-steps (the period of the token boundaries, where a tap can close), and
-/// the two clamps on the coefficients.
+/// Everything that the discretisation needs from the block: the tap pattern,
+/// the micro-steps and the two clamps on the coefficients. The micro-steps are
+/// the period of the token boundaries, where a tap can close.
 ///
 /// [`Mamba3::tap_pattern_spec`](crate::mamba3::mamba3::Mamba3::tap_pattern_spec)
 /// makes it, and `helpers::trapezoidal_coefficients` takes it. So `forward`

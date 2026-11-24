@@ -254,7 +254,7 @@ fn none_equals_lambda_saturated_at_one() {
     let none = config.clone().with_tap_pattern(TapPattern::None).init(&device);
     let mut carry = config.clone().init(&device);
 
-    // Everything but the in-projection is shared outright.
+    // The test shares everything but the in-projection outright.
     carry.dt_bias_h = none.dt_bias_h.clone();
     carry.d_h = none.d_h.clone();
     carry.b_norm = none.b_norm.clone();
@@ -468,7 +468,7 @@ fn vertical_forward_continues_a_stepped_cache() {
     }
 }
 
-/// Gradients too, through the default recompute backward — the band
+/// The gradients match too, through the default recompute backward. The band
 /// correction and the seed are on the autodiff path like everything else.
 #[test]
 fn vertical_grads_match_step() {
@@ -774,7 +774,7 @@ fn append_dead_sub_projections(
     )));
 }
 
-/// Everything but the in-projection, shared outright — the rest of a block
+/// Shares everything but the in-projection outright. The rest of a block
 /// is identical across patterns, so only the projection has to be built.
 fn share_weights_except_in_proj(from: &Mamba3, into: &mut Mamba3) {
     into.out_proj = from.out_proj.clone();

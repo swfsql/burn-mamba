@@ -319,8 +319,8 @@ fn silu(v: f64) -> f64 {
 /// ```
 ///
 /// A SISO block has no `mimo_*` weights, and each is `1`. The `ε` of the RMS is
-/// about `1e-7`, against `mean(y²) ≈ 1`, so the loop omits it. `x` is read
-/// at the last micro-step of each token.
+/// about `1e-7`, against `mean(y²) ≈ 1`, so the loop omits it. The loop
+/// reads `x` at the last micro-step of each token.
 fn assert_tail(mimo_rank: usize, out_norm: bool, u: usize) {
     let label = format!("mimo_rank = {mimo_rank}, out_norm = {out_norm}, u = {u}");
     let device = test_device();
