@@ -21,10 +21,9 @@
 //!   distribution of the first character). It prefills an optional prompt with
 //!   chunkwise `forward`s, then samples one character per `step`.
 //!
-//! The corpus knobs, the scan options, the training-step profiler and the VRAM
-//! cap ([`cli`]) go after the trailing `--`. The example writes the corpus knobs
-//! into the `training_config.json` of the artifacts, so a resumed run keeps
-//! them:
+//! The example's own flags ([`cli`]) go after the trailing `--`. The example
+//! writes the corpus knobs into the `training_config.json` of the artifacts, so
+//! a resumed run keeps them:
 //!
 //! ```bash
 //! # train and then sample (downloads the 673MB parquet once, if not cached yet)

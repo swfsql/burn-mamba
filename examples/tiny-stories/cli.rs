@@ -1,6 +1,14 @@
-//! The example's own flags, forwarded after the trailing `--`: the corpus knobs
-//! (`Overrides`, shared with `burn-deltanet`), the scan options, the
-//! training-step profiler and the VRAM cap.
+//! The example's own flags, forwarded after the trailing `--`:
+//! - the corpus knobs (`Overrides`, shared with `burn-deltanet`),
+//! - the scan options,
+//! - `--pack-align`,
+//! - the flags of a training step (`TrainingStepFlags`: the profiler, the VRAM
+//!   cap, the gradient checkpointing),
+//! - the prompted continuations of inference (`--prompt`, `--continuations`,
+//!   `--temperature`),
+//! - the context-use measure and the long-stories measure,
+//! - the contrast: the `--contrast*` knobs, `--contrast-eval` and
+//!   `--contrast-profile`.
 
 use crate::common::cli::{AppArgs, TrainingStepFlags, finish_extra};
 use crate::common::{parse_pathway, parse_ssd_chunk_len, parse_ssd_path};

@@ -4,8 +4,10 @@
 //!   cap, the gradient checkpointing),
 //! - the scan options,
 //! - the shape of a new model,
-//! - the sampling,
-//! - the context-use measure.
+//! - the log of the chunk ratios during training (`--chunk-log`),
+//! - the sampling (`--step-mode`, `--show-chunks` and the prompted
+//!   continuations),
+//! - the context-use measure and the long-stories measure.
 
 use crate::common::cli::{AppArgs, TrainingStepFlags, finish_extra};
 use crate::common::context::BATCH;

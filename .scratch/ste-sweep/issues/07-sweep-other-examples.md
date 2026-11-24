@@ -291,3 +291,17 @@ one after the other. This change holds the fixes of their findings:
   lists the kind of passive that stays, the second doc that disagrees
   (`hnet-stories/cli.rs`), the near copy of `mnist-ae/model.rs:331` and the
   term "small validation check".
+
+### The decisions of the user
+
+1. Docs that disagree, items 1 and 2: the docs change, so that they agree
+   with the `Cli` struct of each example. The code stays.
+   - The header of `tiny-stories/cli.rs` lists each group of the `Cli`
+     struct. It adds `--pack-align`, the gradient checkpointing, the prompted
+     continuations, the two measures and the contrast.
+   - `tiny-stories/main.rs:24` says "The example's own flags ([`cli`]) go
+     after the trailing `--`", the words of `hnet-stories/main.rs:22`. So only
+     `cli.rs` holds the list.
+   - The header of `hnet-stories/cli.rs` adds `--chunk-log` and the
+     long-stories measure. The sampling names its flags: `--step-mode`,
+     `--show-chunks` and the prompted continuations.
