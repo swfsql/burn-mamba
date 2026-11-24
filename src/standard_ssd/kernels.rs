@@ -436,9 +436,9 @@ fn keep_at<B: Backend>(keep_bn: &F<B, 2>, i_chunk: usize, [nheads, per_head_dim,
 /// Forward, with `sᵢ` for `chunk_input_stateᵢ`: `sᵢ₊₁ = decayᵢ·sᵢ + intraᵢ`.
 /// Reverse, seeded by `d_final`: `d_intraᵢ = d_sᵢ₊₁` and
 /// `d_sᵢ = decayᵢ·d_sᵢ₊₁ + d_chunk_input_stateᵢ`. The walk ends on `d_initial`.
-/// `d_decayᵢ = d_sᵢ₊₁·sᵢ` needs no walk. `decay` is one scalar per `(b, h, n)`,
-/// so it comes out of the `(p, r)` sum, and the whole stream is one batched
-/// product.
+/// `d_decayᵢ = d_sᵢ₊₁·sᵢ` needs no walk. `decay` is one scalar per `(b, h, n)`.
+/// So `d_decay` is the `(p, r)` sum of `d_sᵢ₊₁·sᵢ`, and the whole stream is
+/// one batched product.
 ///
 /// Under a reset (`keep_bn`), `sᵢ = keepᵢ · (the state before chunk i) +
 /// (1 − keepᵢ) · startᵢ`, where `startᵢ` is the start state that chunk `i`
@@ -930,8 +930,9 @@ pub(crate) fn k5_ssd_chunk_scan_backward<B: Backend>(
         let d_diff_bnhTMLM = d_decay_bnhTMLM * decay_bnhTMLM;
 
         // `diff` is target − source. The target term sums `d_diff` over the
-        // sources LMₛ, and it is scattered onto the write axis. The source term
-        // sums `d_diff` over the targets TMₜ, and it is on that axis.
+        // sources LMₛ, and `scatter_fused_read_d_da` scatters it onto the write
+        // axis. The source term sums `d_diff` over the targets TMₜ, and it is
+        // on that axis.
         let d_da_target_bnhTM: F<B, 4> = d_diff_bnhTMLM
             .clone()
             .sum_dim(4) // d_diff_bnhTMₜ1

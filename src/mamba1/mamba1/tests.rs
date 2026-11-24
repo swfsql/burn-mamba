@@ -177,9 +177,10 @@ fn param_input(input: &Tensor<3>) -> Param<Tensor<3>> {
 }
 
 /// Build the initial cache (conv window + state) passed to both
-/// `forward` and the `step` unrolling. With `random = false` the cache is
-/// zero (the standard fresh start); with `random = true` it holds random
-/// values, exercising forward/step parity from an arbitrary initial state.
+/// `forward` and the `step` unrolling. With `random = false`, the cache is
+/// zero (the standard fresh start). With `random = true`, it holds random
+/// values. This exercises the forward/step parity from an arbitrary initial
+/// state.
 fn build_init_cache(cfg: &Mamba1Config, batch: usize, random: bool) -> Mamba1Cache {
     let device = test_device();
     let d_inner = cfg.d_inner();
@@ -220,9 +221,9 @@ fn run_step_matches_forward(cfg: Mamba1Config, random_init: bool) {
     let model = cfg.init(&device.clone().autodiff());
 
     let batch = 2;
-    // seq_len >= d_conv so the final conv window is fully determined by the
-    // sequence (the initial window has been flushed out), keeping the
-    // window comparison well-defined for both zero and random init.
+    // seq_len >= d_conv, so the sequence alone sets the final conv window: no
+    // column of the initial window stays in it. So the window comparison is
+    // well-defined for both zero and random init.
     let seq_len = 5;
     let d_model = cfg.d_model;
     let d_inner = cfg.d_inner();
@@ -377,13 +378,13 @@ fn step_matches_forward_custom_dt_rank_random_init() {
 
 /// One longer `forward` over the whole sequence equals two consecutive
 /// `forward` calls (prefix then suffix) that thread the returned cache (conv
-/// window + state) between them — outputs, final cache, and parameter
+/// window + state) between them. Outputs, final cache, and parameter
 /// gradients all agree. The initial cache is random, so the chaining starts
 /// from a non-trivial state.
 ///
 /// `step_matches_forward_random_init` already subsumes this (parity from an
 /// arbitrary initial state implies a `forward`-produced cache continues
-/// correctly); this is a direct, explicit check.
+/// correctly). This test is a direct, explicit check.
 fn run_split_matches_full(cfg: Mamba1Config) {
     let device = test_device();
     let model = cfg.init(&device.clone().autodiff());

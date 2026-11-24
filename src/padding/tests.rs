@@ -1,8 +1,11 @@
-//! A right-padded call is each of its rows run alone: the outputs of a row's
-//! real tokens, every field of its returned cache, and every parameter's
-//! gradient of a loss over both. Each call continues an unpadded one, so the
-//! cache it reads is not fresh — and a row with no real token at all must hand
-//! that cache back untouched.
+//! A right-padded call is each of its rows run alone. This holds for:
+//!
+//! - the outputs of a row's real tokens,
+//! - every field of its returned cache,
+//! - every parameter's gradient of a loss over both.
+//!
+//! Each call continues an unpadded one, so the cache that it reads is not
+//! fresh. A row with no real token at all must return that cache untouched.
 
 #[cfg(feature = "mamba1")]
 use crate::mamba1::prelude::*;
@@ -94,7 +97,7 @@ fn assert_grads_close(padded: Vec<Option<Tensor<1>>>, alone: Vec<Option<Tensor<1
 }
 
 /// Run a padded call (after an unpadded prefix one) and each row's own
-/// calls, and compare each row's outputs, cache fields (`fields`) and the
+/// calls. Compare each row's outputs, cache fields (`fields`) and the
 /// gradients of a loss over both.
 fn check_each_row_alone<C, M: Module>(
     module: &M,
@@ -226,11 +229,12 @@ fn mamba3(
         .with_tropical(tropical)
 }
 
-/// Both pathways over a spread of the block's dials: every tap pattern family
-/// (none, lag 1, lag `u`, two taps, a lag-1 tap that closes at token
-/// boundaries), every rotation kind,
-/// `u > 1`, MIMO, both positive systems, and chunks short enough that the real
-/// tokens span several.
+/// Both pathways over a spread of the block's dials:
+///
+/// - every tap pattern family (none, lag 1, lag `u`, two taps, a lag-1 tap that
+///   closes at token boundaries),
+/// - every rotation kind, `u > 1`, MIMO, and both positive systems,
+/// - chunks short enough that the real tokens span several.
 #[cfg(feature = "mamba3")]
 #[test]
 fn padded_mamba3_is_each_row_alone() {
@@ -264,10 +268,11 @@ fn padded_mamba3_is_each_row_alone() {
     }
 }
 
-/// Through a network whose stack closes every sequence with an `End` latent: a
-/// real block, run on each row's positions gathered into that row's order,
-/// sees the `End` right after the row's own last token — its tap reading that
-/// token, not the padding the batch-wide `End` follows.
+/// The test runs a network whose stack closes every sequence with an `End`
+/// latent. A real block in it runs on each row's positions, gathered into
+/// that row's order. The block sees the `End` right after the row's own last
+/// token. Its tap reads that token, not the padding that the batch-wide `End`
+/// follows.
 #[cfg(feature = "mamba3")]
 #[test]
 fn padded_mamba3_network_closes_each_row_at_its_own_end() {
@@ -304,8 +309,8 @@ fn padded_mamba3_network_closes_each_row_at_its_own_end() {
         None,
         Some(pad_mask(&lens, padded, &device)),
     );
-    // Positions: `Start`, the tokens, then `End` — after the padding
-    // batch-wide.
+    // Positions: `Start`, the tokens, then `End`. Batch-wide, `End` comes
+    // after the padding.
     assert_eq!(y.dims()[1], padded + 2);
     for (b, &len) in lens.iter().enumerate() {
         let (y_b, caches_b) =

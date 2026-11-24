@@ -228,8 +228,8 @@ impl Mamba1Config {
         };
 
         let conv1d = Conv1dConfig::new(d_inner, d_inner, self.conv_kernel)
-            // Causal left-padding is applied manually in `forward` (from the
-            // conv cache window), so the convolution itself uses no padding.
+            // `forward` applies the causal left-padding by hand (from the conv
+            // cache window), so the convolution itself uses no padding.
             .with_padding(PaddingConfig1d::Valid)
             .with_groups(d_inner)
             .with_bias(self.has_conv_bias)

@@ -6,8 +6,9 @@ use burn::prelude::*;
 use burn::tensor::Distribution;
 use burn_stack::utils::test_helpers::{dtype_tol, test_device};
 
-/// The primitive backend the high-level `Tensor` is pinned to; `combined_backward`
-/// runs generically over it here (dispatching to the feature-selected backend).
+/// The primitive backend that the high-level `Tensor` is pinned to. Here,
+/// `combined_backward` runs generically over it, and `Dispatch` dispatches to
+/// the feature-selected backend.
 type B = Dispatch;
 
 /// Oracle for the local (BLUE+ORANGE) part of `d_da_cumsum`.
@@ -23,8 +24,8 @@ type B = Dispatch;
 /// where `out_x = y − D·x` (output before D-skip). The two forms agree because
 /// `d_dt_orange·dt = Σ_p d_v_orange·x·dt`.
 ///
-/// This is a stronger correctness check than the autodiff comparison:
-/// both sides are computed via independent analytical paths and should
+/// This is a stronger correctness check than the autodiff comparison. Each
+/// side comes from an independent analytical computation, and the two should
 /// match to fp32 precision on small inputs. The identity is numerically
 /// unstable for large inputs (catastrophic cancellation between the two
 /// sums).
@@ -152,6 +153,6 @@ fn oracle_da_local_matches_einsum_minus_ddt_dt() {
         .into_scalar::<f32>();
     assert!(
         diff < dtype_tol(1e-3),
-        "d_da_local oracle identity violated; max abs diff = {diff}",
+        "the oracle identity of d_da_local fails: max abs diff = {diff}",
     );
 }

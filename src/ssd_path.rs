@@ -27,7 +27,7 @@ pub enum SsdPath {
     ///
     /// - Mamba-2:
     ///   [`Mamba2SsdInput::ssd_minimal`](crate::mamba2::ssd::Mamba2SsdInput::ssd_minimal).
-    ///   It is based on `/mamba_ssm/modules/ssd_minimal.py` in the
+    ///   It follows `/mamba_ssm/modules/ssd_minimal.py` in the
     ///   `state-spaces/mamba` GitHub reference.
     /// - Mamba-3:
     ///   [`Mamba3DoubleSsdInput::double_ssd_minimal`](crate::mamba3::double_ssd::ssd::Mamba3DoubleSsdInput::double_ssd_minimal)
@@ -44,7 +44,7 @@ pub enum SsdPath {
     ///
     /// - Mamba-2:
     ///   [`Mamba2SsdInput::ssd_serial`](crate::mamba2::ssd::Mamba2SsdInput::ssd_serial).
-    ///   It is based on 5 kernels under `/mamba_ssm/ops/triton/` in the
+    ///   It follows 5 kernels under `/mamba_ssm/ops/triton/` in the
     ///   `state-spaces/mamba` GitHub reference:
     ///   - `ssd_chunk_state.py` (K1, K3).
     ///   - `ssd_bmm.py` (K2).

@@ -75,7 +75,9 @@ pub fn chunk_tokens(chunk_len: usize, micro_steps: usize) -> usize {
 /// four at **full** width. So **half** stays under the peak that the forward
 /// already reaches, and the walk is two iterations at any chunk count. The
 /// bound is a ratio of live tensors, so it needs no dimension and no absolute
-/// budget. In both cases, the SSD path carries no intermediates across the
+/// budget.
+///
+/// In both cases, the SSD path carries no intermediates across the
 /// forward/backward boundary. When this pass runs, the forward intermediates
 /// are already free.
 pub fn backward_chunk_group(nchunks: usize) -> usize {

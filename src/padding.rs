@@ -1,18 +1,18 @@
 //! Right padding inside a block: the part of the
 //! [`burn_stack::utils::padding`] contract that a family keeps.
 //!
-//! A padded position is absent: the outputs of the real tokens and the
+//! A padded position is absent. The outputs of the real tokens and the
 //! returned cache are those of the real tokens of each row, run alone. Every
 //! family meets this contract in the same two ways:
 //!
 //! - **The state** goes through a padded position unchanged. The family zeroes
 //!   the decay and the writes of that micro-step where the discretisation forms
-//!   them (`Δ = 0` gives `Ā = 1, B̄ = 0`, the same transparency that the
-//!   internal chunk padding uses). With right padding, no real token reads a
+//!   them. `Δ = 0` gives `Ā = 1, B̄ = 0`, the same transparency that the
+//!   internal chunk padding uses. With right padding, no real token reads a
 //!   padded one, so nothing else has to know.
-//! - **Every cache field that holds the last few samples of a row** (a conv
-//!   window, a tap FIFO, the carry of a scan) is read at the row end of each
-//!   row ([`crate::row_end`]).
+//! - **Every cache field that holds the last few samples of a row** reads them
+//!   at the row end of each row ([`crate::row_end`]). These fields are a conv
+//!   window, a tap FIFO and the carry of a scan.
 
 use burn::prelude::*;
 

@@ -5,13 +5,14 @@ use burn_stack::utils::test_helpers::{dtype_tol, test_device};
 
 type Device = burn::prelude::Device;
 
-/// Build a randomised set of tensors on the inner backend (no grad
-/// tracking yet — `Param::from_tensor` is applied per-path below to
-/// give each path its own fresh autodiff graph).
+/// Build a randomised set of tensors on the inner backend, with no grad
+/// tracking yet. The code below applies `Param::from_tensor` for each path,
+/// so that each path gets its own fresh autodiff graph.
 ///
-/// `dt` is drawn from a positive distribution (softplus-like) and `a_decay`
-/// from a negative range so that the implied per-token decay `exp(dt·a)`
-/// stays in `(0, 1]`, matching how the upstream block produces them.
+/// The function draws `dt` from a positive distribution (softplus-like), and
+/// `a_decay` from a negative range. The two ranges keep the implied per-token
+/// decay `exp(dt·a)` in `(0, 1]`. This matches how the upstream block
+/// produces `dt` and `a_decay`.
 #[allow(clippy::too_many_arguments)]
 fn random_input(
     batch: usize,
@@ -69,8 +70,9 @@ fn random_input(
 }
 
 /// Inputs wrapped as `Param`s so each tensor becomes an autodiff leaf
-/// with `require_grad`. One `Inputs` is built per path, sharing the same
-/// underlying inner values but its own autodiff graph.
+/// with `require_grad`. The test builds one `Inputs` for each path. The
+/// `Inputs` share the same underlying inner values, but each has its own
+/// autodiff graph.
 struct Inputs {
     x: Param<Tensor<5>>,
     dt: Param<Tensor<4>>,
@@ -135,8 +137,8 @@ struct PathRun {
 
 /// Combine `y` and `final_state` into a single deterministic scalar loss
 /// using fixed (non-tracked) random "head" tensors. The two heads differ so
-/// that gradients for the y-branch and the state-branch are independent
-/// (a mistake in either path shows up in the parameter grads).
+/// that the gradients of the y-branch and of the state-branch are
+/// independent. A mistake in either path is visible in the parameter grads.
 fn loss_from_outputs(
     y_bnlhp: Tensor<5>,
     final_state_bhpr: Tensor<4>,
@@ -206,7 +208,7 @@ fn run_minimal_matches_serial(
     );
 
     // Fixed (non-tracked) "downstream heads" for the loss. Two distinct
-    // random tensors so y- and state-gradient paths are exercised
+    // random tensors, so the loss exercises the y- and state-gradient paths
     // independently.
     let y_head = Tensor::<5>::random(
         [batch, nchunks, chunk_len, nheads, per_head_dim],

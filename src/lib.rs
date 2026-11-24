@@ -22,13 +22,13 @@
 //! - [`mamba3`] — SSD with trapezoidal discretisation, a complex-valued state
 //!   transition (a data-dependent rotation of B/C), and MIMO rank expansion.
 //!
-//! The block-agnostic [`burn_stack`] crate holds everything around the block:
-//! the Pre-LN [`Layer`](burn_stack::modules::Layer), the (virtual-)layer
-//! [`Layers`](burn_stack::modules::Layers) stack, bidirectional pairs,
-//! latent/vocab networks, multi-gate residuals, class tokens, LR and
-//! virtual-layer schedules, and the Muon parameter groups. The [`family`]
-//! module holds `MambaBlock`, one enum over the three blocks, which selects a
-//! family at run time.
+//! The block-agnostic [`burn_stack`] crate holds everything around the block.
+//! It holds the Pre-LN [`Layer`](burn_stack::modules::Layer), the
+//! (virtual-)layer [`Layers`](burn_stack::modules::Layers) stack,
+//! bidirectional pairs and latent/vocab networks. It also holds multi-gate
+//! residuals, class tokens, LR and virtual-layer schedules, and the Muon
+//! parameter groups. The [`family`] module holds `MambaBlock`, one enum over
+//! the three blocks, which selects a family at run time.
 //!
 //! ## Two execution modes
 //!

@@ -130,7 +130,7 @@ pub struct Mamba2 {
     ///
     /// - Input/output channels: `conv_dim`
     /// - Kernel size: `conv_kernel` (typically 4)
-    /// - Groups: `conv_dim` (fully depthwise — each channel is independent)
+    /// - Groups: `conv_dim` (fully depthwise: each channel is independent)
     /// - Padding: **none**. `forward` adds the causal left padding itself, from
     ///   the cache window.
     ///
@@ -693,8 +693,8 @@ impl Mamba2 {
     /// `origin` has no effect without resets. See [`crate::packing`].
     ///
     /// At a start, the conv reads the window of `origin` in place of the
-    /// positions before it, and the SSD carry between chunks starts again from the state of
-    /// `origin`. Only [`SsdPath::Serial`] and
+    /// positions before it. The SSD carry between chunks starts again from the
+    /// state of `origin`. Only [`SsdPath::Serial`] and
     /// [`SsdPath::SerialRecalculated`] take resets.
     #[allow(non_snake_case)]
     pub fn forward_packed(
@@ -723,8 +723,8 @@ impl Mamba2 {
         assert!(sequence > 0, "sequence length must be at least 1");
         san(&input_bsm);
 
-        // The chunk length is known before the conv, because a reset (at a
-        // chunk start) also changes the conv.
+        // `forward_packed` gets the chunk length before the conv, because a
+        // reset (at a chunk start) also changes the conv.
         let chunk_len = scan_options.chunk_len_or_optimal(state_rank, per_head_dim);
         assert!(chunk_len > 0);
         let reset_bn = reset_bs.map(|reset_bs| crate::packing::chunk_resets(reset_bs, chunk_len));
@@ -841,10 +841,12 @@ impl Mamba2 {
         san(&xbc_bsv);
 
         // ── Step 3: Split xbc into (x, B, C) ──────────────────────────────────
-        // After activation, split xbc along the channel dimension:
-        //   x_bsi   → reshaped to x_bshp   (input)
-        //   b_bsGR  → reshaped to b_bsgr   (state input proj)
-        //   c_bsGR  → reshaped to c_bsgr   (state output proj)
+        // After activation, split xbc along the channel dimension, and reshape
+        // each part:
+        //
+        // - `x_bsi → x_bshp` (the input),
+        // - `b_bsGR → b_bsgr` (the `B` of the write),
+        // - `c_bsGR → c_bsgr` (the `C` of the readout).
         //
         // In the SSM/attention duality, C ↔ Q, B ↔ K, x ↔ V.
         let (x_bshp, b_bsgr, c_bsgr) = {
@@ -917,8 +919,8 @@ impl Mamba2 {
         let b_bnlgr = b_bSgr.reshape([batch, nchunks, chunk_len, ngroups, state_rank]);
         let c_bnlgr = c_bSgr.reshape([batch, nchunks, chunk_len, ngroups, state_rank]);
 
-        // GQA expansion: B and C are produced per-group, but the SSD paths expect
-        // them per-head. Group dim is at axis 3 (`[b, n, l, g, r]`).
+        // GQA expansion: Step 3 gives B and C per group, but the SSD paths
+        // expect them per head. Group dim is at axis 3 (`[b, n, l, g, r]`).
         let b_bnlhr = burn_stack::modules::gqa_expand_to_heads::<5, 6>(b_bnlgr, 3, nheads);
         let c_bnlhr = burn_stack::modules::gqa_expand_to_heads::<5, 6>(c_bnlgr, 3, nheads);
 
@@ -953,7 +955,7 @@ impl Mamba2 {
             cache.ssm_bhpr.dims()
         );
 
-        // Remove zero-pad columns that were added at Step 5.
+        // Drop the zero-pad columns that Step 5 adds.
         let y_bShp = y_bnlhp.reshape([batch, sequence_padded, nheads, per_head_dim]);
         let y_bshp = if pad == 0 {
             y_bShp
@@ -978,9 +980,10 @@ impl Mamba2 {
         (out_bsm, cache)
     }
 
-    /// The depthwise causal conv of [`Self::forward_packed`], tap by tap. A
-    /// tap that reaches back past the start of its segment reads the window
-    /// of the origin instead, as at the start of a call from it.
+    /// The depthwise causal conv of [`Self::forward_packed`], tap by tap. When
+    /// a tap reaches past the start of its segment, it reads the window of the
+    /// origin instead. This read is the same as at the start of a call from
+    /// the origin.
     ///
     /// `Conv1d` computes `yₜ = bias + Σᵢ wᵢ · x̃ₜ₊ᵢ` over the causally padded
     /// input `x̃` (`conv_kernel − 1` cached columns, then the input). So tap
@@ -1058,7 +1061,7 @@ mod step {
         ///   yₜ  = Cₜᵀ · hₜ + D · xₜ     ∈ ℝᴾ   (output)
         /// ```
         ///
-        /// For the convolution, `step` slides the cache window: it removes the
+        /// For the convolution, `step` slides the cache window: it drops the
         /// oldest input column and appends the projection of the new token.
         /// The returned cache holds the new `ssm_bhpr`.
         ///
@@ -1191,9 +1194,10 @@ mod step {
             let dtbx_bhpr = {
                 let x_bhpr = x_bhp.clone().unsqueeze_dim::<4>(3).expand(ssm_shape_bhpr);
 
-                // Expand B from _bgr → _bhpr, as the SSD forward path does:
-                // copy the projection of each group to its heads_per_group
-                // heads, so heads 0..(nheads/ngroups) belong to group 0, etc.
+                // Expand B from _bgr → _bhpr, as `forward` does before the SSD
+                // scan. Copy the projection of each group to its
+                // heads_per_group heads. So heads 0..(nheads/ngroups) belong to
+                // group 0, and so on.
                 let b_bhpr = b_bgr
                     .unsqueeze_dim::<4>(2) // b_bg1r
                     .expand([batch, ngroups, heads_per_group, state_rank]) // b_bgHr

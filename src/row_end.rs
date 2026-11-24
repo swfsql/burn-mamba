@@ -129,7 +129,7 @@ impl RowEnd {
         let reset_bn = self.resets.as_ref().map(|(reset_bn, _)| reset_bn);
         assert!(
             reset_bn.is_none() || origin.is_some(),
-            "a row-end read in a call with resets needs the origin field: the last segment of a row \
+            "a row-end read in a call with resets needs the origin field. The last segment of a row \
              with a reset starts from it"
         );
         self.read_after(samples, axis, width, || match reset_bn.zip(origin) {

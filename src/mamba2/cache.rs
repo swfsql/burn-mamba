@@ -21,7 +21,7 @@
 //!
 //! 2. **State** — the matrix `hₜ ∈ ℝ^{per_head_dim×state_rank}` per
 //!    head. It compresses the full past into a fixed size, for any number of
-//!    tokens. This is the memory advantage of SSMs over attention: the
+//!    tokens. This is the memory advantage of SSMs over attention. The
 //!    KV-cache of a Transformer grows linearly with the sequence length, but
 //!    the state is always O(per_head_dim·state_rank).
 //!

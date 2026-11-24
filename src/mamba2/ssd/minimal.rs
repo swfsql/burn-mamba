@@ -299,7 +299,7 @@ impl Mamba2SsdInput {
         // where Ā_chunk[n] = exp(Σ_{t ∈ chunk n} Δₜ · A) = exp(a_cum[n, chunk_len-1]).
         //
         // The unrolled recurrence has the same matrix form as Step 1, at the
-        // chunk level: each new state is a weighted sum of all previous chunk
+        // chunk level. Each new state is a weighted sum of all previous chunk
         // states. The same 1-SS segsum trick applies, over the nchunks axis.
         //
         // The result is `new_state[n]`, the true state entering chunk n,

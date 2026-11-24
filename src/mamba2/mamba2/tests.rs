@@ -38,8 +38,8 @@ struct Heads {
 }
 
 /// Build the initial cache passed to both `forward` and the `step`
-/// unrolling. With `random = false` it is zero (the standard fresh start);
-/// with `random = true` it holds random values, exercising parity from an
+/// unrolling. With `random = false`, it is zero (the standard fresh start).
+/// With `random = true`, it holds random values. This exercises parity from an
 /// arbitrary initial state (conv window + state).
 fn build_init_cache(cfg: &Mamba2Config, batch: usize, random: bool) -> Mamba2Cache {
     let device = test_device();
@@ -203,9 +203,9 @@ fn run_step_matches_forward(cfg: Mamba2Config, scan_options: Mamba2ScanOptions, 
     let model = cfg.init(&device.clone().autodiff());
 
     let batch = 2;
-    // seq_len >= conv_kernel so the final conv window is fully determined by
-    // the sequence (the initial window is flushed out), keeping the window
-    // comparison well-defined for both zero and random init.
+    // seq_len >= conv_kernel, so the sequence alone sets the final conv
+    // window: no column of the initial window stays in it. So the window
+    // comparison is well-defined for both zero and random init.
     let seq_len = 5;
     let d_model = cfg.d_model;
     let normal = Distribution::Normal(0.0, 1.0);
@@ -331,15 +331,15 @@ fn step_matches_forward_norm_before_gate_random_init() {
 
 /// One longer `forward` over the whole sequence equals two consecutive
 /// `forward` calls (prefix then suffix) that thread the returned cache (conv
-/// window + state) between them — outputs, final cache, and parameter
+/// window + state) between them. Outputs, final cache, and parameter
 /// gradients all agree. The initial cache is random, so the chaining starts
 /// from a non-trivial state.
 ///
 /// `step_matches_forward_random_init` already subsumes this (parity from an
 /// arbitrary initial state implies a `forward`-produced cache continues
-/// correctly); this is a direct, explicit check. A single `Minimal` config
-/// suffices: the three ssd-paths are proven equivalent among themselves in
-/// `mamba2::ssd::ssd_path::tests`.
+/// correctly). This test is a direct, explicit check. A single `Minimal`
+/// config suffices: the tests in `mamba2::ssd::ssd_path::tests` prove the
+/// three SSD paths equivalent among themselves.
 fn run_split_matches_full(cfg: Mamba2Config) {
     let device = test_device();
     let model = cfg.init(&device.clone().autodiff());

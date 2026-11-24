@@ -400,7 +400,7 @@ pub fn k5_ssd_chunk_scan(
     let x_bnhlp = x_bnlhp.clone().swap_dims(2, 3);
     san(&x_bnhlp);
 
-    // B/C are already per-head — only a swap_dims is needed.
+    // B/C are already per head. So a swap_dims is enough.
     let c_bnhlr = c_bnlhr.swap_dims(2, 3);
     san(&c_bnhlr);
     san(&cb_bnhll);

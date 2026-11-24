@@ -5,11 +5,13 @@
 //! caller choose the family at *run time*, and serialize that choice. The choice
 //! sits at the block: [`MambaBlock`] is one enum over the three blocks, and it
 //! fills `Block` (`docs/adr/0009-family-choice-at-the-block.md`). So the
-//! containers need no enum of their own. [`MambaLatentNet`], [`MambaVocabNet`],
-//! [`MambaBidiLayers`] and [`MambaHNetVocabNet`] are type aliases, and each has
-//! a `{ shape, block }` config in [`config`]. The caches of a layer stack are a
-//! `Vec<MambaCache>`, and [`MambaScanOptions`] is the `Options` of the enum. A
-//! cache or scan options of the wrong family panic.
+//! containers need no enum of their own.
+//!
+//! [`MambaLatentNet`], [`MambaVocabNet`], [`MambaBidiLayers`] and
+//! [`MambaHNetVocabNet`] are type aliases, and each has a `{ shape, block }`
+//! config in [`config`]. The caches of a layer stack are a `Vec<MambaCache>`,
+//! and [`MambaScanOptions`] is the `Options` of the enum. A cache or scan
+//! options of the wrong family panic.
 //!
 //! This is also where the three families meet the generic stack: the
 //! `impl Block for Mamba{1,2,3}` and `impl BlockConfig for Mamba{1,2,3}Config`
@@ -27,11 +29,11 @@
 //! deliberately stops at rank 2. For the MIMO tensors of Mamba-3 this needs an
 //! argument, because their *shape* suggests the opposite conclusion.
 //!
-//! The *math* of MIMO does decompose along the rank: R write-channels summed
-//! into one state and read out R ways, each part a **standalone** SISO run.
-//! This holds because the transition is a function of no sample
-//! (`info/mamba-3/mimo-as-batch.md` §5: it is isotropy, not a property of
-//! MIMO, and no delta-rule shape has it). So a `[nheads, mimo_rank,
+//! The *math* of MIMO does decompose along the rank. R write-channels add into
+//! one state, and the block reads that state in R ways. Each part is a
+//! **standalone** SISO run. This holds because the transition is a function of
+//! no sample. That is isotropy, not a property of MIMO, and no delta-rule shape
+//! has it (`info/mamba-3/mimo-as-batch.md` §5). So a `[nheads, mimo_rank,
 //! per_head_dim]` tensor looks like a stack of matrices that a stack-aware Muon
 //! could take one slice at a time.
 //!

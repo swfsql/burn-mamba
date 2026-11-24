@@ -178,7 +178,7 @@ pub(crate) fn chunk_resets(reset_bt: Tensor<2, Bool>, chunk_tokens: usize) -> Te
     let [batch, tokens] = reset_bt.dims();
     let nchunks = tokens.div_ceil(chunk_tokens);
     let pad = nchunks * chunk_tokens - tokens;
-    // The partial last chunk is padded with "no reset".
+    // Pad the partial last chunk with "no reset".
     let whole_bt = if pad == 0 {
         reset_bt
     } else {
