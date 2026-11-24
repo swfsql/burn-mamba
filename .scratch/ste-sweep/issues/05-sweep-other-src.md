@@ -210,6 +210,16 @@ decides it.
    as `src/mamba2/mamba2.rs:1117` does. The user decides whether the
    glossary gives the second sense or the docs change.
 
+### The decisions of the user
+
+1. The doc of `src/padding.rs:8` gets the suggestion. It also says that the
+   decay is a no-op. The new text: "The family zeroes `Δ·A` and the writes of
+   that micro-step where the discretisation forms them. So the decay is 1,
+   and it is a no-op."
+2. Terms 2 to 5 keep their words.
+3. Term 1 keeps its change.
+4. The two suggestions for the linter stay suggestions for the skill.
+
 ### For the linter
 
 Two suggestions. Each one agrees with STE.

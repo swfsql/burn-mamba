@@ -6,10 +6,10 @@
 //! family meets this contract in the same two ways:
 //!
 //! - **The state** goes through a padded position unchanged. The family zeroes
-//!   the decay and the writes of that micro-step where the discretisation forms
-//!   them. `Δ = 0` gives `Ā = 1, B̄ = 0`, the same transparency that the
-//!   internal chunk padding uses. With right padding, no real token reads a
-//!   padded one, so nothing else has to know.
+//!   `Δ·A` and the writes of that micro-step where the discretisation forms
+//!   them. So the decay is 1, and it is a no-op. `Δ = 0` gives `Ā = 1, B̄ = 0`,
+//!   the same transparency that the internal chunk padding uses. With right
+//!   padding, no real token reads a padded one, so nothing else has to know.
 //! - **Every cache field that holds the last few samples of a row** reads them
 //!   at the row end of each row ([`crate::row_end`]). These fields are a conv
 //!   window, a tap FIFO and the carry of a scan.
