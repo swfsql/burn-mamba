@@ -54,7 +54,7 @@ message string.
 
 | Findings | Before | After |
 |---|---|---|
-| Hard | 48 | 2 |
+| Hard | 48 | 0 |
 | Advisory | 171 | 149 |
 
 The ticket gives 55 files, 46 hard findings and 109 advisory findings at
@@ -83,10 +83,22 @@ The advisory findings that stay are of these kinds:
 
 ### The kept findings
 
-| Location | Rule | Match | Reason |
+No hard finding stays. The first commit of this ticket (`ace414bb`) keeps two
+false positives. The user then selects a rewrite of both.
+
+| Location | Rule | Match | New words |
 |---|---|---|---|
-| `arch-review-backlog/issues/01-plant-frame.md:178` | `synonym-rotation` | `launches` and `starts` (`:64`) | False positive. `launches` is a noun: the kernel launches that `./kernels.sh` counts. `kernels.md` gives "Kernel launch counts". `starts` tells the first line of a part of the plant frame. |
-| `arch-review-backlog/issues/10-one-standard-ssd-scan.md:216` | `synonym-rotation` | `Launches` and `starts` (`:24`) | The same misread. `starts` tells the first family of the standard SSD scan. |
+| `arch-review-backlog/issues/01-plant-frame.md:178` | `synonym-rotation` | `launches` and `starts` (`:64`) | "`step` kernels", "kernel count" and "kernel counts" |
+| `arch-review-backlog/issues/10-one-standard-ssd-scan.md:216` | `synonym-rotation` | `Launches` and `starts` (`:24`) | "Kernels", "kernel count" and "extra kernels" |
+
+The reasons:
+
+- In each file, `launches` is a noun: the kernel launches that `./kernels.sh`
+  counts. `starts` tells the first line of a part of the plant frame, or the
+  first family of the standard SSD scan. So the linter misreads the pair.
+- In `kernels.md`, each cell is the number of GPU kernels of one iteration of
+  a case. So "kernel count" keeps the meaning, as "kernels" does in ticket 03.
+- Each file gives the new words to each use of the noun.
 
 Ticket 08 keeps the same misread in `README.md:272`.
 
@@ -105,7 +117,8 @@ Hard findings:
    - ticket 07: `examples/tiny-stories/inference.rs:30` (kept) and
      `examples/tiny-stories/README.md:90` (rewritten),
    - ticket 08: `README.md:272` (kept),
-   - this ticket: the two kept findings above.
+   - this ticket: arch-review tickets 01 and 10, rewritten (see
+     [The kept findings](#the-kept-findings)).
 2. A section banner or a shape map joins the next sentence:
    - ticket 02: the banners of `src/mamba3/double_ssd/double_ssd/mod.rs:409`
      and `:549`, and the shape map of `src/mamba3/single_ssd/ssd/diag.rs:88`
@@ -244,7 +257,7 @@ These findings stay:
   a part away, so the linter finding is not a false positive.
 - In third-party-terms ticket 04, answers 2 and 3 stay in the paragraphs of
   their questions. These paragraphs have no finding.
-- The two kept findings and the code spans of tickets 02–08 (see
+- The code spans of tickets 02–08 (see
   [The decisions of the user](#the-decisions-of-the-user)).
 
 ### The decisions of the user
@@ -254,15 +267,17 @@ These findings stay:
    from the two rules of length, it finds 24 more hard findings. The user
    keeps these code spans, because the spec permits a quote in backticks
    ("Quoted word"). Burn-stack ticket 05 makes the other choice.
-2. The two kept findings stay as false positives. "Launch count" is the term
-   of `kernels.md` and `./kernels.sh`, as in tickets 07 and 08.
+2. At `ace414bb`, the two findings of arch-review tickets 01 and 10 stay as
+   false positives, as in tickets 07 and 08. The user then selects a rewrite
+   of both, so that the scope has zero hard findings.
 
 ### For the linter
 
 Three suggestions. Each one agrees with STE.
 
-1. Suggestion 1 of ticket 07 also clears the two kept findings of this ticket:
-   count a rotation only when both words are verbs.
+1. Suggestion 1 of ticket 07 also clears the findings of arch-review tickets
+   01 and 10 at `ace414bb`. It counts a rotation only when both words are
+   verbs.
 2. In `has seven tests`, the verb `has` is a simple present. A suggestion: do
    not read `has` or `had` before a number as a compound tense.
 3. Suggestion 2 of ticket 05 also clears `is run-time` and `is Feed-forward`:

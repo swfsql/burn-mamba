@@ -144,7 +144,7 @@ chain rule and its `D` skip.
 benches. The reports in the repo before the first commit of this ticket are the
 baseline.
 
-- The launch count of `train` `mamba2` in the `cuda` column of `kernels.md` does not
+- The kernel count of `train` `mamba2` in the `cuda` column of `kernels.md` does not
   rise.
 - The forward of Mamba-2 changes its operations, so the `forward` `mamba2` count can
   change. The user judges that change.
@@ -213,9 +213,9 @@ fusion runs) after `5d2b3125`, against the reports of `d304fccf`. Only `forward`
 `train` of Mamba-2 and of `siso-double-ssd` reach the changed code. `step` and the other
 7 cases of each section (`mamba1` and the other Mamba-3 cases) show the noise of the run.
 
-- **Launches, `cuda`:** `train` `mamba2` falls from 555 to 438 (−21%). `forward` `mamba2`
+- **Kernels, `cuda`:** `train` `mamba2` falls from 555 to 438 (−21%). `forward` `mamba2`
   rises from 105 to 107. 0 of the 24 counts of `mamba1` and of the Mamba-3 rows changed.
-- **Launches, `cuda + fusion + autotune`:** `train` `mamba2` falls from 366 to 315.
+- **Kernels, `cuda + fusion + autotune`:** `train` `mamba2` falls from 366 to 315.
   `forward` `mamba2` rises from 78 to 80. `train` `mamba3/siso-double-ssd` rises from 600
   to 604, and the two values do not overlap. It is the only Mamba-3 case that runs the
   changed backward. The six removed clones are the likely cause, but one run does not
@@ -239,9 +239,9 @@ fusion runs) after `5d2b3125`, against the reports of `d304fccf`. Only `forward`
 **Open points:**
 
 - `forward` of Mamba-2 is above the highest of the 7 cases on `cuda` and with fusion. The 2
-  extra launches are about 2% of its count. The `step` of Mamba-2 has no code change and
+  extra kernels are about 2% of its count. The `step` of Mamba-2 has no code change and
   rose by 11.0% on `cuda` in the same run. One run cannot separate this change from noise.
 - The −15.3% of `train` `mamba2` on `cuda` is not a measured gain. `train` of
-  `mamba3/siso` has no code change and moved by −20.4% in the same column. The launch
+  `mamba3/siso` has no code change and moved by −20.4% in the same column. The kernel
   count is the reliable number.
 - The 7 cases are slower in `forward` and `step` on both GPU columns.

@@ -94,7 +94,7 @@ SSD path stay the same. Each pathway keeps only its middle.
 **Benches:** The agent stops after commit 2, because only the user runs the benches.
 The user runs `./bench.sh` and `./kernels.sh` before commit 1 and after commit 2.
 
-- Commit 2 stays when each `step` case keeps its launch count, and its time stays
+- Commit 2 stays when each `step` case keeps its kernel count, and its time stays
   within run noise as the user judges it.
 - If commit 2 fails that condition, revert it. `step` then keeps its own frame, and
   only the two forwards share one.
@@ -175,7 +175,7 @@ were bit-exact after each commit.
 The numbers come from one run of `./bench.sh` and `./kernels.sh` after commit 2,
 against the reports of `98960779`.
 
-- **`step` launches:** 8 of the 9 cases keep their count in both columns.
+- **`step` kernels:** 8 of the 9 cases keep their count in both columns.
   `mamba3/mimo-rank4` falls from 134 to 133 on `cuda`, and from 70 to 68 with fusion.
 - **`step` time**, geometric mean of the change:
 
@@ -186,8 +186,8 @@ against the reports of `98960779`.
 
 **Open points for a later ticket:**
 
-- Under fusion, the `forward` launches of `mamba3/quaternion4d` rise from 251 to 289,
-  and those of `mamba3/rotor4d` rise from 327 to 365. Their `train` launches each rise
-  by 29. The `cuda` counts do not change. The cause is not known.
+- Under fusion, the `forward` kernel counts of `mamba3/quaternion4d` rise from 251
+  to 289, and those of `mamba3/rotor4d` rise from 327 to 365. Their `train` kernel
+  counts each rise by 29. The `cuda` counts do not change. The cause is not known.
 - `product::unfold_micro_b` now has only its test as a caller. It is `pub`, so this
   ticket keeps it.
