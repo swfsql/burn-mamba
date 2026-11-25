@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="MambaProduct — `u` micro-steps per token"><title>burn_mamba::mamba3::product - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-1e18a8e7.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.102.0-nightly (137d1d494 2026-11-22)" data-channel="nightly" data-search-js="search-085293d4.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-9b351432.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../../static.files/main-419f3a3f.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-101b5a15.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module product</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../burn_mamba/index.html">burn_<wbr>mamba</a><span class="version">0.87.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module product</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#mambaproduct--u-micro-steps-per-token" title="MambaProduct — `u` micro-steps per token">MambaProduct — <code>u</code> micro-steps per token</a><ul><li><a href="#the-dial-and-whose-it-is" title="The dial, and whose it is">The dial, and whose it is</a></li><li><a href="#how-it-is-evaluated" title="How it is evaluated">How it is evaluated</a></li><li><a href="#caches-and-what-does-not-change" title="Caches, and what does not change">Caches, and what does not change</a></li><li><a href="#notation" title="Notation">Notation</a></li></ul></li></ul><h3><a href="#functions">Module Items</a></h3><ul class="block"><li><a href="#functions" title="Functions">Functions</a></li></ul></section><div id="rustdoc-modnav"><h2><a href="../index.html">In burn_<wbr>mamba::<wbr>mamba3</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../index.html">burn_mamba</a>::<wbr><a href="../index.html">mamba3</a></div><h1>Module <span>product</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../src/burn_mamba/mamba3/product/mod.rs.html#1-226">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="mambaproduct--u-micro-steps-per-token"><a class="doc-anchor" href="#mambaproduct--u-micro-steps-per-token">§</a>MambaProduct — <code>u</code> micro-steps per token</h2>
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="MambaProduct — `u` micro-steps per token"><title>burn_mamba::mamba3::product - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-1e18a8e7.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.102.0-nightly (739adecd4 2026-11-24)" data-channel="nightly" data-search-js="search-085293d4.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-9b351432.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../../static.files/main-419f3a3f.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-101b5a15.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module product</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../burn_mamba/index.html">burn_<wbr>mamba</a><span class="version">0.88.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module product</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#mambaproduct--u-micro-steps-per-token" title="MambaProduct — `u` micro-steps per token">MambaProduct — <code>u</code> micro-steps per token</a><ul><li><a href="#the-dial-and-whose-it-is" title="The dial, and whose it is">The dial, and whose it is</a></li><li><a href="#how-it-is-evaluated" title="How it is evaluated">How it is evaluated</a></li><li><a href="#caches-and-what-does-not-change" title="Caches, and what does not change">Caches, and what does not change</a></li><li><a href="#notation" title="Notation">Notation</a></li></ul></li></ul><h3><a href="#functions">Module Items</a></h3><ul class="block"><li><a href="#functions" title="Functions">Functions</a></li></ul></section><div id="rustdoc-modnav"><h2><a href="../index.html">In burn_<wbr>mamba::<wbr>mamba3</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../index.html">burn_mamba</a>::<wbr><a href="../index.html">mamba3</a></div><h1>Module <span>product</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../src/burn_mamba/mamba3/product/mod.rs.html#1-231">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="mambaproduct--u-micro-steps-per-token"><a class="doc-anchor" href="#mambaproduct--u-micro-steps-per-token">§</a>MambaProduct — <code>u</code> micro-steps per token</h2>
 <p><code>u</code> full Mamba-3 micro-steps per token. Each micro-step has its own
 projected <code>x</code>, <code>B</code>, <code>Δ</code>, <code>A</code>, <code>λ</code> and rotation, and the block reads the
 token at the last micro-step.
@@ -45,7 +45,8 @@ rotation product. So what <code>u</code> buys depends only on the
 </div>
 <p>Three consequences decide when the dial is worth a turn:</p>
 <ul>
-<li><strong>On a real transition, it gives only a wider write, not a new
+<li>
+<p><strong>On a real transition, it gives only a wider write, not a new
 transition.</strong> With <a href="../rotation/enum.RotationKind.html#variant.Real1D" title="variant burn_mamba::mamba3::rotation::RotationKind::Real1D"><code>Real1D</code></a> the step size is real too. So every factor
 is a <em>real</em> scalar, the scalars commute, and the <code>u</code> micro-writes collapse
 into one rank-<code>u</code> update with decay-staggered weights. That is the
@@ -53,30 +54,36 @@ into one rank-<code>u</code> update with decay-staggered weights. That is the
 <a href="../mamba3/struct.Mamba3Config.html#structfield.mimo_rank" title="field burn_mamba::mamba3::mamba3::Mamba3Config::mimo_rank"><code>mimo_rank</code></a> fills
 <em>jointly</em>: an epoch of <code>u</code> samples against a minibatch of <code>M</code>. It is also
 why this dial is on Mamba-3 and not on Mamba-2, whose transition is
-scalar by construction: there <code>u</code> would buy nothing. The containment is
-exact and one-way. <code>MambaProduct(u = M)</code> reproduces a whole <code>MIMO(M)</code>
-trajectory. The converse fails by a closed-form dimension count, because
-<code>M</code> ties its values, step sizes and rotation where <code>u</code> leaves them free
-(<code>info/mamba-3/mimo-as-batch.md</code> §9). What <code>M</code> gives back is cost: it is
-parallel, and its state bytes stay flat.</li>
-<li><strong>On the abelian rotation, it lifts a bound that the block cannot
+scalar by construction: there <code>u</code> would buy nothing.</p>
+<p>The containment is exact and one-way. <code>MambaProduct(u = M)</code> reproduces a
+whole <code>MIMO(M)</code> trajectory. The converse fails by a closed-form dimension
+count, because <code>M</code> ties its values, step sizes and rotation where <code>u</code>
+leaves them free (<code>info/mamba-3/mimo-as-batch.md</code> §9). In exchange, <code>M</code>
+costs less: it is parallel, and its state bytes stay flat.</p>
+</li>
+<li>
+<p><strong>On the abelian rotation, it lifts a bound that the block cannot
 otherwise cross.</strong> One micro-step turns by at most
 <a href="../mamba3/struct.Mamba3Config.html#structfield.rotation_range" title="field burn_mamba::mamba3::mamba3::Mamba3Config::rotation_range"><code>rotation_range</code></a><code>·π·Δ</code>.
 A rotation <em>at</em> that bound is on the asymptote of <code>tanh</code>, where the f32
 gradient is exactly zero. So at <code>rotation_range = 1</code>, descent cannot reach
 the half-turn that state-tracking wants. <code>u</code> micro-rotations, each well
 inside the bound, compose to <code>u</code>× the reach with live gradients at every
-factor. Note the price: the token gets <code>u</code> <em>full-size</em> micro-steps, so its
+factor.</p>
+<p>Note the price: the token gets <code>u</code> <em>full-size</em> micro-steps, so its
 effective interval is <code>u</code>× longer, not subdivided. The consistent
-alternative (<code>Δⱼ = Δ/u</code>, the same per-token transition, only the
-staggered writes and the ordering below) stays inside the reach of the
+alternative is <code>Δⱼ = Δ/u</code>: the same per-token transition, with only the
+staggered writes and the ordering below. It stays inside the reach of the
 model, because <code>dt_limit</code> has no lower floor by default. So this is a
-superset of it, not a substitute.</li>
-<li><strong>On the non-abelian rotations, it is the argument of DeltaProduct
+superset of it, not a substitute.</p>
+</li>
+<li>
+<p><strong>On the non-abelian rotations, it is the argument of DeltaProduct
 reached by the other dial.</strong> The factors do not commute, so the product
 is not a single bounded micro-step. <code>u</code> is the number of generators that the
 token can compose. The group is given directly, not factored into
-reflections.</li>
+reflections.</p>
+</li>
 </ul>
 <h3 id="how-it-is-evaluated"><a class="doc-anchor" href="#how-it-is-evaluated">§</a>How it is evaluated</h3>
 <p>Not with a new kernel: the micro-steps fold into the <strong>write axis</strong>. The
@@ -87,17 +94,22 @@ consecutive write positions. So the SSD scan, the trapezoid, the rotation scan, 
 chunking and the caches all run unchanged on a sequence of length
 <code>sequence · u</code>. Two placements make that exactly the recurrence above:</p>
 <ul>
-<li><strong>The read <code>C</code> is on the last micro-step, and only there.</strong> Every
+<li>
+<p><strong>The read <code>C</code> is on the last micro-step, and only there.</strong> Every
 micro-step <em>writes</em> to the state, so <code>B</code>, <code>x</code>, <code>Δ</code>, <code>A</code>, <code>λ</code> and the
 rotation are on the write axis. The token is <em>read</em> once, so <code>C</code> stays at
 token resolution, and so does the <code>y</code> that the SSD returns. That is the
-<strong>read axis</strong> of the chunk (<code>helpers::read_positions</code>). <code>u</code> widens only the
-write axis of a chunk. So the intra-chunk score, the state-to-output
-product and the QK-norm/rotation of <code>C</code> are <code>u</code>-invariant. The block does
-not compute <code>u</code>× the output to discard all positions but one.</li>
-<li><strong><code>z</code>, the <code>D</code> skip and the output gate are per token.</strong> The skip takes
+<strong>read axis</strong> of the chunk (<code>helpers::read_positions</code>).</p>
+<p><code>u</code> widens only the write axis of a chunk. So the intra-chunk score, the
+state-to-output product and the QK-norm/rotation of <code>C</code> are <code>u</code>-invariant.
+The block does not compute <code>u</code>× the output to discard all positions but
+one.</p>
+</li>
+<li>
+<p><strong><code>z</code>, the <code>D</code> skip and the output gate are per token.</strong> The skip takes
 the <code>x</code> of the last micro-step, which is contemporaneous with the readout
-(<a href="fn.last_micro4.html" title="fn burn_mamba::mamba3::product::last_micro4"><code>last_micro4</code></a>).</li>
+(<a href="fn.last_micro4.html" title="fn burn_mamba::mamba3::product::last_micro4"><code>last_micro4</code></a>).</p>
+</li>
 </ul>
 <p><code>step</code> folds the same way, over a block of <code>u</code> positions (not a sequence),
 and evaluates that block <strong>at once</strong>. With the rotation factored out, the
@@ -108,7 +120,7 @@ fusion of <code>(u, mimo_rank)</code> into one contracted axis, make each side o
 recurrence one <code>mimo_outer_sum</code>. So a decode step costs the same number of
 kernel launches at every <code>u</code>.</p>
 <p>Everything else is per micro-step, including the decay. In Mamba, the decay
-is not a control of its own: it comes from the step size (<code>α = exp(ΔA)</code>),
+is not a control of its own. It comes from the step size (<code>α = exp(ΔA)</code>),
 and <code>Δ</code> also weights the write and paces the rotation. So the “forget gate on micro-step 0” of
 DeltaProduct has no faithful analogue here. <code>α ≡ 1</code> on the interior
 micro-steps would also stop the rotation. A scalar decay composes either way

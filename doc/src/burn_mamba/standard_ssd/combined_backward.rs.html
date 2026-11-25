@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/standard_ssd/combined_backward.rs`."><title>combined_backward.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-1e18a8e7.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.102.0-nightly (137d1d494 2026-11-22)" data-channel="nightly" data-search-js="search-085293d4.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-9b351432.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-419f3a3f.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-101b5a15.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/standard_ssd/</div>combined_backward.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! # The analytic backward of the standard SSD scan
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/standard_ssd/combined_backward.rs`."><title>combined_backward.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-1e18a8e7.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.102.0-nightly (739adecd4 2026-11-24)" data-channel="nightly" data-search-js="search-085293d4.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-9b351432.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-419f3a3f.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-101b5a15.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/standard_ssd/</div>combined_backward.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! # The analytic backward of the standard SSD scan
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! The steps of the backward of one SSD call:
 <a href=#4 id=4 data-nosnippet>4</a>//!
@@ -94,136 +94,137 @@
 <a href=#94 id=94 data-nosnippet>94</a>    <span class="kw">let </span>keep_bn = resets.as_ref().map(|(keep_bn, <span class="kw">_</span>)| keep_bn.clone());
 <a href=#95 id=95 data-nosnippet>95</a>    <span class="kw">let </span>[batch, nchunks, chunk_len, mimo_rank, nheads, per_head_dim] = v_bnlmhp.dims();
 <a href=#96 id=96 data-nosnippet>96</a>    <span class="kw">let </span>[.., state_rank] = b_bnlmhr.dims();
-<a href=#97 id=97 data-nosnippet>97</a>    <span class="comment">// The chunk's two axes: `fused` is what it writes, `read` what it is read at.
-<a href=#98 id=98 data-nosnippet>98</a>    </span><span class="kw">let </span>chunk_tokens = chunk_tokens(chunk_len, read_stride);
-<a href=#99 id=99 data-nosnippet>99</a>    <span class="kw">let </span>fused = chunk_len * mimo_rank;
-<a href=#100 id=100 data-nosnippet>100</a>    <span class="kw">let </span>read = chunk_tokens * mimo_rank;
-<a href=#101 id=101 data-nosnippet>101</a>
-<a href=#102 id=102 data-nosnippet>102</a>    san(<span class="kw-2">&amp;</span>d_y_bntmhp);
-<a href=#103 id=103 data-nosnippet>103</a>    san(<span class="kw-2">&amp;</span>d_final_bhpr);
-<a href=#104 id=104 data-nosnippet>104</a>    san(<span class="kw-2">&amp;</span>v_bnlmhp);
-<a href=#105 id=105 data-nosnippet>105</a>    san(<span class="kw-2">&amp;</span>da_bnlh);
-<a href=#106 id=106 data-nosnippet>106</a>    san(<span class="kw-2">&amp;</span>b_bnlmhr);
-<a href=#107 id=107 data-nosnippet>107</a>    san(<span class="kw-2">&amp;</span>c_bntmhr);
-<a href=#108 id=108 data-nosnippet>108</a>    san(<span class="kw-2">&amp;</span>initial_state_bhpr);
-<a href=#109 id=109 data-nosnippet>109</a>
-<a href=#110 id=110 data-nosnippet>110</a>    <span class="comment">// ── Recompute the forward intermediates ───────────────────────────────
-<a href=#111 id=111 data-nosnippet>111</a>
-<a href=#112 id=112 data-nosnippet>112</a>    // K1: pre-combined Δ·A to the intra-chunk cumsum.
-<a href=#113 id=113 data-nosnippet>113</a>    </span><span class="kw">let </span>(da_cumsum_bhnl, da_chunk_end_bhn) = k1_ssd_chunk_cumsum(da_bnlh);
-<a href=#114 id=114 data-nosnippet>114</a>    san(<span class="kw-2">&amp;</span>da_cumsum_bhnl);
-<a href=#115 id=115 data-nosnippet>115</a>
-<a href=#116 id=116 data-nosnippet>116</a>    <span class="comment">// K2: the CB matrix of ORANGE.
-<a href=#117 id=117 data-nosnippet>117</a>    </span><span class="kw">let </span>cb_bnhTMLM = k2_ssd_bmm(c_bntmhr.clone(), b_bnlmhr.clone());
-<a href=#118 id=118 data-nosnippet>118</a>    san(<span class="kw-2">&amp;</span>cb_bnhTMLM);
-<a href=#119 id=119 data-nosnippet>119</a>
-<a href=#120 id=120 data-nosnippet>120</a>    <span class="comment">// K3: the intra-chunk state, and the intermediates of its backward.
-<a href=#121 id=121 data-nosnippet>121</a>    </span><span class="kw">let </span>(intra_chunk_state_bnhpr, k3_decay_bhnLM, k3_decayed_v_bnLMhp) =
-<a href=#122 id=122 data-nosnippet>122</a>        k3_ssd_chunk_state_extended(v_bnlmhp.clone(), b_bnlmhr.clone(), da_cumsum_bhnl.clone());
-<a href=#123 id=123 data-nosnippet>123</a>
-<a href=#124 id=124 data-nosnippet>124</a>    <span class="comment">// K4: the chunk-input state stream of BLUE.
-<a href=#125 id=125 data-nosnippet>125</a>    </span><span class="kw">let </span>(chunk_input_state_bnhpr, _final_state_bhpr) = k4_ssd_state_passing(
-<a href=#126 id=126 data-nosnippet>126</a>        intra_chunk_state_bnhpr,
-<a href=#127 id=127 data-nosnippet>127</a>        da_chunk_end_bhn.clone(),
-<a href=#128 id=128 data-nosnippet>128</a>        initial_state_bhpr,
-<a href=#129 id=129 data-nosnippet>129</a>        resets,
-<a href=#130 id=130 data-nosnippet>130</a>        <span class="prelude-val">None</span>,
-<a href=#131 id=131 data-nosnippet>131</a>    );
-<a href=#132 id=132 data-nosnippet>132</a>
-<a href=#133 id=133 data-nosnippet>133</a>    <span class="kw">let </span>(da_cumsum_bhnLM, da_cumsum_bhnTM) =
-<a href=#134 id=134 data-nosnippet>134</a>        k5_da_cumsum_on_chunk_axes(da_cumsum_bhnl, mimo_rank, read_stride);
-<a href=#135 id=135 data-nosnippet>135</a>    <span class="kw">let </span>d_y_bnhTMp = d_y_bntmhp
-<a href=#136 id=136 data-nosnippet>136</a>        .reshape([batch, nchunks, read, nheads, per_head_dim]) <span class="comment">// d_y_bnTMhp
-<a href=#137 id=137 data-nosnippet>137</a>        </span>.swap_dims(<span class="number">2</span>, <span class="number">3</span>); <span class="comment">// d_y_bnhTMp
-<a href=#138 id=138 data-nosnippet>138</a>    </span>san(<span class="kw-2">&amp;</span>d_y_bnhTMp);
-<a href=#139 id=139 data-nosnippet>139</a>
-<a href=#140 id=140 data-nosnippet>140</a>    <span class="comment">// ── K5 backward (BLUE + ORANGE) ───────────────────────────────────────
-<a href=#141 id=141 data-nosnippet>141</a>    </span><span class="kw">let </span>(
-<a href=#142 id=142 data-nosnippet>142</a>        K5Grads {
-<a href=#143 id=143 data-nosnippet>143</a>            d_chunk_input_state_bnhpr,
-<a href=#144 id=144 data-nosnippet>144</a>            d_c_blue_bnhTMr,
-<a href=#145 id=145 data-nosnippet>145</a>            d_da_blue_bhnl,
-<a href=#146 id=146 data-nosnippet>146</a>            d_v_intra_bnhLMp: d_v_orange_bnhLMp,
-<a href=#147 id=147 data-nosnippet>147</a>            d_cb_bnhTMLM,
-<a href=#148 id=148 data-nosnippet>148</a>            d_da_intra_bhnl: d_da_orange_bhnl,
-<a href=#149 id=149 data-nosnippet>149</a>        },
-<a href=#150 id=150 data-nosnippet>150</a>        <span class="kw">_</span>,
-<a href=#151 id=151 data-nosnippet>151</a>    ) = k5_ssd_chunk_scan_backward(
-<a href=#152 id=152 data-nosnippet>152</a>        d_y_bnhTMp,
-<a href=#153 id=153 data-nosnippet>153</a>        v_bnlmhp.clone(),
-<a href=#154 id=154 data-nosnippet>154</a>        c_bntmhr.clone(),
-<a href=#155 id=155 data-nosnippet>155</a>        cb_bnhTMLM,
-<a href=#156 id=156 data-nosnippet>156</a>        da_cumsum_bhnLM,
-<a href=#157 id=157 data-nosnippet>157</a>        da_cumsum_bhnTM,
-<a href=#158 id=158 data-nosnippet>158</a>        chunk_input_state_bnhpr.clone(),
-<a href=#159 id=159 data-nosnippet>159</a>        <span class="prelude-val">None</span>,
-<a href=#160 id=160 data-nosnippet>160</a>        <span class="number">1</span>, <span class="comment">// `triu(1)`: the sum of this scan includes the same position.
-<a href=#161 id=161 data-nosnippet>161</a>        </span>read_stride,
-<a href=#162 id=162 data-nosnippet>162</a>    );
-<a href=#163 id=163 data-nosnippet>163</a>
-<a href=#164 id=164 data-nosnippet>164</a>    <span class="comment">// ── K4 backward: the reverse of the state-passing scan ────────────────
-<a href=#165 id=165 data-nosnippet>165</a>    </span><span class="kw">let </span>(d_intra_chunk_state_bnhpr, d_da_end_bhn, d_initial_state_bhpr, d_start_state_bnhpr) =
-<a href=#166 id=166 data-nosnippet>166</a>        k4_ssd_state_passing_backward(
-<a href=#167 id=167 data-nosnippet>167</a>            d_chunk_input_state_bnhpr,
-<a href=#168 id=168 data-nosnippet>168</a>            chunk_input_state_bnhpr,
-<a href=#169 id=169 data-nosnippet>169</a>            da_chunk_end_bhn,
-<a href=#170 id=170 data-nosnippet>170</a>            d_final_bhpr,
-<a href=#171 id=171 data-nosnippet>171</a>            keep_bn,
-<a href=#172 id=172 data-nosnippet>172</a>        );
-<a href=#173 id=173 data-nosnippet>173</a>    <span class="comment">// The start state of each chunk with a reset is the origin state, with no
-<a href=#174 id=174 data-nosnippet>174</a>    // seed. So the origin gets the sum over the chunks.
-<a href=#175 id=175 data-nosnippet>175</a>    </span><span class="kw">let </span>d_origin_bhpr =
-<a href=#176 id=176 data-nosnippet>176</a>        d_start_state_bnhpr.map(|d_start_state_bnhpr| d_start_state_bnhpr.sum_dim(<span class="number">1</span>).squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>));
-<a href=#177 id=177 data-nosnippet>177</a>    <span class="kw">let </span>d_da_cumsum_k4_bhnl = scatter_chunk_end(d_da_end_bhn, chunk_len);
-<a href=#178 id=178 data-nosnippet>178</a>
-<a href=#179 id=179 data-nosnippet>179</a>    <span class="comment">// ── K3 and K2 backwards ───────────────────────────────────────────────
-<a href=#180 id=180 data-nosnippet>180</a>    </span><span class="kw">let </span>b_bnLMhr = b_bnlmhr.reshape([batch, nchunks, fused, nheads, state_rank]);
-<a href=#181 id=181 data-nosnippet>181</a>    <span class="kw">let </span>(d_v_k3_bnlmhp, d_b_k3_bnlmhr, d_da_cumsum_k3_bhnl) = k3_ssd_chunk_state_backward(
-<a href=#182 id=182 data-nosnippet>182</a>        d_intra_chunk_state_bnhpr,
-<a href=#183 id=183 data-nosnippet>183</a>        k3_decay_bhnLM,
-<a href=#184 id=184 data-nosnippet>184</a>        k3_decayed_v_bnLMhp,
-<a href=#185 id=185 data-nosnippet>185</a>        v_bnlmhp,
-<a href=#186 id=186 data-nosnippet>186</a>        b_bnLMhr.clone(),
-<a href=#187 id=187 data-nosnippet>187</a>    );
-<a href=#188 id=188 data-nosnippet>188</a>    <span class="kw">let </span>(d_c_k2_bntmhr, d_b_k2_bnlmhr) = k2_ssd_bmm_backward(d_cb_bnhTMLM, c_bntmhr, b_bnLMhr);
-<a href=#189 id=189 data-nosnippet>189</a>
-<a href=#190 id=190 data-nosnippet>190</a>    <span class="kw">let </span>d_c_blue_bntmhr = split_fused_axis(d_c_blue_bnhTMr, chunk_tokens);
-<a href=#191 id=191 data-nosnippet>191</a>    <span class="kw">let </span>d_v_orange_bnlmhp = split_fused_axis(d_v_orange_bnhLMp, chunk_len);
-<a href=#192 id=192 data-nosnippet>192</a>
-<a href=#193 id=193 data-nosnippet>193</a>    <span class="comment">// Test-only copies for the oracle of the local same-chunk `d_da`.
-<a href=#194 id=194 data-nosnippet>194</a>    // Production builds compute neither the add nor the copy.
-<a href=#195 id=195 data-nosnippet>195</a>    </span><span class="attr">#[cfg(test)]
-<a href=#196 id=196 data-nosnippet>196</a>    </span><span class="kw">let </span>d_da_local_bhnl = d_da_blue_bhnl.clone() + d_da_orange_bhnl.clone();
-<a href=#197 id=197 data-nosnippet>197</a>    <span class="attr">#[cfg(test)]
-<a href=#198 id=198 data-nosnippet>198</a>    </span><span class="kw">let </span>d_v_orange_save_bnlmhp = d_v_orange_bnlmhp.clone();
-<a href=#199 id=199 data-nosnippet>199</a>
-<a href=#200 id=200 data-nosnippet>200</a>    <span class="comment">// ── K1 backward and the sum of the contributions ──────────────────────
-<a href=#201 id=201 data-nosnippet>201</a>    </span><span class="kw">let </span>d_da_cumsum_bhnl =
-<a href=#202 id=202 data-nosnippet>202</a>        d_da_blue_bhnl + d_da_orange_bhnl + d_da_cumsum_k3_bhnl + d_da_cumsum_k4_bhnl;
-<a href=#203 id=203 data-nosnippet>203</a>    san(<span class="kw-2">&amp;</span>d_da_cumsum_bhnl);
-<a href=#204 id=204 data-nosnippet>204</a>    <span class="kw">let </span>d_da_bnlh = k1_ssd_chunk_cumsum_backward(d_da_cumsum_bhnl);
-<a href=#205 id=205 data-nosnippet>205</a>
-<a href=#206 id=206 data-nosnippet>206</a>    <span class="kw">let </span>d_v_bnlmhp = d_v_k3_bnlmhp + d_v_orange_bnlmhp;
-<a href=#207 id=207 data-nosnippet>207</a>    <span class="kw">let </span>d_b_bnlmhr = d_b_k2_bnlmhr + d_b_k3_bnlmhr;
-<a href=#208 id=208 data-nosnippet>208</a>    <span class="kw">let </span>d_c_bntmhr = d_c_k2_bntmhr + d_c_blue_bntmhr;
-<a href=#209 id=209 data-nosnippet>209</a>
-<a href=#210 id=210 data-nosnippet>210</a>    san(<span class="kw-2">&amp;</span>d_v_bnlmhp);
-<a href=#211 id=211 data-nosnippet>211</a>    san(<span class="kw-2">&amp;</span>d_da_bnlh);
-<a href=#212 id=212 data-nosnippet>212</a>    san(<span class="kw-2">&amp;</span>d_b_bnlmhr);
-<a href=#213 id=213 data-nosnippet>213</a>    san(<span class="kw-2">&amp;</span>d_c_bntmhr);
-<a href=#214 id=214 data-nosnippet>214</a>    san(<span class="kw-2">&amp;</span>d_initial_state_bhpr);
-<a href=#215 id=215 data-nosnippet>215</a>
-<a href=#216 id=216 data-nosnippet>216</a>    CombinedGrads {
-<a href=#217 id=217 data-nosnippet>217</a>        d_v_bnlmhp,
-<a href=#218 id=218 data-nosnippet>218</a>        d_da_bnlh,
-<a href=#219 id=219 data-nosnippet>219</a>        d_b_bnlmhr,
-<a href=#220 id=220 data-nosnippet>220</a>        d_c_bntmhr,
-<a href=#221 id=221 data-nosnippet>221</a>        d_initial_state_bhpr,
-<a href=#222 id=222 data-nosnippet>222</a>        d_origin_bhpr,
-<a href=#223 id=223 data-nosnippet>223</a>        <span class="attr">#[cfg(test)]
-<a href=#224 id=224 data-nosnippet>224</a>        </span>d_da_local_bhnl,
-<a href=#225 id=225 data-nosnippet>225</a>        <span class="attr">#[cfg(test)]
-<a href=#226 id=226 data-nosnippet>226</a>        </span>d_v_orange_bnlmhp: d_v_orange_save_bnlmhp,
-<a href=#227 id=227 data-nosnippet>227</a>    }
-<a href=#228 id=228 data-nosnippet>228</a>}
+<a href=#97 id=97 data-nosnippet>97</a>    <span class="comment">// The two axes of the chunk: `fused` is the length of its write axis, and
+<a href=#98 id=98 data-nosnippet>98</a>    // `read` is the length of its read axis.
+<a href=#99 id=99 data-nosnippet>99</a>    </span><span class="kw">let </span>chunk_tokens = chunk_tokens(chunk_len, read_stride);
+<a href=#100 id=100 data-nosnippet>100</a>    <span class="kw">let </span>fused = chunk_len * mimo_rank;
+<a href=#101 id=101 data-nosnippet>101</a>    <span class="kw">let </span>read = chunk_tokens * mimo_rank;
+<a href=#102 id=102 data-nosnippet>102</a>
+<a href=#103 id=103 data-nosnippet>103</a>    san(<span class="kw-2">&amp;</span>d_y_bntmhp);
+<a href=#104 id=104 data-nosnippet>104</a>    san(<span class="kw-2">&amp;</span>d_final_bhpr);
+<a href=#105 id=105 data-nosnippet>105</a>    san(<span class="kw-2">&amp;</span>v_bnlmhp);
+<a href=#106 id=106 data-nosnippet>106</a>    san(<span class="kw-2">&amp;</span>da_bnlh);
+<a href=#107 id=107 data-nosnippet>107</a>    san(<span class="kw-2">&amp;</span>b_bnlmhr);
+<a href=#108 id=108 data-nosnippet>108</a>    san(<span class="kw-2">&amp;</span>c_bntmhr);
+<a href=#109 id=109 data-nosnippet>109</a>    san(<span class="kw-2">&amp;</span>initial_state_bhpr);
+<a href=#110 id=110 data-nosnippet>110</a>
+<a href=#111 id=111 data-nosnippet>111</a>    <span class="comment">// ── Recompute the forward intermediates ───────────────────────────────
+<a href=#112 id=112 data-nosnippet>112</a>
+<a href=#113 id=113 data-nosnippet>113</a>    // K1: pre-combined Δ·A to the intra-chunk cumsum.
+<a href=#114 id=114 data-nosnippet>114</a>    </span><span class="kw">let </span>(da_cumsum_bhnl, da_chunk_end_bhn) = k1_ssd_chunk_cumsum(da_bnlh);
+<a href=#115 id=115 data-nosnippet>115</a>    san(<span class="kw-2">&amp;</span>da_cumsum_bhnl);
+<a href=#116 id=116 data-nosnippet>116</a>
+<a href=#117 id=117 data-nosnippet>117</a>    <span class="comment">// K2: the CB matrix of ORANGE.
+<a href=#118 id=118 data-nosnippet>118</a>    </span><span class="kw">let </span>cb_bnhTMLM = k2_ssd_bmm(c_bntmhr.clone(), b_bnlmhr.clone());
+<a href=#119 id=119 data-nosnippet>119</a>    san(<span class="kw-2">&amp;</span>cb_bnhTMLM);
+<a href=#120 id=120 data-nosnippet>120</a>
+<a href=#121 id=121 data-nosnippet>121</a>    <span class="comment">// K3: the intra-chunk state, and the intermediates of its backward.
+<a href=#122 id=122 data-nosnippet>122</a>    </span><span class="kw">let </span>(intra_chunk_state_bnhpr, k3_decay_bhnLM, k3_decayed_v_bnLMhp) =
+<a href=#123 id=123 data-nosnippet>123</a>        k3_ssd_chunk_state_extended(v_bnlmhp.clone(), b_bnlmhr.clone(), da_cumsum_bhnl.clone());
+<a href=#124 id=124 data-nosnippet>124</a>
+<a href=#125 id=125 data-nosnippet>125</a>    <span class="comment">// K4: the chunk-input state stream of BLUE.
+<a href=#126 id=126 data-nosnippet>126</a>    </span><span class="kw">let </span>(chunk_input_state_bnhpr, _final_state_bhpr) = k4_ssd_state_passing(
+<a href=#127 id=127 data-nosnippet>127</a>        intra_chunk_state_bnhpr,
+<a href=#128 id=128 data-nosnippet>128</a>        da_chunk_end_bhn.clone(),
+<a href=#129 id=129 data-nosnippet>129</a>        initial_state_bhpr,
+<a href=#130 id=130 data-nosnippet>130</a>        resets,
+<a href=#131 id=131 data-nosnippet>131</a>        <span class="prelude-val">None</span>,
+<a href=#132 id=132 data-nosnippet>132</a>    );
+<a href=#133 id=133 data-nosnippet>133</a>
+<a href=#134 id=134 data-nosnippet>134</a>    <span class="kw">let </span>(da_cumsum_bhnLM, da_cumsum_bhnTM) =
+<a href=#135 id=135 data-nosnippet>135</a>        k5_da_cumsum_on_chunk_axes(da_cumsum_bhnl, mimo_rank, read_stride);
+<a href=#136 id=136 data-nosnippet>136</a>    <span class="kw">let </span>d_y_bnhTMp = d_y_bntmhp
+<a href=#137 id=137 data-nosnippet>137</a>        .reshape([batch, nchunks, read, nheads, per_head_dim]) <span class="comment">// d_y_bnTMhp
+<a href=#138 id=138 data-nosnippet>138</a>        </span>.swap_dims(<span class="number">2</span>, <span class="number">3</span>); <span class="comment">// d_y_bnhTMp
+<a href=#139 id=139 data-nosnippet>139</a>    </span>san(<span class="kw-2">&amp;</span>d_y_bnhTMp);
+<a href=#140 id=140 data-nosnippet>140</a>
+<a href=#141 id=141 data-nosnippet>141</a>    <span class="comment">// ── K5 backward (BLUE + ORANGE) ───────────────────────────────────────
+<a href=#142 id=142 data-nosnippet>142</a>    </span><span class="kw">let </span>(
+<a href=#143 id=143 data-nosnippet>143</a>        K5Grads {
+<a href=#144 id=144 data-nosnippet>144</a>            d_chunk_input_state_bnhpr,
+<a href=#145 id=145 data-nosnippet>145</a>            d_c_blue_bnhTMr,
+<a href=#146 id=146 data-nosnippet>146</a>            d_da_blue_bhnl,
+<a href=#147 id=147 data-nosnippet>147</a>            d_v_intra_bnhLMp: d_v_orange_bnhLMp,
+<a href=#148 id=148 data-nosnippet>148</a>            d_cb_bnhTMLM,
+<a href=#149 id=149 data-nosnippet>149</a>            d_da_intra_bhnl: d_da_orange_bhnl,
+<a href=#150 id=150 data-nosnippet>150</a>        },
+<a href=#151 id=151 data-nosnippet>151</a>        <span class="kw">_</span>,
+<a href=#152 id=152 data-nosnippet>152</a>    ) = k5_ssd_chunk_scan_backward(
+<a href=#153 id=153 data-nosnippet>153</a>        d_y_bnhTMp,
+<a href=#154 id=154 data-nosnippet>154</a>        v_bnlmhp.clone(),
+<a href=#155 id=155 data-nosnippet>155</a>        c_bntmhr.clone(),
+<a href=#156 id=156 data-nosnippet>156</a>        cb_bnhTMLM,
+<a href=#157 id=157 data-nosnippet>157</a>        da_cumsum_bhnLM,
+<a href=#158 id=158 data-nosnippet>158</a>        da_cumsum_bhnTM,
+<a href=#159 id=159 data-nosnippet>159</a>        chunk_input_state_bnhpr.clone(),
+<a href=#160 id=160 data-nosnippet>160</a>        <span class="prelude-val">None</span>,
+<a href=#161 id=161 data-nosnippet>161</a>        <span class="number">1</span>, <span class="comment">// `triu(1)`: the sum of this scan includes the same position.
+<a href=#162 id=162 data-nosnippet>162</a>        </span>read_stride,
+<a href=#163 id=163 data-nosnippet>163</a>    );
+<a href=#164 id=164 data-nosnippet>164</a>
+<a href=#165 id=165 data-nosnippet>165</a>    <span class="comment">// ── K4 backward: the reverse of the state-passing scan ────────────────
+<a href=#166 id=166 data-nosnippet>166</a>    </span><span class="kw">let </span>(d_intra_chunk_state_bnhpr, d_da_end_bhn, d_initial_state_bhpr, d_start_state_bnhpr) =
+<a href=#167 id=167 data-nosnippet>167</a>        k4_ssd_state_passing_backward(
+<a href=#168 id=168 data-nosnippet>168</a>            d_chunk_input_state_bnhpr,
+<a href=#169 id=169 data-nosnippet>169</a>            chunk_input_state_bnhpr,
+<a href=#170 id=170 data-nosnippet>170</a>            da_chunk_end_bhn,
+<a href=#171 id=171 data-nosnippet>171</a>            d_final_bhpr,
+<a href=#172 id=172 data-nosnippet>172</a>            keep_bn,
+<a href=#173 id=173 data-nosnippet>173</a>        );
+<a href=#174 id=174 data-nosnippet>174</a>    <span class="comment">// The start state of each chunk with a reset is the origin state, with no
+<a href=#175 id=175 data-nosnippet>175</a>    // seed. So the origin gets the sum over the chunks.
+<a href=#176 id=176 data-nosnippet>176</a>    </span><span class="kw">let </span>d_origin_bhpr =
+<a href=#177 id=177 data-nosnippet>177</a>        d_start_state_bnhpr.map(|d_start_state_bnhpr| d_start_state_bnhpr.sum_dim(<span class="number">1</span>).squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">1</span>));
+<a href=#178 id=178 data-nosnippet>178</a>    <span class="kw">let </span>d_da_cumsum_k4_bhnl = scatter_chunk_end(d_da_end_bhn, chunk_len);
+<a href=#179 id=179 data-nosnippet>179</a>
+<a href=#180 id=180 data-nosnippet>180</a>    <span class="comment">// ── K3 and K2 backwards ───────────────────────────────────────────────
+<a href=#181 id=181 data-nosnippet>181</a>    </span><span class="kw">let </span>b_bnLMhr = b_bnlmhr.reshape([batch, nchunks, fused, nheads, state_rank]);
+<a href=#182 id=182 data-nosnippet>182</a>    <span class="kw">let </span>(d_v_k3_bnlmhp, d_b_k3_bnlmhr, d_da_cumsum_k3_bhnl) = k3_ssd_chunk_state_backward(
+<a href=#183 id=183 data-nosnippet>183</a>        d_intra_chunk_state_bnhpr,
+<a href=#184 id=184 data-nosnippet>184</a>        k3_decay_bhnLM,
+<a href=#185 id=185 data-nosnippet>185</a>        k3_decayed_v_bnLMhp,
+<a href=#186 id=186 data-nosnippet>186</a>        v_bnlmhp,
+<a href=#187 id=187 data-nosnippet>187</a>        b_bnLMhr.clone(),
+<a href=#188 id=188 data-nosnippet>188</a>    );
+<a href=#189 id=189 data-nosnippet>189</a>    <span class="kw">let </span>(d_c_k2_bntmhr, d_b_k2_bnlmhr) = k2_ssd_bmm_backward(d_cb_bnhTMLM, c_bntmhr, b_bnLMhr);
+<a href=#190 id=190 data-nosnippet>190</a>
+<a href=#191 id=191 data-nosnippet>191</a>    <span class="kw">let </span>d_c_blue_bntmhr = split_fused_axis(d_c_blue_bnhTMr, chunk_tokens);
+<a href=#192 id=192 data-nosnippet>192</a>    <span class="kw">let </span>d_v_orange_bnlmhp = split_fused_axis(d_v_orange_bnhLMp, chunk_len);
+<a href=#193 id=193 data-nosnippet>193</a>
+<a href=#194 id=194 data-nosnippet>194</a>    <span class="comment">// Test-only copies for the oracle of the local same-chunk `d_da`.
+<a href=#195 id=195 data-nosnippet>195</a>    // Production builds compute neither the add nor the copy.
+<a href=#196 id=196 data-nosnippet>196</a>    </span><span class="attr">#[cfg(test)]
+<a href=#197 id=197 data-nosnippet>197</a>    </span><span class="kw">let </span>d_da_local_bhnl = d_da_blue_bhnl.clone() + d_da_orange_bhnl.clone();
+<a href=#198 id=198 data-nosnippet>198</a>    <span class="attr">#[cfg(test)]
+<a href=#199 id=199 data-nosnippet>199</a>    </span><span class="kw">let </span>d_v_orange_save_bnlmhp = d_v_orange_bnlmhp.clone();
+<a href=#200 id=200 data-nosnippet>200</a>
+<a href=#201 id=201 data-nosnippet>201</a>    <span class="comment">// ── K1 backward and the sum of the contributions ──────────────────────
+<a href=#202 id=202 data-nosnippet>202</a>    </span><span class="kw">let </span>d_da_cumsum_bhnl =
+<a href=#203 id=203 data-nosnippet>203</a>        d_da_blue_bhnl + d_da_orange_bhnl + d_da_cumsum_k3_bhnl + d_da_cumsum_k4_bhnl;
+<a href=#204 id=204 data-nosnippet>204</a>    san(<span class="kw-2">&amp;</span>d_da_cumsum_bhnl);
+<a href=#205 id=205 data-nosnippet>205</a>    <span class="kw">let </span>d_da_bnlh = k1_ssd_chunk_cumsum_backward(d_da_cumsum_bhnl);
+<a href=#206 id=206 data-nosnippet>206</a>
+<a href=#207 id=207 data-nosnippet>207</a>    <span class="kw">let </span>d_v_bnlmhp = d_v_k3_bnlmhp + d_v_orange_bnlmhp;
+<a href=#208 id=208 data-nosnippet>208</a>    <span class="kw">let </span>d_b_bnlmhr = d_b_k2_bnlmhr + d_b_k3_bnlmhr;
+<a href=#209 id=209 data-nosnippet>209</a>    <span class="kw">let </span>d_c_bntmhr = d_c_k2_bntmhr + d_c_blue_bntmhr;
+<a href=#210 id=210 data-nosnippet>210</a>
+<a href=#211 id=211 data-nosnippet>211</a>    san(<span class="kw-2">&amp;</span>d_v_bnlmhp);
+<a href=#212 id=212 data-nosnippet>212</a>    san(<span class="kw-2">&amp;</span>d_da_bnlh);
+<a href=#213 id=213 data-nosnippet>213</a>    san(<span class="kw-2">&amp;</span>d_b_bnlmhr);
+<a href=#214 id=214 data-nosnippet>214</a>    san(<span class="kw-2">&amp;</span>d_c_bntmhr);
+<a href=#215 id=215 data-nosnippet>215</a>    san(<span class="kw-2">&amp;</span>d_initial_state_bhpr);
+<a href=#216 id=216 data-nosnippet>216</a>
+<a href=#217 id=217 data-nosnippet>217</a>    CombinedGrads {
+<a href=#218 id=218 data-nosnippet>218</a>        d_v_bnlmhp,
+<a href=#219 id=219 data-nosnippet>219</a>        d_da_bnlh,
+<a href=#220 id=220 data-nosnippet>220</a>        d_b_bnlmhr,
+<a href=#221 id=221 data-nosnippet>221</a>        d_c_bntmhr,
+<a href=#222 id=222 data-nosnippet>222</a>        d_initial_state_bhpr,
+<a href=#223 id=223 data-nosnippet>223</a>        d_origin_bhpr,
+<a href=#224 id=224 data-nosnippet>224</a>        <span class="attr">#[cfg(test)]
+<a href=#225 id=225 data-nosnippet>225</a>        </span>d_da_local_bhnl,
+<a href=#226 id=226 data-nosnippet>226</a>        <span class="attr">#[cfg(test)]
+<a href=#227 id=227 data-nosnippet>227</a>        </span>d_v_orange_bnlmhp: d_v_orange_save_bnlmhp,
+<a href=#228 id=228 data-nosnippet>228</a>    }
+<a href=#229 id=229 data-nosnippet>229</a>}
 </code></pre></div></section></main></body></html>

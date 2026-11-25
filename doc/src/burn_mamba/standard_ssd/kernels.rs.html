@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/standard_ssd/kernels.rs`."><title>kernels.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-1e18a8e7.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.102.0-nightly (137d1d494 2026-11-22)" data-channel="nightly" data-search-js="search-085293d4.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-9b351432.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-419f3a3f.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-101b5a15.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/standard_ssd/</div>kernels.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! # The kernels of the standard SSD scan
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `src/standard_ssd/kernels.rs`."><title>kernels.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-1e18a8e7.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.102.0-nightly (739adecd4 2026-11-24)" data-channel="nightly" data-search-js="search-085293d4.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-9b351432.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-419f3a3f.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-101b5a15.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">burn_mamba/standard_ssd/</div>kernels.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! # The kernels of the standard SSD scan
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! The forward K1–K5 on backend primitives, and the analytic backward of each
 <a href=#4 id=4 data-nosnippet>4</a>//! kernel beside its forward. [`super::combined_backward()`] and the backward
@@ -436,9 +436,9 @@
 <a href=#436 id=436 data-nosnippet>436</a>/// Forward, with `sᵢ` for `chunk_input_stateᵢ`: `sᵢ₊₁ = decayᵢ·sᵢ + intraᵢ`.
 <a href=#437 id=437 data-nosnippet>437</a>/// Reverse, seeded by `d_final`: `d_intraᵢ = d_sᵢ₊₁` and
 <a href=#438 id=438 data-nosnippet>438</a>/// `d_sᵢ = decayᵢ·d_sᵢ₊₁ + d_chunk_input_stateᵢ`. The walk ends on `d_initial`.
-<a href=#439 id=439 data-nosnippet>439</a>/// `d_decayᵢ = d_sᵢ₊₁·sᵢ` needs no walk. `decay` is one scalar per `(b, h, n)`,
-<a href=#440 id=440 data-nosnippet>440</a>/// so it comes out of the `(p, r)` sum, and the whole stream is one batched
-<a href=#441 id=441 data-nosnippet>441</a>/// product.
+<a href=#439 id=439 data-nosnippet>439</a>/// `d_decayᵢ = d_sᵢ₊₁·sᵢ` needs no walk. `decay` is one scalar per `(b, h, n)`.
+<a href=#440 id=440 data-nosnippet>440</a>/// So `d_decay` is the `(p, r)` sum of `d_sᵢ₊₁·sᵢ`, and the whole stream is
+<a href=#441 id=441 data-nosnippet>441</a>/// one batched product.
 <a href=#442 id=442 data-nosnippet>442</a>///
 <a href=#443 id=443 data-nosnippet>443</a>/// Under a reset (`keep_bn`), `sᵢ = keepᵢ · (the state before chunk i) +
 <a href=#444 id=444 data-nosnippet>444</a>/// (1 − keepᵢ) · startᵢ`, where `startᵢ` is the start state that chunk `i`
@@ -930,54 +930,55 @@
 <a href=#930 id=930 data-nosnippet>930</a>        <span class="kw">let </span>d_diff_bnhTMLM = d_decay_bnhTMLM * decay_bnhTMLM;
 <a href=#931 id=931 data-nosnippet>931</a>
 <a href=#932 id=932 data-nosnippet>932</a>        <span class="comment">// `diff` is target − source. The target term sums `d_diff` over the
-<a href=#933 id=933 data-nosnippet>933</a>        // sources LMₛ, and it is scattered onto the write axis. The source term
-<a href=#934 id=934 data-nosnippet>934</a>        // sums `d_diff` over the targets TMₜ, and it is on that axis.
-<a href=#935 id=935 data-nosnippet>935</a>        </span><span class="kw">let </span>d_da_target_bnhTM: F&lt;B, <span class="number">4</span>&gt; = d_diff_bnhTMLM
-<a href=#936 id=936 data-nosnippet>936</a>            .clone()
-<a href=#937 id=937 data-nosnippet>937</a>            .sum_dim(<span class="number">4</span>) <span class="comment">// d_diff_bnhTMₜ1
-<a href=#938 id=938 data-nosnippet>938</a>            </span>.squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">4</span>); <span class="comment">// d_da_target_bnhTMₜ
-<a href=#939 id=939 data-nosnippet>939</a>        </span><span class="kw">let </span>d_da_source_bnhLM: F&lt;B, <span class="number">4</span>&gt; = d_diff_bnhTMLM
-<a href=#940 id=940 data-nosnippet>940</a>            .sum_dim(<span class="number">3</span>) <span class="comment">// d_diff_bnh1LMₛ
-<a href=#941 id=941 data-nosnippet>941</a>            </span>.squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">3</span>); <span class="comment">// d_da_source_bnhLMₛ
-<a href=#942 id=942 data-nosnippet>942</a>
-<a href=#943 id=943 data-nosnippet>943</a>        </span><span class="kw">let </span>d_da_target_bnhl = scatter_fused_read_d_da(d_da_target_bnhTM, mimo_rank, read_stride);
-<a href=#944 id=944 data-nosnippet>944</a>        <span class="kw">let </span>d_da_source_bnhl: F&lt;B, <span class="number">4</span>&gt; = d_da_source_bnhLM
-<a href=#945 id=945 data-nosnippet>945</a>            .reshape([batch, n, nheads, chunk_len, mimo_rank]) <span class="comment">// d_da_source_bnhlm
-<a href=#946 id=946 data-nosnippet>946</a>            </span>.sum_dim(<span class="number">4</span>) <span class="comment">// d_da_source_bnhl1
-<a href=#947 id=947 data-nosnippet>947</a>            </span>.squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">4</span>); <span class="comment">// d_da_source_bnhl
-<a href=#948 id=948 data-nosnippet>948</a>        </span><span class="kw">let </span>d_da_intra_bnhl = d_da_target_bnhl - d_da_source_bnhl;
-<a href=#949 id=949 data-nosnippet>949</a>        san(<span class="kw-2">&amp;</span>d_da_intra_bnhl);
-<a href=#950 id=950 data-nosnippet>950</a>        vec_intra_d_da_bnhl.push(d_da_intra_bnhl);
-<a href=#951 id=951 data-nosnippet>951</a>
-<a href=#952 id=952 data-nosnippet>952</a>        <span class="comment">// d_scale[l] = Σ_{TMₜ, m} d_scale_at[TMₜ, LMₛ]
-<a href=#953 id=953 data-nosnippet>953</a>        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(d_scale_at_bnhTMLM) = d_scale_at_bnhTMLM {
-<a href=#954 id=954 data-nosnippet>954</a>            <span class="kw">let </span>d_scale_bnhl: F&lt;B, <span class="number">4</span>&gt; = d_scale_at_bnhTMLM
-<a href=#955 id=955 data-nosnippet>955</a>                .sum_dim(<span class="number">3</span>) <span class="comment">// d_scale_at_bnh1LMₛ
-<a href=#956 id=956 data-nosnippet>956</a>                </span>.squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">3</span>) <span class="comment">// d_scale_at_bnhLMₛ
-<a href=#957 id=957 data-nosnippet>957</a>                </span>.reshape([batch, n, nheads, chunk_len, mimo_rank]) <span class="comment">// d_scale_at_bnhlm
-<a href=#958 id=958 data-nosnippet>958</a>                </span>.sum_dim(<span class="number">4</span>) <span class="comment">// d_scale_at_bnhl1
-<a href=#959 id=959 data-nosnippet>959</a>                </span>.squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">4</span>); <span class="comment">// d_scale_bnhl
-<a href=#960 id=960 data-nosnippet>960</a>            </span>vec_d_scale_bnhl.push(d_scale_bnhl);
-<a href=#961 id=961 data-nosnippet>961</a>        }
-<a href=#962 id=962 data-nosnippet>962</a>    }
-<a href=#963 id=963 data-nosnippet>963</a>
-<a href=#964 id=964 data-nosnippet>964</a>    <span class="comment">// ── Rejoin the groups along the chunk axis ────────────────────────────
-<a href=#965 id=965 data-nosnippet>965</a>    </span><span class="kw">let </span>d_v_intra_bnhLMp = cat_chunk_groups(vec_intra_d_v_bnhLMp, <span class="number">1</span>);
-<a href=#966 id=966 data-nosnippet>966</a>    <span class="kw">let </span>d_c_blue_bnhTMr = cat_chunk_groups(vec_blue_d_c_bnhTMr, <span class="number">1</span>);
-<a href=#967 id=967 data-nosnippet>967</a>    <span class="kw">let </span>d_cb_bnhTMLM = cat_chunk_groups(vec_d_cb_bnhTMLM, <span class="number">1</span>);
-<a href=#968 id=968 data-nosnippet>968</a>    <span class="kw">let </span>d_da_blue_bhnl = cat_chunk_groups(vec_blue_d_da_bnhl, <span class="number">1</span>).swap_dims(<span class="number">1</span>, <span class="number">2</span>);
-<a href=#969 id=969 data-nosnippet>969</a>    <span class="kw">let </span>d_da_intra_bhnl = cat_chunk_groups(vec_intra_d_da_bnhl, <span class="number">1</span>).swap_dims(<span class="number">1</span>, <span class="number">2</span>);
-<a href=#970 id=970 data-nosnippet>970</a>    <span class="kw">let </span>d_scale_bhnl = scale_bnlh.map(|<span class="kw">_</span>| cat_chunk_groups(vec_d_scale_bnhl, <span class="number">1</span>).swap_dims(<span class="number">1</span>, <span class="number">2</span>));
-<a href=#971 id=971 data-nosnippet>971</a>    <span class="kw">let </span>d_chunk_input_state_bnhpr = cat_chunk_groups(vec_d_chunk_input_state_bnhpr, <span class="number">1</span>);
-<a href=#972 id=972 data-nosnippet>972</a>
-<a href=#973 id=973 data-nosnippet>973</a>    <span class="kw">let </span>grads = K5Grads {
-<a href=#974 id=974 data-nosnippet>974</a>        d_chunk_input_state_bnhpr,
-<a href=#975 id=975 data-nosnippet>975</a>        d_c_blue_bnhTMr,
-<a href=#976 id=976 data-nosnippet>976</a>        d_da_blue_bhnl,
-<a href=#977 id=977 data-nosnippet>977</a>        d_v_intra_bnhLMp,
-<a href=#978 id=978 data-nosnippet>978</a>        d_cb_bnhTMLM,
-<a href=#979 id=979 data-nosnippet>979</a>        d_da_intra_bhnl,
-<a href=#980 id=980 data-nosnippet>980</a>    };
-<a href=#981 id=981 data-nosnippet>981</a>    (grads, d_scale_bhnl)
-<a href=#982 id=982 data-nosnippet>982</a>}
+<a href=#933 id=933 data-nosnippet>933</a>        // sources LMₛ, and `scatter_fused_read_d_da` scatters it onto the write
+<a href=#934 id=934 data-nosnippet>934</a>        // axis. The source term sums `d_diff` over the targets TMₜ, and it is
+<a href=#935 id=935 data-nosnippet>935</a>        // on that axis.
+<a href=#936 id=936 data-nosnippet>936</a>        </span><span class="kw">let </span>d_da_target_bnhTM: F&lt;B, <span class="number">4</span>&gt; = d_diff_bnhTMLM
+<a href=#937 id=937 data-nosnippet>937</a>            .clone()
+<a href=#938 id=938 data-nosnippet>938</a>            .sum_dim(<span class="number">4</span>) <span class="comment">// d_diff_bnhTMₜ1
+<a href=#939 id=939 data-nosnippet>939</a>            </span>.squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">4</span>); <span class="comment">// d_da_target_bnhTMₜ
+<a href=#940 id=940 data-nosnippet>940</a>        </span><span class="kw">let </span>d_da_source_bnhLM: F&lt;B, <span class="number">4</span>&gt; = d_diff_bnhTMLM
+<a href=#941 id=941 data-nosnippet>941</a>            .sum_dim(<span class="number">3</span>) <span class="comment">// d_diff_bnh1LMₛ
+<a href=#942 id=942 data-nosnippet>942</a>            </span>.squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">3</span>); <span class="comment">// d_da_source_bnhLMₛ
+<a href=#943 id=943 data-nosnippet>943</a>
+<a href=#944 id=944 data-nosnippet>944</a>        </span><span class="kw">let </span>d_da_target_bnhl = scatter_fused_read_d_da(d_da_target_bnhTM, mimo_rank, read_stride);
+<a href=#945 id=945 data-nosnippet>945</a>        <span class="kw">let </span>d_da_source_bnhl: F&lt;B, <span class="number">4</span>&gt; = d_da_source_bnhLM
+<a href=#946 id=946 data-nosnippet>946</a>            .reshape([batch, n, nheads, chunk_len, mimo_rank]) <span class="comment">// d_da_source_bnhlm
+<a href=#947 id=947 data-nosnippet>947</a>            </span>.sum_dim(<span class="number">4</span>) <span class="comment">// d_da_source_bnhl1
+<a href=#948 id=948 data-nosnippet>948</a>            </span>.squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">4</span>); <span class="comment">// d_da_source_bnhl
+<a href=#949 id=949 data-nosnippet>949</a>        </span><span class="kw">let </span>d_da_intra_bnhl = d_da_target_bnhl - d_da_source_bnhl;
+<a href=#950 id=950 data-nosnippet>950</a>        san(<span class="kw-2">&amp;</span>d_da_intra_bnhl);
+<a href=#951 id=951 data-nosnippet>951</a>        vec_intra_d_da_bnhl.push(d_da_intra_bnhl);
+<a href=#952 id=952 data-nosnippet>952</a>
+<a href=#953 id=953 data-nosnippet>953</a>        <span class="comment">// d_scale[l] = Σ_{TMₜ, m} d_scale_at[TMₜ, LMₛ]
+<a href=#954 id=954 data-nosnippet>954</a>        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(d_scale_at_bnhTMLM) = d_scale_at_bnhTMLM {
+<a href=#955 id=955 data-nosnippet>955</a>            <span class="kw">let </span>d_scale_bnhl: F&lt;B, <span class="number">4</span>&gt; = d_scale_at_bnhTMLM
+<a href=#956 id=956 data-nosnippet>956</a>                .sum_dim(<span class="number">3</span>) <span class="comment">// d_scale_at_bnh1LMₛ
+<a href=#957 id=957 data-nosnippet>957</a>                </span>.squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">3</span>) <span class="comment">// d_scale_at_bnhLMₛ
+<a href=#958 id=958 data-nosnippet>958</a>                </span>.reshape([batch, n, nheads, chunk_len, mimo_rank]) <span class="comment">// d_scale_at_bnhlm
+<a href=#959 id=959 data-nosnippet>959</a>                </span>.sum_dim(<span class="number">4</span>) <span class="comment">// d_scale_at_bnhl1
+<a href=#960 id=960 data-nosnippet>960</a>                </span>.squeeze_dim::&lt;<span class="number">4</span>&gt;(<span class="number">4</span>); <span class="comment">// d_scale_bnhl
+<a href=#961 id=961 data-nosnippet>961</a>            </span>vec_d_scale_bnhl.push(d_scale_bnhl);
+<a href=#962 id=962 data-nosnippet>962</a>        }
+<a href=#963 id=963 data-nosnippet>963</a>    }
+<a href=#964 id=964 data-nosnippet>964</a>
+<a href=#965 id=965 data-nosnippet>965</a>    <span class="comment">// ── Rejoin the groups along the chunk axis ────────────────────────────
+<a href=#966 id=966 data-nosnippet>966</a>    </span><span class="kw">let </span>d_v_intra_bnhLMp = cat_chunk_groups(vec_intra_d_v_bnhLMp, <span class="number">1</span>);
+<a href=#967 id=967 data-nosnippet>967</a>    <span class="kw">let </span>d_c_blue_bnhTMr = cat_chunk_groups(vec_blue_d_c_bnhTMr, <span class="number">1</span>);
+<a href=#968 id=968 data-nosnippet>968</a>    <span class="kw">let </span>d_cb_bnhTMLM = cat_chunk_groups(vec_d_cb_bnhTMLM, <span class="number">1</span>);
+<a href=#969 id=969 data-nosnippet>969</a>    <span class="kw">let </span>d_da_blue_bhnl = cat_chunk_groups(vec_blue_d_da_bnhl, <span class="number">1</span>).swap_dims(<span class="number">1</span>, <span class="number">2</span>);
+<a href=#970 id=970 data-nosnippet>970</a>    <span class="kw">let </span>d_da_intra_bhnl = cat_chunk_groups(vec_intra_d_da_bnhl, <span class="number">1</span>).swap_dims(<span class="number">1</span>, <span class="number">2</span>);
+<a href=#971 id=971 data-nosnippet>971</a>    <span class="kw">let </span>d_scale_bhnl = scale_bnlh.map(|<span class="kw">_</span>| cat_chunk_groups(vec_d_scale_bnhl, <span class="number">1</span>).swap_dims(<span class="number">1</span>, <span class="number">2</span>));
+<a href=#972 id=972 data-nosnippet>972</a>    <span class="kw">let </span>d_chunk_input_state_bnhpr = cat_chunk_groups(vec_d_chunk_input_state_bnhpr, <span class="number">1</span>);
+<a href=#973 id=973 data-nosnippet>973</a>
+<a href=#974 id=974 data-nosnippet>974</a>    <span class="kw">let </span>grads = K5Grads {
+<a href=#975 id=975 data-nosnippet>975</a>        d_chunk_input_state_bnhpr,
+<a href=#976 id=976 data-nosnippet>976</a>        d_c_blue_bnhTMr,
+<a href=#977 id=977 data-nosnippet>977</a>        d_da_blue_bhnl,
+<a href=#978 id=978 data-nosnippet>978</a>        d_v_intra_bnhLMp,
+<a href=#979 id=979 data-nosnippet>979</a>        d_cb_bnhTMLM,
+<a href=#980 id=980 data-nosnippet>980</a>        d_da_intra_bhnl,
+<a href=#981 id=981 data-nosnippet>981</a>    };
+<a href=#982 id=982 data-nosnippet>982</a>    (grads, d_scale_bhnl)
+<a href=#983 id=983 data-nosnippet>983</a>}
 </code></pre></div></section></main></body></html>

@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="The layer stack: `Layer`s with an optional layer schedule. One struct for every family. After each layer, the residual join of `Self::residuals` combines the output of the layer with the residual streams."><title>Layers in burn_mamba::prelude - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-1e18a8e7.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.102.0-nightly (137d1d494 2026-11-22)" data-channel="nightly" data-search-js="search-085293d4.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-9b351432.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="sidebar-items.js"></script><script defer src="../../static.files/main-419f3a3f.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-101b5a15.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc struct"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Layers</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../burn_mamba/index.html">burn_<wbr>mamba</a><span class="version">0.87.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Layers</a></h2><h3><a href="#fields">Fields</a></h3><ul class="block structfield"><li><a href="#structfield.class_latents" title="class_latents">class_latents</a></li><li><a href="#structfield.class_latents_emb" title="class_latents_emb">class_latents_emb</a></li><li><a href="#structfield.grad_horizon" title="grad_horizon">grad_horizon</a></li><li><a href="#structfield.ignore_first_residual" title="ignore_first_residual">ignore_first_residual</a></li><li><a href="#structfield.ignore_last_residual" title="ignore_last_residual">ignore_last_residual</a></li><li><a href="#structfield.n_real_layers" title="n_real_layers">n_real_layers</a></li><li><a href="#structfield.n_virtual_layers" title="n_virtual_layers">n_virtual_layers</a></li><li><a href="#structfield.real_layers" title="real_layers">real_layers</a></li><li><a href="#structfield.residuals" title="residuals">residuals</a></li></ul><h3><a href="#implementations">Methods</a></h3><ul class="block method"><li><a href="#method.class_latent_output_indices" title="class_latent_output_indices">class_latent_output_indices</a></li><li><a href="#method.forward" title="forward">forward</a></li><li><a href="#method.forward_packed" title="forward_packed">forward_packed</a></li><li><a href="#method.n_virtual_count" title="n_virtual_count">n_virtual_count</a></li><li><a href="#method.only_start_latents" title="only_start_latents">only_start_latents</a></li><li><a href="#method.prime" title="prime">prime</a></li><li><a href="#method.retie" title="retie">retie</a></li><li><a href="#method.step" title="step">step</a></li><li><a href="#method.zero_caches" title="zero_caches">zero_caches</a></li></ul><h3><a href="#trait-implementations">Trait Implementations</a></h3><ul class="block trait-implementation"><li><a href="#impl-Clone-for-Layers%3CM%3E" title="Clone">Clone</a></li><li><a href="#impl-Debug-for-Layers%3CM%3E" title="Debug">Debug</a></li><li><a href="#impl-Display-for-Layers%3CM%3E" title="Display">Display</a></li><li><a href="#impl-Module-for-Layers%3CM%3E" title="Module">Module</a></li><li><a href="#impl-ModuleDisplay-for-Layers%3CM%3E" title="ModuleDisplay">ModuleDisplay</a></li><li><a href="#impl-ModuleDisplayDefault-for-Layers%3CM%3E" title="ModuleDisplayDefault">ModuleDisplayDefault</a></li></ul><h3><a href="#synthetic-implementations">Auto Trait Implementations</a></h3><ul class="block synthetic-implementation"><li><a href="#impl-RefUnwindSafe-for-Layers%3CM%3E" title="!RefUnwindSafe">!RefUnwindSafe</a></li><li><a href="#impl-UnwindSafe-for-Layers%3CM%3E" title="!UnwindSafe">!UnwindSafe</a></li><li><a href="#impl-Forget-for-Layers%3CM%3E" title="Forget">Forget</a></li><li><a href="#impl-Freeze-for-Layers%3CM%3E" title="Freeze">Freeze</a></li><li><a href="#impl-Move-for-Layers%3CM%3E" title="Move">Move</a></li><li><a href="#impl-Send-for-Layers%3CM%3E" title="Send">Send</a></li><li><a href="#impl-Sync-for-Layers%3CM%3E" title="Sync">Sync</a></li><li><a href="#impl-Unpin-for-Layers%3CM%3E" title="Unpin">Unpin</a></li><li><a href="#impl-UnsafeUnpin-for-Layers%3CM%3E" title="UnsafeUnpin">UnsafeUnpin</a></li></ul><h3><a href="#blanket-implementations">Blanket Implementations</a></h3><ul class="block blanket-implementation"><li><a href="#impl-Any-for-T" title="Any">Any</a></li><li><a href="#impl-Borrow%3CT%3E-for-T" title="Borrow&#60;T&#62;">Borrow&#60;T&#62;</a></li><li><a href="#impl-BorrowMut%3CT%3E-for-T" title="BorrowMut&#60;T&#62;">BorrowMut&#60;T&#62;</a></li><li><a href="#impl-CastableFrom%3CST,+Initialized,+Initialized%3E-for-DT" title="CastableFrom&#60;ST, Initialized, Initialized&#62;">CastableFrom&#60;ST, Initialized, Initialized&#62;</a></li><li><a href="#impl-CastableFrom%3CST,+Uninit,+Uninit%3E-for-DT" title="CastableFrom&#60;ST, Uninit, Uninit&#62;">CastableFrom&#60;ST, Uninit, Uninit&#62;</a></li><li><a href="#impl-CloneToUninit-for-T" title="CloneToUninit">CloneToUninit</a></li><li><a href="#impl-From%3CT%3E-for-T" title="From&#60;T&#62;">From&#60;T&#62;</a></li><li><a href="#impl-Into%3CU%3E-for-T" title="Into&#60;U&#62;">Into&#60;U&#62;</a></li><li><a href="#impl-Read%3CExclusive,+BecauseExclusive%3E-for-T" title="Read&#60;Exclusive, BecauseExclusive&#62;">Read&#60;Exclusive, BecauseExclusive&#62;</a></li><li><a href="#impl-ToOwned-for-T" title="ToOwned">ToOwned</a></li><li><a href="#impl-ToString-for-T" title="ToString">ToString</a></li><li><a href="#impl-TryFrom%3CU%3E-for-T" title="TryFrom&#60;U&#62;">TryFrom&#60;U&#62;</a></li><li><a href="#impl-TryInto%3CU%3E-for-T" title="TryInto&#60;U&#62;">TryInto&#60;U&#62;</a></li></ul></section><div id="rustdoc-modnav"><h2><a href="index.html">In burn_<wbr>mamba::<wbr>prelude</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../index.html">burn_mamba</a>::<wbr><a href="index.html">prelude</a></div><h1>Struct <span class="struct">Layers</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"></span></div><pre class="rust item-decl"><code>pub struct Layers&lt;M&gt;<div class="where">where
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="The layer stack: `Layer`s with an optional layer schedule. One struct for every family. After each layer, the residual join of `Self::residuals` combines the output of the layer with the residual streams."><title>Layers in burn_mamba::prelude - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-1e18a8e7.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="burn_mamba" data-themes="" data-resource-suffix="" data-rustdoc-version="1.102.0-nightly (739adecd4 2026-11-24)" data-channel="nightly" data-search-js="search-085293d4.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-9b351432.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="sidebar-items.js"></script><script defer src="../../static.files/main-419f3a3f.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-101b5a15.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc struct"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Layers</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../burn_mamba/index.html">burn_<wbr>mamba</a><span class="version">0.88.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Layers</a></h2><h3><a href="#fields">Fields</a></h3><ul class="block structfield"><li><a href="#structfield.class_latents" title="class_latents">class_latents</a></li><li><a href="#structfield.class_latents_emb" title="class_latents_emb">class_latents_emb</a></li><li><a href="#structfield.grad_horizon" title="grad_horizon">grad_horizon</a></li><li><a href="#structfield.ignore_first_residual" title="ignore_first_residual">ignore_first_residual</a></li><li><a href="#structfield.ignore_last_residual" title="ignore_last_residual">ignore_last_residual</a></li><li><a href="#structfield.n_real_layers" title="n_real_layers">n_real_layers</a></li><li><a href="#structfield.n_virtual_layers" title="n_virtual_layers">n_virtual_layers</a></li><li><a href="#structfield.real_layers" title="real_layers">real_layers</a></li><li><a href="#structfield.residuals" title="residuals">residuals</a></li></ul><h3><a href="#implementations">Methods</a></h3><ul class="block method"><li><a href="#method.class_latent_output_indices" title="class_latent_output_indices">class_latent_output_indices</a></li><li><a href="#method.forward" title="forward">forward</a></li><li><a href="#method.forward_packed" title="forward_packed">forward_packed</a></li><li><a href="#method.n_virtual_count" title="n_virtual_count">n_virtual_count</a></li><li><a href="#method.only_start_latents" title="only_start_latents">only_start_latents</a></li><li><a href="#method.prime" title="prime">prime</a></li><li><a href="#method.retie" title="retie">retie</a></li><li><a href="#method.step" title="step">step</a></li><li><a href="#method.zero_caches" title="zero_caches">zero_caches</a></li></ul><h3><a href="#trait-implementations">Trait Implementations</a></h3><ul class="block trait-implementation"><li><a href="#impl-Clone-for-Layers%3CM%3E" title="Clone">Clone</a></li><li><a href="#impl-Debug-for-Layers%3CM%3E" title="Debug">Debug</a></li><li><a href="#impl-Display-for-Layers%3CM%3E" title="Display">Display</a></li><li><a href="#impl-Module-for-Layers%3CM%3E" title="Module">Module</a></li><li><a href="#impl-ModuleDisplay-for-Layers%3CM%3E" title="ModuleDisplay">ModuleDisplay</a></li><li><a href="#impl-ModuleDisplayDefault-for-Layers%3CM%3E" title="ModuleDisplayDefault">ModuleDisplayDefault</a></li></ul><h3><a href="#synthetic-implementations">Auto Trait Implementations</a></h3><ul class="block synthetic-implementation"><li><a href="#impl-RefUnwindSafe-for-Layers%3CM%3E" title="!RefUnwindSafe">!RefUnwindSafe</a></li><li><a href="#impl-UnwindSafe-for-Layers%3CM%3E" title="!UnwindSafe">!UnwindSafe</a></li><li><a href="#impl-Forget-for-Layers%3CM%3E" title="Forget">Forget</a></li><li><a href="#impl-Freeze-for-Layers%3CM%3E" title="Freeze">Freeze</a></li><li><a href="#impl-Move-for-Layers%3CM%3E" title="Move">Move</a></li><li><a href="#impl-Send-for-Layers%3CM%3E" title="Send">Send</a></li><li><a href="#impl-Sync-for-Layers%3CM%3E" title="Sync">Sync</a></li><li><a href="#impl-Unpin-for-Layers%3CM%3E" title="Unpin">Unpin</a></li><li><a href="#impl-UnsafeUnpin-for-Layers%3CM%3E" title="UnsafeUnpin">UnsafeUnpin</a></li></ul><h3><a href="#blanket-implementations">Blanket Implementations</a></h3><ul class="block blanket-implementation"><li><a href="#impl-Any-for-T" title="Any">Any</a></li><li><a href="#impl-Borrow%3CT%3E-for-T" title="Borrow&#60;T&#62;">Borrow&#60;T&#62;</a></li><li><a href="#impl-BorrowMut%3CT%3E-for-T" title="BorrowMut&#60;T&#62;">BorrowMut&#60;T&#62;</a></li><li><a href="#impl-CastableFrom%3CST,+Initialized,+Initialized%3E-for-DT" title="CastableFrom&#60;ST, Initialized, Initialized&#62;">CastableFrom&#60;ST, Initialized, Initialized&#62;</a></li><li><a href="#impl-CastableFrom%3CST,+Uninit,+Uninit%3E-for-DT" title="CastableFrom&#60;ST, Uninit, Uninit&#62;">CastableFrom&#60;ST, Uninit, Uninit&#62;</a></li><li><a href="#impl-CloneToUninit-for-T" title="CloneToUninit">CloneToUninit</a></li><li><a href="#impl-From%3CT%3E-for-T" title="From&#60;T&#62;">From&#60;T&#62;</a></li><li><a href="#impl-Into%3CU%3E-for-T" title="Into&#60;U&#62;">Into&#60;U&#62;</a></li><li><a href="#impl-Read%3CExclusive,+BecauseExclusive%3E-for-T" title="Read&#60;Exclusive, BecauseExclusive&#62;">Read&#60;Exclusive, BecauseExclusive&#62;</a></li><li><a href="#impl-ToOwned-for-T" title="ToOwned">ToOwned</a></li><li><a href="#impl-ToString-for-T" title="ToString">ToString</a></li><li><a href="#impl-TryFrom%3CU%3E-for-T" title="TryFrom&#60;U&#62;">TryFrom&#60;U&#62;</a></li><li><a href="#impl-TryInto%3CU%3E-for-T" title="TryInto&#60;U&#62;">TryInto&#60;U&#62;</a></li></ul></section><div id="rustdoc-modnav"><h2><a href="index.html">In burn_<wbr>mamba::<wbr>prelude</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../index.html">burn_mamba</a>::<wbr><a href="index.html">prelude</a></div><h1>Struct <span class="struct">Layers</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"></span></div><pre class="rust item-decl"><code>pub struct Layers&lt;M&gt;<div class="where">where
     M: Module,</div>{
     pub n_real_layers: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
     pub n_virtual_layers: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;(<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>, <a class="enum" href="enum.Schedule.html" title="enum burn_mamba::prelude::Schedule">Schedule</a>)&gt;,
@@ -28,9 +28,9 @@ layers. The other layers run without an autodiff graph. <code>None</code> (the
 default) tracks the whole stack.</p>
 <p>The horizon follows the deep recursion of TRM and HRM. When
 <code>n_virtual_layers</code> is far above <code>n_real_layers</code>, the tracking of every
-pass is what runs out of memory. Both papers back-propagate only a
+pass is what fills the memory. Both papers back-propagate only a
 suffix: TRM one full recursion, HRM-Text a horizon <code>K</code> warmed from 2 to
-5. The horizon counts <strong>from the top</strong>, so it keeps its meaning when the
+5. The horizon counts <strong>from the top</strong>. So it keeps its meaning when the
 stack depth changes, and a training loop can move it per training step.</p>
 <p><a href="enum.GradHorizon.html#variant.Depth" title="variant burn_mamba::prelude::GradHorizon::Depth"><code>GradHorizon::Depth</code></a><code>(K)</code> counts <code>K</code> from the top of every <strong>real</strong>
 layer (its last <code>K</code> applications), not from the top of the stack. The
@@ -87,22 +87,29 @@ follow the same rule. The module header of
 autodiff backend, before the stack runs. Each case below would let a
 parameter silently not train:</p>
 <ul>
-<li>An untracked application of a layer that unties parameters. Only
-their own application reads the copies.</li>
-<li>An untracked layer 0 under <code>ignore_first_residual</code>, or an untracked
+<li>
+<p>An untracked application of a layer that unties parameters. Only
+their own application reads the copies.</p>
+</li>
+<li>
+<p>An untracked layer 0 under <code>ignore_first_residual</code>, or an untracked
 top layer under <code>ignore_last_residual</code>. The carry path across a
 suppressed skip has gain 0. So the input of the stack, or every layer
-of the stack, would get no gradient.</li>
-<li>Under MGR, a module that pools in a tracked layer, but only directly
+of the stack, would get no gradient.</p>
+</li>
+<li>
+<p>Under MGR, a module that pools in a tracked layer, but only directly
 below untracked layers. Its pooled token takes no straight-through
-carry, so its aggregator query <code>w_alpha</code> would never train. With no
-weight sharing, or with one module for each virtual layer, an MGR
-stack can thus take an untracked span only at the bottom, or directly
-above a suppressed first skip. Its layer 0 does not pool. Under
-<a href="enum.Schedule.html#variant.Stretched" title="variant burn_mamba::prelude::Schedule::Stretched"><code>Schedule::Stretched</code></a> with modules for each real layer, <code>Depth(1)</code>
-panics when a run other than the bottom one is longer than one layer.
-The module of the run below pools only at its tail, directly below
-the untracked head of that run.</li>
+carry, so its aggregator query <code>w_alpha</code> would never train. Thus, with
+no weight sharing or with one module for each virtual layer, an MGR
+stack can take an untracked span at two places only. One is the
+bottom, and the other is directly above a suppressed first skip.
+Under a suppressed first skip, layer 0 does not pool.</p>
+<p>Under <a href="enum.Schedule.html#variant.Stretched" title="variant burn_mamba::prelude::Schedule::Stretched"><code>Schedule::Stretched</code></a> with modules for each real layer,
+<code>Depth(1)</code> panics when a run other than the bottom one is longer than
+one layer. The module of the run below pools only at its tail,
+directly below the untracked head of that run.</p>
+</li>
 </ul>
 <p><strong>Every class embedding trains</strong>, at both marker levels and on both
 sides of a cut. The <a href="enum.ClassToken.html" title="enum burn_mamba::prelude::ClassToken"><code>ClassToken</code></a>s of a network and the
@@ -122,7 +129,7 @@ truncation that it trains under.</p>
 position past the emitted sequence. Compare it against the sequence
 length.</p>
 </div></details><details class="toggle method-toggle" open><summary><section id="method.only_start_latents" class="method"><h4 class="code-header">pub fn <a href="#method.only_start_latents" class="fn">only_start_latents</a>(&amp;self) -&gt; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a></h4></section></summary><div class="docblock"><p>Whether every class latent of the stack is a <code>Start</code>. Then, after the
-opening of a sequence has run, no later <a href="struct.Layers.html#method.step" title="method burn_mamba::prelude::Layers::step"><code>step</code></a> emits one.
+opening of a sequence runs, no later <a href="struct.Layers.html#method.step" title="method burn_mamba::prelude::Layers::step"><code>step</code></a> emits one.
 So every step runs the same launches (a
 <a href="crate::utils::capture::CapturedStep"><code>CapturedStep</code></a> needs this), and
 a step with no cursors equals the step with them.</p>
@@ -169,26 +176,42 @@ whole sequence, so every latent lands in this call. Pass the same
 [<code>ClassCursors</code>] to consecutive windows to split the sequence without a
 move of any latent (see [<code>ClassCursors</code>]).</p>
 <p><code>pad</code> (<code>[batch, sequence]</code>, <code>true</code> at padding, <code>None</code> ⇒ no padding)
-marks a right-padded batch. Every row comes out as its own sequence
-would come out alone: the outputs of its real tokens, and its caches.
-Every class latent is placed against the length of that row (see
-[<code>crate::utils::padding</code>]). The positions still come back in the
-batch-wide order, with the class latents where the plan for the padded
-length puts them.</p>
+marks a right-padded batch. The output of every row equals the output
+of its own sequence alone: the outputs of its real tokens, and its
+caches. The stack places every class latent against the length of that
+row (see [<code>crate::utils::padding</code>]). The output still has the positions
+in the batch-wide order, with the class latents where the plan for the
+padded length puts them.</p>
 </div></details><details class="toggle method-toggle" open><summary><section id="method.forward_packed" class="method"><h4 class="code-header">pub fn <a href="#method.forward_packed" class="fn">forward_packed</a>(
     &amp;self,
     x: Tensor&lt;3&gt;,
     caches: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;&lt;M as <a class="trait" href="trait.Block.html" title="trait burn_mamba::prelude::Block">Block</a>&gt;::<a class="associatedtype" href="trait.Block.html#associatedtype.Cache" title="type burn_mamba::prelude::Block::Cache">Cache</a>&gt;&gt;,
+    origins: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;&lt;M as <a class="trait" href="trait.Block.html" title="trait burn_mamba::prelude::Block">Block</a>&gt;::<a class="associatedtype" href="trait.Block.html#associatedtype.Cache" title="type burn_mamba::prelude::Block::Cache">Cache</a>&gt;&gt;,
     options: &lt;M as <a class="trait" href="trait.Block.html" title="trait burn_mamba::prelude::Block">Block</a>&gt;::<a class="associatedtype" href="trait.Block.html#associatedtype.Options" title="type burn_mamba::prelude::Block::Options">Options</a>,
     packed: &amp;Packed,
 ) -&gt; (Tensor&lt;3&gt;, <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;&lt;M as <a class="trait" href="trait.Block.html" title="trait burn_mamba::prelude::Block">Block</a>&gt;::<a class="associatedtype" href="trait.Block.html#associatedtype.Cache" title="type burn_mamba::prelude::Block::Cache">Cache</a>&gt;)</h4></section></summary><div class="docblock"><p><a href="struct.Layers.html#method.forward" title="method burn_mamba::prelude::Layers::forward"><code>Self::forward</code></a> over packed rows (see [<code>crate::utils::packing</code>]). At
-each reset of <code>packed</code>, every layer starts again from a zero cache. The
-positions before the first reset of a row continue from <code>caches</code>.</p>
+each reset of <code>packed</code> in row <code>b</code>, each virtual layer starts again from
+row <code>b</code> of its origin. The positions before the first reset of a row
+continue from <code>caches</code>. The returned caches are those of the last
+segment of each row.</p>
+<p><code>origins</code> holds one origin for each virtual layer, in the order of
+<code>caches</code>. <code>None</code> gives each virtual layer its zero cache, as for
+<code>caches</code>. The call does not return the origins. An origin follows the
+rules of a cache:</p>
+<ul>
+<li>It gets a gradient from each segment that starts from it.</li>
+<li>Under <a href="struct.Layers.html#structfield.grad_horizon" title="field burn_mamba::prelude::Layers::grad_horizon"><code>Self::grad_horizon</code></a>, the origin of an untracked layer moves
+to the inner backend with the cache of that layer. It gets no
+gradient.</li>
+<li>An origin from the caller has the checkpointing strategy of the
+stack, or an op panics.</li>
+<li>An origin that an earlier backward used needs a detach first
+(<a href="crate::modules::cache_detach"><code>cache_detach</code></a>).</li>
+</ul>
 <p>The stack puts its class latents into the opening slots of each
 segment, in place of the input tokens. So the output has the shape of
 <code>x</code>. Every class latent of the stack must be a <code>Start</code>, and <code>packed</code>
-must give each segment one opening slot per class latent. The returned
-caches are those of the last segment of each row.</p>
+must give each segment one opening slot per class latent.</p>
 </div></details><details class="toggle method-toggle" open><summary><section id="method.step" class="method"><h4 class="code-header">pub fn <a href="#method.step" class="fn">step</a>(
     &amp;self,
     x: Tensor&lt;2&gt;,
@@ -204,7 +227,7 @@ and <code>forward</code> and <code>step</code> agree.</p>
 <p>The step returns the (fully propagated) output of the <strong>last</strong> token of
 that stream. This is the user token, unless an <code>End</code> latent follows it
 (the one kind that closes the sequence, not precedes a token). The
-latents emitted <em>before</em> the user token are stepped only for their
+stack steps the latents emitted <em>before</em> the user token only for their
 effect on the state.</p>
 <p><code>None</code> injects nothing. <code>Middle</code>/<code>End</code> latents then panic, as they do
 without a [<code>ClassCursors::full_len</code>] hint.</p>
@@ -235,7 +258,7 @@ nothing.</p>
 <code>None</code> when no latent was waiting. This is the entry point of seedless
 generation: <code>prime</code> → sample → <code>step</code> → sample → … <code>batch</code> sizes the
 latent rows, which are the only inputs.</p>
-<p>When nothing ran, the caches come back as they went in (<code>None</code>
+<p>When nothing ran, the call returns the caches unchanged (<code>None</code>
 included). When a latent runs from <code>None</code>, the cascade starts from
 <a href="struct.Layers.html#method.zero_caches" title="method burn_mamba::prelude::Layers::zero_caches"><code>Self::zero_caches</code></a>. <code>None</code> cursors inject nothing (<code>Middle</code>/<code>End</code>
 latents then panic, as in <code>step</code>).</p>
