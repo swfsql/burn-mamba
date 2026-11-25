@@ -47,7 +47,7 @@ glossary term **Tap FIFO**.
 - A use of "slot" for one position of the FIFO stays. `TapPattern::tap_slots` and the
   shape name `tap_slots` stay.
 - The outputs, the caches and the gradients do not change. No tensor op changes.
-- The crate goes up one minor version, in the first commit that breaks the public API.
+- The first commit that breaks the public API bumps the minor version of the crate.
   That commit message states the break.
 
 **Names:**
@@ -114,7 +114,7 @@ Only `zero_tap_fifo` is public API. The version is 0.82.0.
 
 **Review findings that did not change the code:**
 
-- `save_tap_fifo` computes the FIFO and gives it back. It saves nothing. **Names** sets the
+- `save_tap_fifo` computes the FIFO and returns it. It saves nothing. **Names** sets the
   name.
 - The first line of the doc of `save_tap_fifo` calls its output "The tap FIFO for the next
   call". The body calls it "the new tap FIFO". The two phrases name the same value.

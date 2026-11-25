@@ -64,7 +64,7 @@ not compiled. 39 test lines name the tap fields.
   If that also needs a change in Burn or burn-stack, the agent reverts step 4.
 - `TestCache::map` in the packing tests uses `CacheTensors::zip_tensors`.
   `TestCache::visit` stays, because only it treats the rotation angle as an angle.
-- Ticket 07 is blocked by this ticket. It then reads one `TapFifo`.
+- This ticket blocks ticket 07. Ticket 07 then reads one `TapFifo`.
 - A ticket that breaks the public API bumps the minor version (`CLAUDE.md`). This ticket
   also names the break of ticket 05, which had no bump.
 - No ticket of this split runs the benches. No tensor op changes.

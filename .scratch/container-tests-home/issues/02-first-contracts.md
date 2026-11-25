@@ -92,12 +92,15 @@ contracts, on each block setting that its family tests use.
 
 ### The review (`tmp/review-ct02-standards.md`, `tmp/review-ct02-spec.md`)
 
-- Fixed: the seam row describes no plan, uses noun phrases and gives the coverage
-  clause of the spec. The module header no longer says that each setting changes one
-  value. It says "the default SSD path" and "chunk length", and it gives the reason for
-  the optimal chunk length of the default path. All Mamba-3 paths get their chunk length
-  from one helper (`m3_path`). The panic text has no count. `This` became
-  `ThisContract`.
+- Fixed:
+  - The seam row describes no plan, uses noun phrases and gives the coverage clause of
+    the spec.
+  - The module header said that each setting changes one value. The fixed header does
+    not say it. It says "the default SSD path" and "chunk length", and it gives the
+    reason for the optimal chunk length of the default path.
+  - All Mamba-3 paths get their chunk length from one helper (`m3_path`).
+  - The panic text has no count.
+  - `This` became `ThisContract`.
 - Kept, with a note in ticket 06: the copies of the config builders `m1`/`m2`/`m3` of
   `block.rs`, and the pointer to `capture.rs` in the header of the module. Ticket 06
   sorts both files.

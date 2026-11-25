@@ -44,7 +44,7 @@ loading, and that is correct (no config compatibility).
 ## Acceptance criteria
 
 - [x] `rg -w 'Trapezoid|trapezoid|TrapezoidSpec|trapezoid_spec|with_trapezoid|has_interior_tap'`
-      over the code finds no hit. Prose "trapezoid" is left only where it means
+      over the code finds no hit. Prose "trapezoid" stays only where it means
       the rule.
 - [x] `rg -i 'interior tap|far tap|horizontal tap|vertical tap'` finds no hit.
 - [x] `cargo check`, `cargo test --lib -- --test-threads=1`,
@@ -71,10 +71,10 @@ loading, and that is correct (no config compatibility).
     `src/mamba3/positive/tests.rs`, and `nu_int`, `nu_far` in the scripts. They
     spell the math symbols `νⁱⁿᵗ` and `νᶠᵃʳ`, which this ticket keeps.
   - `interior_gap_decay`: the inside of the gap of a tap, not a tap.
-  - "Interior" for a point inside the `tanh` range, or for the micro-steps
-    inside a token (ADR 0005, `product/mod.rs`, the script), and the far part
-    of the context scores (`examples/common/context.rs`). These are other
-    meanings.
+  - "Interior" for these other meanings:
+    - a point inside the `tanh` range,
+    - the micro-steps inside a token (ADR 0005, `product/mod.rs`, the script),
+    - the far part of the context scores (`examples/common/context.rs`).
   - The names from the member names: the `vertical_*` and `horizontal_*` test
     names, `cfg_vertical`, the script labels (`vertical (lag u)`,
     `reset-horizontal`, …), and "the tap graph is "vertical"" (why the member

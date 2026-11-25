@@ -63,8 +63,8 @@ item is lost, stop and ask the user. The fix is usually a new contract in burn-s
   |---|---|---|
   | `block.rs` | `record_round_trip`, `cache_stack_and_traversal`, `captured_step_over_flat_caches`, `stack_knobs`, `untied_through_the_enum`, `muon_plan_matches_the_family_type` | the other 10 tests |
   | `untied.rs` | the three `*_untied_stack_equals_the_stack_of_its_application_views`, `mamba3_untied_tail_trains_one_copy_per_application` | `mamba3_layout_follows_the_untie_list` |
-  | `packed.rs` | all 4. The file and its `mod` line are deleted. | none |
-  | `hnet.rs` | all 4. The file and its `mod` line are deleted. | none |
+  | `packed.rs` | all 4. The change deletes the file and its `mod` line. | none |
+  | `hnet.rs` | all 4. The change deletes the file and its `mod` line. | none |
   | `capture.rs` | `mamba2_assign_moves_every_field`, `mamba1_assign_moves_every_field` | the two Mamba-3 tests |
   | `config.rs` | none | all 5 |
   | `reset_align.rs` | none | all 5 |
@@ -152,7 +152,7 @@ The final run (`tmp/coverage-record/gate-06.log`) is on both fixes:
 
 The record has 7713 of 7898 lines for burn-mamba, and 4057 of 6627 lines for burn-stack
 by both suites. Tickets 03–06 are now all resolved, so the record and its `.discard` tag
-go to `/tmp`. The paragraph about the gate of the move is deleted from
+go to `/tmp`. The change deletes the paragraph about the gate of the move from
 `docs/agents/testing.md`.
 
 ### The review
@@ -166,10 +166,10 @@ Four reports, one for each axis and each repo: `tmp/review-ct06-standards.md`,
   part after the step, as in the deleted test. One check compares each copy, for the
   `Segmented` step and for the training step. The comments of burn-stack ticket 06 give
   the red check in fp32 and fp16.
-- burn-stack, the docs: the seam row "Containers with real blocks" is deleted. The line
-  of `CLAUDE.md` about the tests of burn-mamba names the block contracts. The spec says:
-  "The test-seam tables of both repos change with the module and with the burn-mamba
-  ticket."
+- burn-stack, the docs: the fix deletes the seam row "Containers with real blocks". The
+  line of `CLAUDE.md` about the tests of burn-mamba names the block contracts. The spec
+  says: "The test-seam tables of both repos change with the module and with the
+  burn-mamba ticket."
 - The header of `block_contract.rs` said that the untied Mamba-3 setting unties each
   tensor that it can untie. It does not untie the tensors of the Kalman gain and of the
   tropical readout. The deleted test did not untie them either. The header now names

@@ -115,7 +115,7 @@ The reports of commit `0c1efac8` are the reports before the change. The user run
 
 - The single split stays when no launch count rises and the time stays within run
   noise, as the user judges it.
-- If the split fails that condition, change only the body of the split. Remove the
+- If the split fails that condition, change only the body of the split. Separate the
   optional groups from the end with `narrow`. Split the fixed groups with `split_into`.
   These are the ops of the code before this ticket.
 

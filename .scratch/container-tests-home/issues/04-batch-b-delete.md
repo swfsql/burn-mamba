@@ -45,14 +45,14 @@ item is lost, stop and ask the user. The fix is usually a new contract in burn-s
 - The pin moved from `a236fe3f` to burn-stack `d8d8d351`, the pushed commit that resolves
   its ticket 04. The version of burn-stack stays 0.41.0, so there is no version bump.
 - `src/family/tests/layers.rs` (18 tests, with the memory probe), `layer.rs` (5 tests)
-  and `bidi.rs` (2 tests) held only tests of rule 1. The three files and their `mod` lines
-  are deleted.
+  and `bidi.rs` (2 tests) held only tests of rule 1. The change deletes the three files and
+  their `mod` lines.
 - The header of `src/family/tests/mod.rs` names the properties of the files that stay. It
   does not name the gradient reachability across a `grad_horizon` cut.
 - No other doc of burn-mamba names a deleted test or the probe.
 - This ticket adds no test, so it has no red check.
 - `cargo test --lib -- --test-threads=1` on `flex`: 350 passed, 3 ignored. Before the
-  change: 374 passed, 4 ignored. The deletion removes 24 tests and the ignored probe.
+  change: 374 passed, 4 ignored. The change deletes 24 tests and the ignored probe.
 - `scripts/check.sh` passed on the pin, with no warning. Its coverage step gave the
   burn-mamba totals of the record.
 

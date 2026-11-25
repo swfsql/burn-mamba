@@ -14,9 +14,12 @@ burn-stack half is burn-stack ticket 08.
 
 **Category:** enhancement
 
-**Summary:** Move the burn-stack pin to burn-stack ticket 08, delete the hand-written
-backend hop of each cache, implement `Block::zero_cache`, and keep the slot logic of
-each family only in `CacheStack`.
+**Summary:**
+
+- Move the burn-stack pin to burn-stack ticket 08.
+- Delete the hand-written backend hop of each cache.
+- Implement `Block::zero_cache`.
+- Keep the slot logic of each family only in `CacheStack`.
 
 **Current behaviour (with the pin of today, after ticket 06):**
 
@@ -67,9 +70,11 @@ each family only in `CacheStack`.
       or a tolerance.
 - [ ] `./scripts/check.sh` passes.
 - [ ] `Cargo.toml` has the next minor version.
-- [ ] The docs describe the code as it is: the module headers of the adapters and of the
-      capture traversals, `src/family/mod.rs`, the File Map line of `capture.rs`, and
-      each doc that names a deleted item.
+- [ ] The docs describe the code as it is:
+  - the module headers of the adapters and of the capture traversals,
+  - `src/family/mod.rs`,
+  - the File Map line of `capture.rs`,
+  - each doc that names a deleted item.
 
 **Benches:** none. No tensor op changes.
 

@@ -217,9 +217,11 @@ called them are gone.
 2. The File Map has a `row_end.rs` line. The seam row "Mechanism against its direct form"
    lists `src/row_end/tests.rs`.
 3. `./scripts/check.sh` passes.
-4. `cargo test --lib` gives 397 passed, 0 failed and 4 ignored. The base gave 390 passed,
-   and `src/row_end/tests.rs` adds 7 tests: the 5 cases of the brief, one case of resets
-   with `width ≤ micro_steps` (the `narrow` path with resets), and the `should_panic` test.
+4. `cargo test --lib` gives 397 passed, 0 failed and 4 ignored. The base gave 390 passed.
+   `src/row_end/tests.rs` adds 7 tests:
+   - the 5 cases of the brief,
+   - one case of resets with `width ≤ micro_steps` (the `narrow` path with resets),
+   - the `should_panic` test.
 5. The version in `Cargo.toml` did not change.
 
 **Changes outside the list of the brief:**

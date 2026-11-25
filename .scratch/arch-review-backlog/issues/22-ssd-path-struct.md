@@ -281,10 +281,14 @@ example the moved `chunk_len_or_optimal` and the old `match` of each `reset_alig
   (Mamba-3).
 - `fn m2_scan_options` in the block contracts replaces a closure and a copy of its
   body.
-- Smaller fixes: "options" in two docs of the examples and in `MambaScanOptions`
-  collided with the glossary term, the phrasal verb "divides it out", the number of
-  "scan options" in the `mnist-class` doc, the placeholder of `parse_ssd_path`, the
-  place of the `Config` import, and two reflowed README lines.
+- Smaller fixes:
+  - the word "options" in two docs of the examples and in `MambaScanOptions`, which
+    collided with the glossary term,
+  - a phrasal verb (this ticket at `cce87fe7` quotes it),
+  - the number of "scan options" in the `mnist-class` doc,
+  - the placeholder of `parse_ssd_path`,
+  - the place of the `Config` import,
+  - two reflowed README lines.
 
 **Review findings that did not change the work:**
 

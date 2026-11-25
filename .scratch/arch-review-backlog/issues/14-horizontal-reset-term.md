@@ -79,7 +79,7 @@ token boundaries. The new names end in `InToken`.
 - The _Avoid_ line of **Tap pattern** in `GLOSSARY.md` adds "reset (for a lag-1 tap that
   closes at token boundaries)".
 - The outputs, the caches and the gradients do not change. No tensor op changes.
-- The crate goes up one minor version, in the first commit that breaks the public API.
+- The first commit that breaks the public API bumps the minor version of the crate.
   That commit message states the break.
 
 **Names:**

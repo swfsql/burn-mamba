@@ -61,9 +61,10 @@ is too much for one agent. So the lead splits the work before any agent starts.
 **The first row to check.** Part 1 of `research.md` defines the path aliases of
 this paragraph. The official kernel accumulates `+Δθ` (`TRI/angle_dt.py:104`).
 mamba3-minimal accumulates `−Δθ` (`MM/mamba3.py:367`). The official rotary step
-has a `conjugate` flag, and `SSM/modules/mamba3.py:339` passes `False`. Find the
-sign of our code. Say if the difference changes any output, or only the sign of
-the learned angles.
+has a `conjugate` flag, and `SSM/modules/mamba3.py:339` passes `False`.
+
+Find the sign of our code. Say if the difference changes any output, or only the
+sign of the learned angles.
 
 ## Links
 
@@ -101,7 +102,7 @@ Add these after the merge:
 - **Agents:** 12 for the batches, not 6 to 8. The cap of 25 rows forces this, because
   a row counts once for each source group that it cites. One more agent answered one
   question from the review. A harness rule refuses a report file from a subagent, so
-  each report came as the final message of its agent. The user removed the reports
+  each report came as the final message of its agent. The user deleted the reports
   and the numeric checks from the repo after the merge.
 - **Agents over 150k tokens:** `s3-rotation` (197k), `s3-paths` (191k) and
   `s3-coefficients` (168k). The user accepted up to 200k.
@@ -141,6 +142,7 @@ with our sign, and 33.8% to 40.1% with a flipped `ϑ`, in a transient mutation.
    `B̃ₜ = Rₜ Bₜ` absorbs this form. These two statements did not match. Absorption of
    that `ρₜ` gives `B̃ₜ = Rₜᵀ Bₜ`, the form of the paper. Our code applies `R(+θ)`, as
    the official kernels do, and that equals a direct form with `ρₜ = R(−…)`.
+
    **Answer:** the code stays, and the docs change. A follow-up change corrects the
    header, and it adds a note that the sources turn in opposite directions. That
    change touches only doc comments under `src/`. The check found no bug.
@@ -172,7 +174,7 @@ selectable option or a recorded decision.
 ### Findings about a source, with no doc change
 
 - **`SSM/modules/mamba3.py:147`.** The one-token branch can fail. It passes a 3-axis
-  `u` to `step`, and `step` takes `(batch, d_model)`. Mamba-2 removes the axis at
+  `u` to `step`, and `step` takes `(batch, d_model)`. Mamba-2 deletes the axis at
   `SSM/modules/mamba2.py:281`. An agent read this and did not run it, so row L52
   stays as it is.
 - **`M2/systems.tex:116`.** The paper sets `A_t = 0` on the last token of a sequence.

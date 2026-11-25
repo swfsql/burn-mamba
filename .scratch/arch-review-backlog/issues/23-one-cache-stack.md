@@ -184,7 +184,7 @@ The report is the `--save` report of BASE `a41d647d`, from its git worktree in
 | branches | 193 of 220 (87.7%) | 193 of 220 (87.7%) |
 | conditions | 84 of 110 (76.4%) | 84 of 110 (76.4%) |
 
-Lost items: 0 lines, 0 branches, 0 conditions. The line count goes down because the
+Lost items: 0 lines, 0 branches, 0 conditions. The line count decreases because the
 change deletes covered code: the `CacheStack` impls, the four types and their cache
 traversals.
 
@@ -198,8 +198,8 @@ Spec agent found no missing requirement and no wrong implementation.
 
 Fixed:
 
-- The `expect` message of the step runner had the phrasal verb "puts back". It is
-  now "each step stores the cache of the next step".
+- The `expect` message of the step runner had a phrasal verb. It is now "each step
+  stores the cache of the next step". This ticket at `bf81d7cd` quotes the old verb.
 - The module doc of `examples/tiny-stories/training.rs` had a sentence of about 33
   words. It is two sentences.
 - The headers of the three `cache.rs` files said "one layer", and their item docs said

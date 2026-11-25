@@ -11,8 +11,9 @@ From the architecture review of 2026-11-03. Line numbers are those of commit
 `src/mamba3/single_ssd/ssd/serial_recalculated/combined_backward.rs:418-539`.
 
 **Problem:** 566 lines hide a difference of a few terms: `y_diag`, `scale`, the strict
-mask and the seeds. Normalised, 194 of 271 double-SSD lines occur in single-SSD. The
-forward K1–K4 and `k4_ssd_state_passing_backward` are already shared. The K1 suffix
+mask and the seeds. Normalised, 194 of 271 double-SSD lines occur in single-SSD.
+
+The forward K1–K4 and `k4_ssd_state_passing_backward` are already shared. The K1 suffix
 sum, the K2 backward and BLUE are copies. K3 differs only in `k_scaled` and the
 `d_scale` split. A K3 fix needs two edits (`e43b32e3`, `0ac8e539`). Single-SSD lacks
 three `san` guards that double-SSD has (`d_c_blue`, `diff`, `d_da_blue`).
@@ -329,7 +330,7 @@ Flex `train`, the mean of two rounds, in ms:
 **The mechanism, by reading:** Flex allocates each tensor from the global allocator and
 has no buffer pool (burn-flex 0.22.1). This crate, burn-stack and burn-flex set no global
 allocator. Under the defaults of glibc, the `mmap` threshold moves with the frees of the
-process, and the top of the heap goes back to the system. So a flex cell can depend on the
+process, and the top of the heap returns to the system. So a flex cell can depend on the
 cells that ran before it and on the order of the allocations. This commit changes that
 order: `combined_backward` drops `cb` and `d_y` at the end of the K5 pass.
 

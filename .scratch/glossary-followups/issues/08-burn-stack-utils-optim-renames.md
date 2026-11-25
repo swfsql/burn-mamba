@@ -25,9 +25,9 @@ burn-mamba does not compile against that rev until it makes the same renames.
 | `class_chunk_plan` | `class_window_plan` |
 | module `utils::graph` | `utils::capture` |
 
-Two burn-stack commits before that rev also change the glossary and the docs:
-`f4c12d8` (the prose of utils and optim) and `6896ed1` (the glossary entries
-**Recording** and **Captured step**).
+Two burn-stack commits before that rev also change the glossary and the docs.
+`f4c12d8` changes the prose of utils and optim. `6896ed1` changes the
+glossary entries **Recording** and **Captured step**.
 
 ## Sites
 

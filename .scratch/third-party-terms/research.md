@@ -77,7 +77,7 @@ Notation table of `BM/CLAUDE.md`, `BS/src/modules/layer.rs`,
 | `../papers/multi-gate-res/html/` | Same title as the TeX. I read the title and counted a term. I did not compare the text. |
 | `M3/ref/*.rs` | First 12 lines of `data.rs` only: music data code. The term searches excluded `*.rs`. |
 | `M3/.structure.tex.swp`, `*.bib`, `*.bbl` | Not read. The term searches excluded them. |
-| `papers/deltanet`, `papers/hrm`, `../hnet` | Excluded by the task. So `DeltaProduct` is checked only against the approved sources. |
+| `papers/deltanet`, `papers/hrm`, `../hnet` | Excluded by the task. So this research checks `DeltaProduct` only against the approved sources. |
 
 ## 2. Comparison tables
 

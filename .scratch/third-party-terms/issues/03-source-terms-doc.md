@@ -50,7 +50,7 @@ Residuals rows go to the doc of burn-stack, whichever crate owns our term.
 
 **Citations.** A source citation has the form `file:line`. The doc header gives
 the path aliases and pins the commits: official code `a14b1df`, mamba3-minimal
-`15ba998`. Our own code is cited by item name, with no line number.
+`15ba998`. The doc cites our own code by item name, with no line number.
 
 **"Our code follows".** This ticket leaves each cell as `?`. Ticket 04 fills the
 cells in a new session. Do not check our code for these cells here.

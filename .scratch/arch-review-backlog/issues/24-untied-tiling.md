@@ -219,9 +219,9 @@ The report is the `--save` report of BASE `8858292e` from its git worktree
 | branches | 196 of 220 (89.1%) | 192 of 214 (89.7%) |
 | conditions | 87 of 110 (79.1%) | 86 of 107 (80.4%) |
 
-Lost items: 0 lines, 0 branches, 0 conditions. The counts go down because the change
+Lost items: 0 lines, 0 branches, 0 conditions. The counts decrease because the change
 removes covered code. The 3 covered conditions on changed lines are the `copies`
-closures of the three inits, and the change deletes them. The test files do not count.
+closures of the three inits, and the change removes them. The test files do not count.
 
 ### Review
 
@@ -245,9 +245,9 @@ Fixed:
   of `check_table` is `build`, because it builds a block.
 - The doc of `check_table` treats `untied_params` as singular, as the rest of the
   file does.
-- The Spec agent found one more setting whose start values change at a fixed seed:
-  `examples/mnist-ae` unties Mamba-3 `InProjTail` over 2 real layers run as 4 virtual
-  layers. The commit message names it with `examples/mnist-class`.
+- The Spec agent found one more setting whose start values change at a fixed seed.
+  `examples/mnist-ae` unties Mamba-3 `InProjTail` over 2 real layers that run as 4
+  virtual layers. The commit message names it with `examples/mnist-class`.
 
 Not fixed:
 

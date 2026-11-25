@@ -44,10 +44,10 @@ item is lost, stop and ask the user. The fix is usually a new contract in burn-s
 
 - The pin moved from `d534e7d3` to burn-stack `a236fe3f`, the pushed commit of its
   ticket 05. The version of burn-stack stays 0.41.0, so there is no version bump.
-- `src/family/tests/multi_gate.rs` had 17 tests, all of rule 1. The file and its `mod`
-  line are deleted.
-- `src/family/tests/optim.rs` had 16 tests. The 15 tests of rule 1 or 2 are deleted.
-  `mamba3_scalar_channels_stay_on_adamw` (rule 3) stays.
+- `src/family/tests/multi_gate.rs` had 17 tests, all of rule 1. The change deletes the
+  file and its `mod` line.
+- `src/family/tests/optim.rs` had 16 tests. The change deletes the 15 tests of rule 1
+  or 2. `mamba3_scalar_channels_stay_on_adamw` (rule 3) stays.
 - The new rule-3 test `each_family_gives_a_fixed_count_of_muon_specs` holds the counts
   of the four `*_plan_fits_the_model` tests. It reads the plan of a network config with
   no feed-forward, no `CatLinear` merge and no untied parameter. The configs are Mamba-3

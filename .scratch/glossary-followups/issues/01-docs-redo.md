@@ -40,8 +40,8 @@ decisions are in the module headers.
   no git command. Fix every link to files.md (README.md, CLAUDE.md, a handoff in
   `examples/reset/`).
 - The block-agnostic rule follows ADR-0002. burn-stack code is block-agnostic
-  by default, and its docs can cite a family. A rare exception is named after
-  the mechanism. burn-deltanet is a second consumer.
+  by default, and its docs can cite a family. A rare exception takes the name
+  of the mechanism. burn-deltanet is a second consumer.
 - The doc-maintenance rules:
   - Keep the docs small, and never use them as a changelog (keep this rule).
   - A change that adds, deletes or renames a file updates its File Map line
@@ -63,9 +63,9 @@ decisions are in the module headers.
 - [x] CLAUDE.md has about 200 lines or fewer, and its File Map has 40 lines or
       fewer.
 - [x] files.md is not in the repo. Each of its non-obvious decisions is in a
-      module header, or is listed under `## Comments`.
+      module header, or `## Comments` lists it.
 - [x] Each deleted CLAUDE.md paragraph has its content in a glossary, an ADR or
-      a module header, or is listed under `## Comments`.
+      a module header, or `## Comments` lists it.
 - [x] `rg 'files\.md'` finds no link outside `.scratch/`. No doc links to a
       CLAUDE.md anchor that is gone.
 - [x] `cargo check` passes, and `cargo doc --all --no-deps` has no warnings.
@@ -79,6 +79,7 @@ Notes from the implementation, for the user:
   paragraphs of CLAUDE.md were already in the docs of their own file. Such a
   doc is the module header, an item doc, or a code comment beside the code. I
   did not copy them into the module header, to keep one source of truth.
+
   Examples: the `tanh` reason of `rotation_range` and the CPU/GPU trade-off of
   `siso_specialization_decode` are in their config docs. The order of the `A`
   floor is in a comment in `helpers.rs`. Object if you want each of them in
@@ -115,4 +116,4 @@ Notes from the implementation, for the user:
   ("Kalman gate", "SSM state", "slot" for a row, "folded axis"). The notation
   table in the `mamba3.rs` header still says "`sequence` length, **folded**"
   for `s`.
-- No new term and no new decision came up.
+- The work found no new term and no new decision.

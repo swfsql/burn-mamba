@@ -19,7 +19,8 @@ uses of "restart" that mean a reset.
   `origin_heads` and "start state".
 - The word "restart" can have more than one meaning in the code. The agent checks the
   meaning of each use before it renames that use.
-- The rename breaks the public API, so the crate goes up one minor version.
+- The rename breaks the public API, so this ticket bumps the minor version of the
+  crate.
 - No bench run. No tensor op changes.
 
 **Checks against the code** (at `c2fb89b2`):
@@ -59,7 +60,7 @@ reset chunk starts from, with the terms of the glossaries.
   name from **Names**. This includes identifiers, comments and messages.
 - A use with another meaning keeps the word. The report of this ticket lists it.
 - The outputs, the caches and the gradients do not change. No tensor op changes.
-- The crate goes up one minor version, in the first commit that breaks the public API.
+- The first commit that breaks the public API bumps the minor version of the crate.
   That commit message states the break.
 
 **The meanings of "restart":**
@@ -145,9 +146,9 @@ by meaning:
   shuffle with `seed`, with these cut and negative kinds.") and its call
   `feed.restart(cut, negative, EVAL_SEED)`. It restarts a data feed.
 - `examples/tiny-stories/tmp/1m-b/summ.py`, `examples/tiny-stories/tmp/1m-cased/summ.py`
-  and `examples/hnet-stories/tmp/1m-a/summ.py`, the comment "elapsed restarts per
-  segment; sum per-segment spans". The elapsed time of a training log starts again at
-  each run segment.
+  and `examples/hnet-stories/tmp/1m-a/summ.py`: the comment of line 27 says that the
+  elapsed time "restarts" at each segment, and that the script sums the span of each
+  segment. The elapsed time of a training log starts again at each run segment.
 
 **All the acceptance criteria hold.**
 
@@ -160,10 +161,11 @@ by meaning:
 
 **Changes outside the list of the brief:**
 
-- The test files change more than the test name, but no check: the doc link and the
-  call `crate::packing::origin_heads`, the field `resets: None` in the three
-  `ssd_path/tests.rs` files, and two comments of `src/packing/tests.rs` (criterion 2).
-  No expected value or tolerance changes.
+- The test files change more than the test name, but no check, expected value or
+  tolerance changes. The other changes of the test files:
+  - the doc link and the call `crate::packing::origin_heads`,
+  - the field `resets: None` in the three `ssd_path/tests.rs` files,
+  - two comments of `src/packing/tests.rs` (criterion 2).
 - Two longer sentences are now two sentences each, for the STE length cap.
 - The comment on the K4 backward of `src/standard_ssd/combined_backward.rs` says that
   the start state has no seed. Its K4 call gives `None` as the seed.

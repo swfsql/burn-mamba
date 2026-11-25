@@ -35,8 +35,8 @@ no lost condition.
 - `src/mamba3/tap_pattern/` does not exist. No file of the repo names
   `tap_pattern::tests` or a line number of `tap_pattern.rs`.
 - Each line of the module body (lines 365–1435) is empty or starts with 4 spaces. The
-  body has no raw string, no line continuation and no line of only spaces. So the
-  removal of 4 spaces of indent changes only whitespace.
+  body has no raw string, no line continuation and no line of only spaces. So when the
+  move deletes 4 spaces of indent, it changes only whitespace.
 - `../burn-stack/scripts/coverage.py` does not count a test file: a `tests.rs`, or a
   file in a `tests/` directory. The inline module is in neither, so the report counts
   it as code of `src/`. After the move, its items leave the report, and the compare
@@ -63,7 +63,7 @@ no lost condition.
 - `src/mamba3/tap_pattern.rs` has lines 1–363 of the old file, then one line
   `mod tests;`. Line 363 is the `#[cfg(all(test, feature = "_dev-test"))]` attribute.
 - `src/mamba3/tap_pattern/tests.rs` has the body of the old module (lines 365–1435),
-  with 4 spaces of indent removed from each line. It has no other line. The second
+  with 4 spaces of indent deleted from each line. It has no other line. The second
   commit of "Decision of the maintainer" under **Comments** then changes only comment
   lines.
 - The path of each test stays `mamba3::tap_pattern::tests::<name>`.
@@ -140,7 +140,7 @@ changed. The branches (189 of 216) and the conditions (82 of 108) do not change.
 
 **Review findings that changed the comments or the ticket:**
 
-- The split of the `two_tap_patterns_actually_spend_their_second_tap` doc had dropped a
+- The split of the `two_tap_patterns_actually_spend_their_second_tap` doc dropped a
   "must". The two two-tap members "must also differ from each other", as the assert
   says.
 - The doc of `lattice_multi_chunk_matches_step` has two paragraphs. It had 8 sentences
@@ -148,9 +148,10 @@ changed. The branches (189 of 216) and the conditions (82 of 108) do not change.
 - The doc of `tap_slots_follow_the_lag` uses **Tap FIFO**, not "tap buffer".
 - The MIMO doc of the lattice uses "correction band", as `token_band.rs` does, not "band
   correction".
-- Two smaller fixes: "In each," starts the invariant of the section comment of the
-  lattice, and "the two-tap members" is the subject in the doc of
-  `the_lag_u_patterns_are_the_carry_over_at_one_micro_step`.
+- Two smaller fixes:
+  - "In each," starts the invariant of the section comment of the lattice.
+  - The doc of `the_lag_u_patterns_are_the_carry_over_at_one_micro_step` has "the
+    two-tap members" as its subject.
 - **Desired behaviour** and the first acceptance criterion point to the decision.
 
 **Benches:** none. No production code changes.

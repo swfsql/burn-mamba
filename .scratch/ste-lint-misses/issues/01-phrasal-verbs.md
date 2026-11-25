@@ -64,7 +64,7 @@ Run the linter on a `.md` file with these lines, one paragraph each:
   the repro there.
 
 - [x] The linter flags each line of the repro that has no finding, in each of
-      its tenses, as a hard finding with a plain verb.
+      its tenses. Each new finding is hard and gives a plain verb.
 - [x] The lines with `go back`, `goes back` and `picks up` keep their findings.
 - [x] `--selftest` holds the cases of the repro, and it passes.
 - [x] The `SKILL.md` of the skill describes the rule as it is.

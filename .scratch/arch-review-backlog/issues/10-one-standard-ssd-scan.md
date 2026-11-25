@@ -201,7 +201,7 @@ tensors. The removal of those clones changes no operation.
 
 **A gap outside this ticket:** `cargo test --lib --no-default-features --features
 mamba2,backend-flex` does not compile. The `muon_*` methods in `src/family/` are missing,
-because the dev-dependency turns on `optim` in burn-stack only. `./scripts/check.sh` runs
+because the dev-dependency enables `optim` in burn-stack only. `./scripts/check.sh` runs
 only `cargo check` for each family alone, so it does not see this.
 
 ### Bench result

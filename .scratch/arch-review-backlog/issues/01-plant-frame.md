@@ -24,8 +24,8 @@ its middle.
 
 **Decided with the user:**
 
-- ADR-0007 is amended in this work. Independence covers the scans. The pre-scan
-  work and the tail are one module with their own tests.
+- This work amends ADR-0007. Independence covers the scans. The pre-scan work and
+  the tail are one module with their own tests.
 - The user runs `./bench.sh` before and after. Decode kernels are shape-sensitive
   (`helpers.rs:771-774`). If decode slows down, `step` keeps its own frame, and only
   the two forwards share one.
@@ -88,7 +88,7 @@ SSD path stay the same. Each pathway keeps only its middle.
 
 1. Both forwards call the frame. `step` does not change.
 2. `step` calls the frame with a read axis of length 1. It adds that axis to its
-   input and removes it from its output. Delete `step_project`, `step_finish` and
+   input and deletes it from its output. Delete `step_project`, `step_finish` and
    `StepProjection`.
 
 **Benches:** The agent stops after commit 2, because only the user runs the benches.

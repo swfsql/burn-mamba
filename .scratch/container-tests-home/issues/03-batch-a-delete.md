@@ -13,7 +13,7 @@ of both repos keeps each item of the record.
 
 - Read the sorted list under `## Comments` of burn-stack ticket 03.
 - Delete each test of `src/family/tests/class.rs` that the list marks rule 1 or rule 2.
-  Also delete each test that the list marks "3, repeat": the user chose this in burn-stack
+  Also delete each test that the list marks "3, repeat". The user chose this in burn-stack
   ticket 03, because a kept test of burn-mamba makes its checks. Keep each other test of
   rule 3.
 - Add each contract that burn-stack ticket 03 added to the contract tests of ticket 02,
@@ -99,9 +99,11 @@ the log is `tmp/coverage-record/gate-03.log`. The first run passed:
 - Step 4: the compare with the record lists no lost item. It lists 13 lines, 2 branches
   and 1 condition on changed lines, in `src/block_contract.rs` (lines 371–386 of the
   record, the condition 385:29). These are the lines of `muon_projections_name_existing_rank_2_weights`
-  that burn-stack ticket 05 changed. The gates of tickets 04 and 05 listed the same lines
-  and branches. Since burn-stack `65334b6`, the compare also names each condition. So it
-  names the condition of the two branches. The gate lost no condition.
+  that burn-stack ticket 05 changed.
+
+  The gates of tickets 04 and 05 listed the same lines and branches. Since burn-stack
+  `65334b6`, the compare also names each condition. So it names the condition of the two
+  branches. The gate lost no condition.
 - Of the burn-mamba tests, only the deleted tests reached 77 lines, 16 branches and 14
   conditions of burn-stack, in `src/modules/{bidi,layers,network}.rs` and
   `src/utils/class/mod.rs`. The compare of `burn-stack-by-burn-mamba` from `after-04` to
@@ -125,4 +127,4 @@ the log is `tmp/coverage-record/gate-03.log`. The first run passed:
   - "with the `[patch]` on" and "the union". `tmp/coverage-record/record.md` and the
     tickets 04 and 05 use these words.
 - `scripts/check.sh` ran before the fixes. The fixes change only this ticket and the
-  header of `src/family/tests/mod.rs`, which went back to its base text.
+  header of `src/family/tests/mod.rs`, which returned to its base text.

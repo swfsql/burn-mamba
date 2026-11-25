@@ -299,8 +299,8 @@ one lists the hits that stay, with their reasons, under `## Comments`.
 
 - The counts come from burn-mamba `9a8958ec`, burn-stack `e3a6c7b` and the
   skill at `88d216a`. The measure files are in `tmp/ste-sweep/`.
-- The history rule also flags a passive in the past tense, for example "were
-  added".
+- The history rule also flags a passive in the past tense. An example is the
+  comment of the zero-pad columns of `src/mamba2/mamba2.rs:955` at `9a8958ec`.
 - Two known false positives: `CLAUDE.md:65` quotes a banned phrase of the
   history rule. At `src/mamba3/positive/tests.rs:825`, the linter reads
   "keeps … out" across a gap of spaces.

@@ -271,10 +271,13 @@ docs that read them.
   cache type.
 - **The docs**:
   - `GLOSSARY.md`, **Learnable initial state**: rewrite the entry. Do not delete it.
-    The new text: "A state `h₀` that the caller trains. The caller gives it as the state
-    of a cache. The cache of a call gives the start of each row. The origin gives the
-    start of each segment. The block holds no parameter for it. Every SSD path of
-    Mamba-2 and Mamba-3 takes it." Keep `_Avoid_: origin`.
+    Keep `_Avoid_: origin`. The new text:
+
+    > A state `h₀` that the caller trains. The caller gives it as the state of a
+    > cache. The cache of a call gives the start of each row. The origin gives the
+    > start of each segment. The block holds no parameter for it. Every SSD path of
+    > Mamba-2 and Mamba-3 takes it.
+
   - `GLOSSARY.md`, **Origin**: delete the entry. burn-stack ticket 18 moves it to the
     glossary of burn-stack.
   - A new ADR, `docs/adr/0011-…`: the learnable initial state is a cache that the
